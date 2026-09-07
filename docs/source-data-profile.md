@@ -8,6 +8,7 @@
   - **D** — Bounded non-zero consumption window, 2026-09-07 — section 11
   - **E** — Zeros, missing tokens and absent intervals across households, 2026-09-07 — section 12
   - **F** — Structural consistency across all 168 members, 2026-09-07 — section 13
+  - **G** — Authoritative documentation research (time-boxed), 2026-09-07 — section 14
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
@@ -28,6 +29,7 @@ it is what stops a plausible-sounding claim from being treated as an established
 | **UNVERIFIED** | Not confirmed from the page as displayed text. Must be confirmed before use. |
 | **INFERRED** | Derived by reasoning from VERIFIED items. Reasoning shown. Not a source statement. |
 | **CONTRADICTED** | Measurement disagrees with a claim made by the source. Both values shown. |
+| **PUBLISHER-DOCUMENTED** | Stated by the publisher in authoritative documentation, quoted with a citation. Accepted as the source contract; not independently measured by us. |
 | **UNKNOWN** | Cannot be answered from the page at all; requires inspecting downloaded files. |
 
 Nothing in this document was taken from prior knowledge of this dataset. Where the page is
@@ -193,10 +195,23 @@ calculated. That is explicitly out of scope for REP-001 (ticket section 12).
   other version. Determining the version requires following the linked logo to the licence deed
   and recording where that link points — a separate verification step, not done here.
 
+> **RESOLVED IN PHASE G (section 14.5): the licence is CC BY 4.0. VERIFIED.** The verification step
+> described above was carried out on 2026-09-07: the page's licence link points to
+> `https://creativecommons.org/licenses/by/4.0/`, whose deed is titled **"Attribution 4.0
+> International"**, canonical identifier **CC BY 4.0**. The version was resolved by following the
+> link, exactly as this paragraph required — not by inference.
+>
+> It was also confirmed that the link belongs to **this dataset's own Licence metadata field** and
+> not to site chrome: the URL appears only in that field, positioned between the resource list and
+> `Last Update`, and no site-wide footer on the page links to creativecommons.org. See 14.5 for the
+> check. Without that confirmation the version could have belonged to the site rather than the
+> dataset, and the conclusion would not stand.
+
 ### Required attribution wording
 
 - **NOT STATED ON PAGE.** No "how to cite", "attribution", "acknowledgement" or "terms of use"
-  wording was found. **VERIFIED absence** — checked explicitly.
+  wording was found. **VERIFIED absence on this page** — checked explicitly. Scoped to the dataset
+  page; other publisher documentation was not searched for attribution wording.
 - Because a Creative Commons Attribution licence requires attribution but the publisher supplies
   no mandated sentence, we must compose one. It carries no official status.
 
@@ -207,9 +222,18 @@ calculated. That is explicitly out of scope for REP-001 (ticket section 12).
 > Accessed 2026-09-06 from
 > https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 
-**Status: PROPOSED.** This sentence was written by us, not supplied by the publisher. It
-deliberately omits a licence version because none is displayed. It should be reviewed once the
-licence version is confirmed, and before any public publication of derived results.
+**Status: PROPOSED.** This sentence was written by us, not supplied by the publisher.
+
+> **UPDATED IN PHASE G:** the licence version is now VERIFIED as **CC BY 4.0**, so the omission this
+> paragraph flagged can be closed. Revised proposed wording:
+>
+> > Contains data from *SmartMeter Energy Consumption Data in London Households*, published by UK
+> > Power Networks via the London Datastore, licensed under the Creative Commons Attribution 4.0
+> > International licence (CC BY 4.0). Accessed 2026-09-06 from
+> > https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
+>
+> Still **PROPOSED**: the publisher supplies no mandated attribution sentence (VERIFIED absence
+> above), so this remains our own wording and carries no official status.
 
 ---
 
@@ -903,9 +927,15 @@ behaviour, corroborated by two independent documentary statements.**
 **Billing consequence:** these values are **summed** over a billing period. They must **not** be
 differenced.
 
-**What this does NOT establish.** The *unit* is still taken on the publisher's word. Ticket
+**What this does NOT establish.** The *unit* is taken on the publisher's word. Ticket
 section 6 requires the unit to come from authoritative documentation, and states plainly that
 plausibility of the observed range may be noted but **does not confirm the unit**. Accordingly:
+
+> **RECLASSIFIED IN PHASE G (section 14.1): the unit is PUBLISHER-DOCUMENTED, not UNKNOWN.**
+> Section 6 requires a *citation*, and one exists — the dataset page states "energy consumption, in
+> kWh (per half hour)", and Phase F confirmed by census that all 168 members carry the column name
+> `KWH/hh (per half hour) `. Recording the unit as UNKNOWN was over-strict. The documented contract
+> and the per-interval behaviour VERIFIED below agree with each other.
 
 > Corroborating note only: 48 consecutive values from the first non-zero reading sum to
 > **12.4530**, with individual values from 0.106 to 0.933. If the unit is kWh
@@ -1001,7 +1031,7 @@ authoritative copy. The preview is fully regenerable from the record range above
 | Missing intervals exist | **VERIFIED** — one internal gap observed |
 | Cause of missing interval | **UNKNOWN** |
 | Meaning of the zero run | **UNKNOWN** |
-| Consumption unit | **UNKNOWN** — publisher's word only; range noted, not relied on |
+| Consumption unit | **PUBLISHER-DOCUMENTED** (reclassified in Phase G 14.1) — kWh per half hour |
 | Null token representation | **UNKNOWN** — none seen in 300 records |
 | Timezone convention | **UNKNOWN** — not present in the data |
 | Interval start vs end | **UNKNOWN** — not determinable from data |
@@ -1265,7 +1295,7 @@ more rows from the same place.
 | Is the file time-ordered? | **VERIFIED non-decreasing** per household |
 | Timezone convention | **UNKNOWN** |
 | Interval start vs end | **UNKNOWN** |
-| Consumption unit | **UNKNOWN** — publisher's word only |
+| Consumption unit | **PUBLISHER-DOCUMENTED** (reclassified in Phase G 14.1) |
 | Archive-wide generality of all the above | **UNKNOWN** — see 12.11 |
 
 **Handling policy is deliberately absent.** REP-001 section 12 places "deciding *how* to handle
@@ -1521,7 +1551,8 @@ would have produced silently wrong per-household results.
 | Archive row total | **INFERRED 167,932,474** |
 | Global time ordering | **VERIFIED absent** |
 | Cross-file key uniqueness | **UNKNOWN** |
-| Timezone / interval semantics / unit | **UNKNOWN** |
+| Timezone / interval semantics | **UNKNOWN** |
+| Consumption unit | **PUBLISHER-DOCUMENTED** (Phase G) |
 | Cause of any zero, token, gap or duplicate | **UNKNOWN** |
 
 **Go / no-go on billing: still NO** — timezone and interval-start-vs-end are untouched by this
@@ -1531,3 +1562,245 @@ phase and remain blocking.
 
 *Phase F of REP-001, 2026-09-07. 168 headers censused; 50,000 sampled rows plus four declared
 targeted checks; nothing extracted; `data/raw/` unmodified.*
+
+---
+
+## 14. Phase G — authoritative documentation research (time-boxed)
+
+**Phase:** G — publisher-documented semantics (REP-001 sections 6, 7). **Date:** 2026-09-07.
+**Method:** official sources only. No blogs, no Kaggle notebooks, no third-party interpretations.
+Web search was used **only for navigation** — to locate official URLs — and nothing from a search
+results page is recorded as evidence here.
+
+**Time box: 8 network calls (6 fetches, 2 searches).** The box was reached and research stopped.
+Where an answer was not found inside it, the item is preserved as UNKNOWN and designed around
+(section 14.6) rather than guessed.
+
+### 14.1 A correction to how this project applied REP-001 section 6
+
+Section 6 says the consumption unit "must be taken from authoritative source documentation and
+quoted with a citation. **Until such a citation exists**, the unit is `UNKNOWN`."
+
+Phases C–F recorded the unit as UNKNOWN on the grounds that observed values cannot prove their own
+physical unit. That was **over-strict, and it misread the rule.** Section 6 asks for a *citation*,
+not an experiment. The citation has existed since Phase A. Authoritative publisher metadata defines
+a **source contract**: if the contract says kWh per half-hour and reality differs, that is a
+publisher defect, not an unsupported assumption on our side.
+
+A fourth label is therefore introduced and used from here on:
+
+| Label | Meaning |
+|---|---|
+| **PUBLISHER-DOCUMENTED** | Stated by the publisher in authoritative documentation, quoted with a citation. Accepted as the source contract. Not independently measured by us. |
+
+This sits between VERIFIED (we measured it) and INFERRED (we reasoned it).
+
+### 14.2 Sources consulted
+
+| # | Source | URL | Coverage |
+|---|---|---|---|
+| 1 | London Datastore dataset page | `https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d` | full page, fetched twice (2026-09-06, 2026-09-07) |
+| 2 | UK Power Networks — Low Carbon London project page | `https://innovation.ukpowernetworks.co.uk/projects/low-carbon-london/` | full page + link inventory |
+| 3 | **LCL Project Closedown Report, March 2015** | `https://d1oyzg0jo3ox9g.cloudfront.net/app/uploads/2023/10/Project-Closedown-Report-March-2015.pdf` | **101 pages, 331,432 characters** searched |
+| 4 | **LCL Summary Report** | `https://d1oyzg0jo3ox9g.cloudfront.net/app/uploads/2023/10/Summary-Report.pdf` | **104 pages, 279,500 characters** searched |
+| 5 | Creative Commons Attribution licence deed | `https://creativecommons.org/licenses/by/4.0/` | target of the dataset page's licence link |
+| 6 | Imperial College Spiral deposit (LCL dToU trial data) | `https://spiral.imperial.ac.uk/handle/10044/1/31454` | **NOT RETRIEVED — HTTP 405** |
+
+Source 2 links directly to source 1, and sources 3 and 4 are linked from source 2, so all are
+inside the permitted source rules. Source 6 is recorded as **attempted and unavailable**; nothing
+from it is used.
+
+**Search-result text is explicitly excluded.** A search snippet stated a specific dToU participant
+count. It is **not recorded here** because it did not come from a fetched official document. The
+figures used in this profile remain the page's own "approximately 1100" / "approximately 4500".
+
+### 14.3 A method note — how the search was actually done, and one false result it produced
+
+The two PDFs could not be text-extracted by the remote fetcher, but were saved locally, so they were
+searched directly with `pypdf` in an **ephemeral environment outside the repository** (no project
+dependency was added).
+
+The first search pass reported **55 hits for "UTC" and 95 for "BST"** in the Closedown Report. Both
+were **false**: a case-insensitive substring search matches `utc` inside "o**utc**omes" and `bst`
+inside "s**ubst**ation". Re-running with word boundaries (`\bUTC\b`) returned **zero** for both.
+
+This is recorded because it is exactly the failure this project is meant to guard against: a
+plausible-looking result, confidently produced, that would have led to a *false positive* — claiming
+the reports discuss timezones when they never do. The corrected counts are the ones used below.
+
+### 14.4 Findings against the five questions
+
+| # | Question | Answer | Label |
+|---|---|---|---|
+| 1 | Is `DateTime` UTC, GMT, UK local civil time, or something else? | **Not found in the sources listed in 14.2, using the searches recorded in 14.3** | **UNKNOWN** |
+| 2 | Does `DateTime` mark interval start or interval end? | **Not found in those sources, using those searches** | **UNKNOWN** |
+| 3 | Is the consumption unit documented as kWh per half-hour? | **YES** | **PUBLISHER-DOCUMENTED** |
+| 4 | How were daylight-saving transitions represented? | **Not found in those sources, using those searches** | **UNKNOWN** |
+| 5 | Are `Null`, off-grid rows, duplicates or missing readings explained? | **Not found in those sources, using those searches** | **UNKNOWN** |
+
+**Scope of these four negatives — read this before quoting them.** They mean: *these specific search
+terms did not appear in the two named reports or on the dataset page.* They do **not** mean the
+semantics are undocumented in general. Substantial LCL documentation remains unexplored — see the
+unopened learning-report series in 14.5 — and a document may define a convention in wording none of
+our search terms would match. The correct summary is **"not found in the sources searched"**, never
+"not documented anywhere".
+
+**Evidence for the four negatives — a searched absence, not an unchecked box.** Word-boundary
+searches across 205 pages and 610,932 characters of the two named reports returned:
+
+```
+UTC 0    GMT 0    BST 0    DST 0    "British Summer" 0    "local time" 0
+"time zone" 0    "timezone" 0    "daylight" 0    "clock change" 0
+"interval start" 0    "interval end" 0    "data dictionary" 0
+LCLid 0    stdorToU 0    DateTime 0    Null 0    "missing data" 0    "duplicate" 0
+```
+
+The dataset page was separately confirmed to contain no such text. **The CSV's own column names do
+not appear in either report**, which is itself informative: these two reports describe project
+outcomes, not the published data files — which is a reason to expect the answer to live in a
+different document rather than a reason to conclude no such document exists. No data dictionary was
+found in the sources consulted within the time box.
+
+**Evidence for question 3 — two independent publisher statements:**
+
+> "The dataset contains energy consumption, in **kWh (per half hour)**, unique household identifier,
+> date and time."
+> — London Datastore dataset page, accessed 2026-09-06
+
+> Column 4 of the header, present byte-identically in **all 168 members** (Phase F census):
+> `KWH/hh (per half hour) `
+
+The unit is therefore **PUBLISHER-DOCUMENTED as kWh per half-hour**. Phase D separately VERIFIED by
+observation that the values behave as *per-interval* quantities rather than a cumulative register
+(142 decreases in 299 pairs), so the documented contract and the observed behaviour agree.
+
+### 14.5 Corroborations and one blocker resolved
+
+**RESOLVED — the licence version. VERIFIED.** Phase A recorded the licence version as UNKNOWN
+because the page displays "Creative Commons Attribution" with no version in text, and noted that
+resolving it required following the linked logo. That link points to
+`https://creativecommons.org/licenses/by/4.0/`, whose deed is titled **"Attribution 4.0
+International"**, canonical identifier **CC BY 4.0**.
+
+**The link belongs to THIS dataset, not to the site — checked explicitly on 2026-09-07**, because a
+site-wide footer link would prove nothing about this dataset's licence:
+
+| Check | Result |
+|---|---|
+| Does a licence field belong to this dataset's metadata? | **Yes** — a "Licence" field reading "Creative Commons Attribution" with a linked CC logo |
+| Where does the `creativecommons.org/licenses/by/4.0/` URL appear? | **Only inside that dataset metadata field** |
+| Position on the page | Between the final resource (`Tariffs (239.63 kB)`) and the `Last Update` field — i.e. within the dataset's own metadata block |
+| Does any site-wide footer link to creativecommons.org? | **No** — the footer (contact, governance, standards, privacy, FAQs, accessibility, terms, credits) contains no CC link |
+
+Because the URL occurs **only** in this dataset's licence field and nowhere in site chrome, the
+version resolved through it applies to this dataset. Had it appeared in a footer, this conclusion
+would have been withdrawn.
+
+**Corroborated — the dToU price bands.** The Summary Report, p9, independently confirms the figures
+Phase A took from the dataset page:
+
+> "The values of the price bands were: High price: 67.20 pence/kWh; Mid-price: 11.76 pence/kWh; and
+> Low price: 3.99 pence/kWh."
+> — LCL Summary Report, p9
+
+Note the wording difference: the dataset page calls the middle band **"normal"**, the report calls it
+**"Mid-price"** and adds that it "was used as a baseline tariff". Same numbers, different labels.
+
+**Corroborated — the 2013 dToU window.**
+
+> "During the trials half-hourly meter reading data for the full 2013 calendar year was successfully
+> collected for the meter population."
+> — LCL Project Closedown Report, p15
+
+**Context for what was published:**
+
+> "Domestic half hourly (HH) consumption complete with socio-demographic metadata; Dynamic Time of
+> Use HH consumption complete with price signal schedule"
+> — LCL Project Closedown Report, p63
+
+**A documentation trail that exists but was not opened.** Both reports cite a lettered LCL learning
+report series (**A1–A11, C2, D3 …**), authored by **Imperial College London, 2014**, for the LCNF
+project — for example *"Report A3 – Residential consumer responsiveness to time varying pricing"*.
+These were **not** listed on the UKPN project page's download index and were not retrieved inside
+the time box. They are the **single most likely remaining home for a data dictionary** and are the
+first place a future phase should look.
+
+### 14.6 Reversible ingestion design for the unresolved unknowns
+
+Three semantics remain undocumented: **timezone**, **interval start-vs-end**, and the meaning of
+zeros, tokens, gaps and duplicates. Ingestion must proceed without them, and must do so in a way
+that costs nothing to revise if a document later turns up.
+
+**The design rule: never let an unknown destroy the original, and make every output identify what
+produced it.**
+
+| Layer | Rule |
+|---|---|
+| **Raw** | Store `DateTime` **exactly as supplied** — the 27-character string, unparsed, unshifted. Store the consumption field as its raw string too. No conversion, no normalisation, no timezone attached. |
+| **Typed** | Parse to a **naive** timestamp (no timezone) and a decimal. Parsing is not interpretation. Keep the raw string alongside. |
+| **Semantic** | Timezone convention and interval anchor live in **configuration**, not code — e.g. `source_timezone = UNKNOWN`, `interval_anchor = UNKNOWN`. |
+| **Derived** | Anything depending on those parameters — billing-period assignment, daily totals, DST handling — **may be stored or materialised**, and often should be for cost and speed. What matters is that it is **reproducible and re-derivable**, not that it is left uncomputed. |
+| **Quarantine** | Off-grid rows, unexpected tokens and malformed rows are routed aside with a reason code, never dropped and never coerced. |
+| **Stamping** | Every derived output records the four identities below, so any figure can be traced and reproduced. |
+
+**What reproducibility actually requires.** Not "don't store derived data" — that would rule out
+materialising anything. It requires that every stored output can be tied back to the exact inputs
+that produced it:
+
+| Identity | What it pins down |
+|---|---|
+| **Source identity** | Which raw bytes — member name plus SHA-256, as recorded in `data/manifests/raw-file-manifest.csv`. |
+| **Code version** | Which transformation logic — a commit hash or release tag. |
+| **Configuration version** | Which assumptions — the values of `source_timezone`, `interval_anchor` and the handling policy in force. |
+| **Output / run identity** | Which execution produced this row set — a run id and timestamp, so two runs under different assumptions are distinguishable rather than one silently overwriting the other. |
+
+**Keeping the original data is what makes correction possible.** Because the raw layer preserves the
+supplied strings unchanged, a wrong assumption is repaired by re-deriving from source, not by
+attempting to reverse a transformation that already lost information.
+
+**Why this is genuinely reversible.** If the convention is learned tomorrow, you change the
+configuration version and re-derive. There is no re-ingestion, because the raw layer never lost
+anything; no irreversible corruption, because nothing was shifted in place; and no archaeology to
+work out what the old numbers assumed, because each output names its source, code, configuration and
+run. Old and new figures can then be compared directly, and the difference explained — which is the
+project's stated question.
+
+The opposite approach — converting to UTC at ingestion under a guess — destroys the original string,
+and if the guess is wrong every downstream figure is silently wrong with no way to detect or reverse
+it.
+
+**This unknown is also the project's own subject matter.** The project question is *"what did we
+calculate at the time, what would we calculate now, and can we explain every difference?"* An
+assumption-stamped output is exactly what makes that question answerable. The unresolved semantics
+are not merely an obstacle here; they are a worked example of the thing being built.
+
+### 14.7 Status after Phase G
+
+| Item | Status |
+|---|---|
+| Consumption unit | **PUBLISHER-DOCUMENTED** — kWh per half hour |
+| Values are per-interval, not cumulative | **VERIFIED** (Phase D) — agrees with the contract |
+| Licence version | **VERIFIED — CC BY 4.0** |
+| dToU price bands | **PUBLISHER-DOCUMENTED**, corroborated in two sources |
+| Timezone convention | **UNKNOWN** — not found in the 14.2 sources using the 14.3 searches |
+| Interval start vs end | **UNKNOWN** — not found in those sources, those searches |
+| DST representation | **UNKNOWN** — not found in those sources, those searches |
+| Meaning of `Null`, gaps, duplicates, zeros | **UNKNOWN** — not found in those sources, those searches |
+| A data dictionary | **not found within the time box**; other LCL documentation is unexplored |
+| LCL learning reports A1–A11 | **exist, not yet retrieved** |
+
+**Go / no-go on billing: still NO**, but the blocker has changed character. It is no longer "we
+have not looked at all" — it is **"we searched two named reports and the dataset page with recorded
+search terms, and did not find it."** Documentation we have not opened may still define these
+conventions, so the research question stays open; what has changed is that we no longer have to wait
+on it, because section 14.6 handles the unknown as a design constraint.
+
+**A distinction that matters for scheduling work:** the unknown timezone blocks **authoritative
+billing** — assigning energy to a specific billing period and defending the figure. It does **not**
+block **lossless ingestion**, profiling, data-quality measurement or reconciliation, none of which
+require knowing the convention. Ingestion work can proceed now; billing cannot.
+
+---
+
+*Phase G of REP-001, 2026-09-07. Time-boxed to 8 network calls; official sources only; no raw data
+read, modified or extracted.*
