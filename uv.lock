@@ -51,7 +51,7 @@ wheels = [
 [[package]]
 name = "energy-reconciliation"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
     { name = "pandas" },

@@ -7,7 +7,8 @@ than from memory or optimism.
 **This file is deliberately not a CV.** No bullet here is phrased for a recruiter. Several entries
 are marked NOT-YET-CV-READY, and those must not be used until the gap named in them is closed.
 
-**Last updated:** 2026-09-07, after REP-001 Phase G. **Status of REP-001: OPEN.**
+**Last updated:** 2026-09-07, after REP-001 Phase H. **Status of REP-001: OPEN** (criterion 11.6
+outstanding).
 
 ## How to read this file
 
@@ -25,9 +26,10 @@ Nothing in this file may be upgraded to a stronger label without new evidence re
 
 ## 1. What has actually been built so far
 
-**Honest summary: this is an investigation, not yet a pipeline.** Seven phases of source
-verification are complete. **No production code exists.** No dbt model, no Airflow DAG, no
-transformation, no test suite.
+**Honest summary: a verified source investigation plus one working, tested tool.** Eight phases are
+complete. Phase H produced the project's **first production code** — a reproducible one-member
+profiler with 48 passing tests. There is still **no pipeline**: no dbt model, no Airflow DAG, no
+orchestration, no transformation beyond profiling.
 
 | Artefact | Status |
 |---|---|
@@ -35,12 +37,17 @@ transformation, no test suite.
 | `docs/tickets/REP-001-source-data-investigation.md` | Full investigation spec written before work began — **VERIFIED** exists |
 | `data/manifests/raw-file-manifest.csv` | Machine-readable integrity manifest, 6 files — **VERIFIED** exists |
 | `PROJECT_CONTEXT.md` | Maintained so a future session can resume from the repo alone — **VERIFIED** exists |
-| Production ingestion code | **DOES NOT EXIST** |
-| dbt / Airflow / Spark work | **DOES NOT EXIST** |
+| `src/energy_reconciliation/profiling/` | Reader, validation, aggregation, report, CLI — **VERIFIED** works; `uv run profile-member` |
+| `tests/` — 69 tests, synthetic fixtures | **VERIFIED** all pass; never touch `data/raw/` |
+| `docs/roadmap.md` — 7 delivery milestones with completion conditions | **VERIFIED** exists |
+| `docs/rep-001-verified-facts.md` (47) and `…-assumptions-and-open-questions.md` (32) | **VERIFIED** exist; non-overlap machine-enforced |
+| `data/profiles/lcl-june2015v2-0-profile.json` | Machine-readable full-member profile — **VERIFIED** exists |
+| `docs/profiling.md` | Exact reproduction command — **VERIFIED** exists |
+| Ingestion pipeline / dbt / Airflow / Spark | **DOES NOT EXIST** |
 
 > **NOT-YET-CV-READY:** the project cannot yet be described as an end-to-end pipeline, a data
-> platform, or an ELT project. It is a rigorous source investigation. Claiming otherwise would fail
-> the first technical question asked about it.
+> platform, or an ELT project. It is a rigorous source investigation plus one profiling tool.
+> Claiming otherwise would fail the first technical question asked about it.
 
 ---
 
@@ -67,6 +74,19 @@ Each item names what was measured and how, so it can be defended under questioni
 | 2.15 | Zero rates vary 0.0%–76.7% between neighbouring households | Phase E §12.10 | **VERIFIED** (5 households) |
 | 2.16 | Licence is **CC BY 4.0**, and the link is in this dataset's own licence field (not site chrome) | Phase G §14.5, link followed and its page position checked | **VERIFIED** |
 | 2.17 | Timezone, interval start-vs-end, DST handling and the meaning of nulls/gaps were **not found in the two named LCL reports or the dataset page**, using recorded word-boundary searches (205 pages, 610,932 characters) | Phase G §14.4 | **VERIFIED search result** — a scoped negative, **not** proof the semantics are undocumented; other LCL documentation is unexplored |
+| 2.18 | Member 0 holds **exactly 1,000,000 data records**, counted directly | Phase H §15.1, `data/profiles/…json` | **VERIFIED** |
+| 2.19 | **Six reconciliation equations hold** over 1,000,000 records, including `raw lines = header + parsed + rejected` | Phase H §15.2 | **VERIFIED** |
+| 2.20 | Full member: 0 malformed, 0 invalid timestamps, **0 negatives**, 0 empty, 0 unexpected tokens, 0 non-finite; 45,538 zeros; 29 `Null` | Phase H §15.3 | **VERIFIED** |
+| 2.21 | **29 off-grid rows == 29 `Null` rows**, same record numbers, across 1,000,000 records / 30 households — the Phase E correlation at full scale | Phase H §15.4 | **VERIFIED** |
+| 2.22 | 688 exact duplicate extra rows == 688 key collisions, **0 conflicting** | Phase H §15.6 | **VERIFIED** (this member) |
+| 2.23 | Member 0 is **ASCII-compatible**: 0 bytes >= 0x80 in 50,755,532 bytes | Phase H §15.7 | **VERIFIED** — does not distinguish UTF-8 from Latin-1 |
+| 2.24 | Profiling 1,000,000 rows uses **~38 MB peak memory** because duplicate detection is disk-backed (SQLite), not in-RAM | Phase H, `/usr/bin/time -v` | **VERIFIED** |
+| 2.25 | All eight REP-001 acceptance criteria met; ticket still open on one engineering item (§6 distribution summary) and the §13 checkpoints | profile §16 | **VERIFIED assessment** |
+| 2.26 | Go/no-go recorded: **no-go for billing, go for ingestion**, with three named blockers | profile §16.3 | **VERIFIED assessment** |
+| 2.27 | Consumption distribution over 999,971 values: min `0`, max `6.5279999`, sum `239572.7849879`, mean `0.239579733`, median `0.129`, IQR `0.195` | profile §15.3 | **VERIFIED** — count/min/max/sum exact; mean derived |
+| 2.28 | Percentiles use nearest rank, so every reported figure is an **observed value**, not an interpolation | profile §15.3 | **VERIFIED** |
+| 2.29 | Percentiles and the zero count agree by independent routes: 45,538 zeros = 4.554%, p1 (rank 10,000) `0`, p5 (rank 49,999) `0.005` | profile §15.3 | **VERIFIED** |
+| 2.30 | The **source** contains binary-float artefacts (`6.5279999` for `6.528`); our arithmetic is Decimal throughout | profile §15.3 | **VERIFIED observation**, cause UNKNOWN |
 
 ---
 
@@ -114,7 +134,27 @@ undetectable and irreversible.
 
 > **NOT-YET-CV-READY** — this is a written design, not an implementation.
 
-### 3.5 Distinguishing a census from a sample — VERIFIED
+### 3.5 Measuring physical lines and logical records separately — VERIFIED
+
+The profiler counts line terminators in the decompressed bytes **and** records returned by the CSV
+parser, independently, then reports whether they agree.
+
+**Why:** a quoted CSV field may legally contain a newline, so one line does not universally equal one
+record. Every earlier phase assumed it did. For this member they do agree — so the ticket's
+`raw lines = header + parsed + rejected` equation is valid *here*, as a measured property rather than
+an assumption. A regression test builds a fixture with a quoted newline and asserts the profiler
+reports the equation as **failing**, so the check cannot quietly become an assumption again.
+
+### 3.6 Keeping memory flat with a disk-backed join — VERIFIED
+
+Exact duplicate detection over 1,000,000 rows would cost hundreds of megabytes as Python objects.
+Streaming records into a temporary SQLite database instead held peak memory to **~38 MB** while
+keeping the answer exact.
+
+**Why it matters beyond this file:** the same code will run against members of any size, and against
+167 more of them, without the memory profile changing.
+
+### 3.7 Distinguishing a census from a sample — VERIFIED
 
 Phase F read all 168 headers (**census** — conclusions hold archive-wide) but sampled records from
 5 members (**sample** — can refute uniformity, never prove it). The two were reported separately
@@ -209,17 +249,75 @@ waiting on the answer and design around it, without pretending the question is c
 
 ---
 
+### 4.8 "Statistics that never touch a float"
+
+Summarising 999,971 consumption values needed a minimum, maximum, mean and spread. The obvious
+implementation loads them into a list and calls a stats library — hundreds of megabytes, and binary
+float error compounding across a million money-adjacent values.
+
+Instead: count, min, max and sum accumulate exactly with `Decimal` in **constant memory** while the
+file streams, and percentiles come from the SQLite store already on disk, selected by **nearest
+rank** so every reported figure is an actually observed value rather than an interpolation between
+two. The mean is the only rounded number, and the report says so explicitly per statistic.
+
+**The payoff was immediate:** the largest observed values are `6.5279999` and `6.5100002` — which is
+what `6.528` and `6.51` look like after a round-trip through an IEEE-754 float. That artefact is in
+the **source**. Had the profiler used floats, that finding would have been indistinguishable from
+noise we introduced ourselves.
+
+### 4.9 "A legal file reported as a failure"
+
+The profiler folded the `physical_lines == header + parsed` check in with its logical partitions and
+reported a single `all_hold`. On a CSV containing a quoted field with a newline — **legal CSV** —
+physical lines exceed logical records, so `all_hold` became false even though every logical partition
+reconciled perfectly. A valid, complete profile was being reported as a reconciliation failure.
+
+The fix separates `core_partitions` (the correctness signal, driving the exit code) from
+`source_shape_checks` (a property of this file's physical layout). A test asserts a multiline member
+exits 0 with core partitions holding and the shape check not holding.
+
+**Lesson:** a check that conflates "this file has an unusual shape" with "the arithmetic is wrong"
+trains people to ignore failures.
+
+### 4.10 "A commit hash that identified nothing"
+
+The report recorded `git_commit` plus `git_tree_dirty: true`. Those two fields together do **not**
+identify what ran: every dirty run at that commit shares the same commit id while the code differs.
+
+The report now names `package_source_sha256` as the authoritative fingerprint, lists the exact files
+it covers, states what it excludes (tests, `pyproject.toml`, dependency versions) and carries an
+explicit `git_identity_sufficient` flag. Tests assert the digest changes when a source file is edited
+**or renamed**.
+
+**Lesson:** "we record the git commit" sounds like reproducibility and isn't, the moment the tree is
+dirty — which for a working session is most of the time.
+
+### 4.11 "The report that disagreed with its own JSON"
+
+A test compared the in-memory report with its serialised form and failed: the malformed-field-count
+distribution used **integer** dict keys, which JSON silently converts to **strings**. A caller
+reading the file would have seen different data from a caller using the object.
+
+The fix was to make the report use string keys, plus a permanent round-trip test asserting
+`json.loads(written) == report`.
+
+**Lesson:** "machine-readable" is a promise about what a *consumer* sees. Serialisation is part of
+the contract, not a detail after it.
+
+---
+
 ## 5. Explicitly NOT claimable yet
 
 | Claim that must NOT be made | Why not |
 |---|---|
-| "Built an end-to-end data pipeline" | No production code exists. |
-| "Processed 167 million rows" | Roughly 350,000 rows have ever been read. The total is INFERRED. |
+| "Built an end-to-end data pipeline" | Only a profiler exists. No ingestion, no models, no orchestration. |
+| "Processed 167 million rows" | 1,000,000 rows have been read in full, plus roughly 350,000 in samples. The archive total is INFERRED. |
 | "Used dbt / Airflow / Spark / AWS" | None have been touched. |
 | "Handled timezone and DST correctly" | Both conventions are UNKNOWN. Phase G did not find them in the sources it searched, and they are not recoverable from the data. |
 | "Validated the full dataset" | One of two archives is CRC-unverified (deflate64); one of 168 members has been examined in depth. |
-| "Built data-quality tests" | Measurements exist; no test suite does. |
-| "Designed a schema-validating reader" | Specified in a draft ticket, not built. |
+| "Built data-quality tests" | 48 tests cover the profiler's own logic. No tests assert data-quality rules over the source itself. |
+| "Built a schema-validating reader" | The profiler validates and reports; it does not yet emit validated records for downstream use. |
+| "Profiled the whole archive" | One member of 168. |
 
 ---
 

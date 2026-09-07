@@ -1,0 +1,662 @@
+{
+  "report_schema_version": 1,
+  "status": "COMPLETE",
+  "incomplete_reason": null,
+  "code_identity": {
+    "profiler_name": "energy_reconciliation.profiling",
+    "profiler_version": "1.0.0",
+    "authoritative_code_fingerprint": "package_source_sha256",
+    "package_source_sha256": "6ca5ee45ca7f66d16fad180cac0a1facd6a9713a090870e2370d12e8d195e559",
+    "source_files": [
+      "__init__.py",
+      "aggregate.py",
+      "cli.py",
+      "reader.py",
+      "report.py",
+      "validation.py"
+    ],
+    "source_file_count": 6,
+    "source_files_scope": "src/energy_reconciliation/profiling/*.py only. Tests, pyproject.toml and dependency versions are NOT covered by this digest.",
+    "git_commit": "7a8d5e7865401ec8a9c4f49a9a779f95d66cf1b1",
+    "git_tree_dirty": true,
+    "git_identity_sufficient": false,
+    "identity_note": "git_commit identifies the code ONLY when git_tree_dirty is false. With a dirty tree the commit is not a unique identifier of what ran; compare package_source_sha256 instead. Reproducing a dirty-tree run needs the same source bytes, not merely the same commit."
+  },
+  "invocation": {
+    "argv": [
+      "profile-member"
+    ],
+    "archive": "data/raw/Partitioned LCL Data.zip",
+    "member": "Small LCL Data/LCL-June2015v2_0.csv",
+    "python_version": "3.12.14",
+    "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
+    "started_at_utc": "2026-09-07T21:07:50.696553+00:00",
+    "finished_at_utc": "2026-09-07T21:08:01.666634+00:00",
+    "duration_seconds": 10.97
+  },
+  "source": {
+    "archive_path": "data/raw/Partitioned LCL Data.zip",
+    "archive_sha256": "149a6a9c43c622fd0a14b7d11be055665317d3018d9fb7e1043bd51420bfaea5",
+    "archive_bytes": 795722689,
+    "member_name": "Small LCL Data/LCL-June2015v2_0.csv",
+    "member_uncompressed_bytes": 50755532,
+    "member_compressed_bytes": 4722446,
+    "member_crc32_hex": "41139d72",
+    "member_zip_datetime": "2021-08-25T11:27:54",
+    "compression": "deflate",
+    "member_content_sha256": "4997141df1efb62488305936c3d2aee395c456f475542bfbdcd5a2145479bd61"
+  },
+  "encoding_evidence": {
+    "decoded_as": "ascii",
+    "non_ascii_bytes_in_member": 0,
+    "note": "Zero non-ASCII bytes means the member is ASCII-compatible; it does not distinguish UTF-8 from Latin-1 or Windows-1252, which agree on ASCII."
+  },
+  "header": {
+    "expected": [
+      "LCLid",
+      "stdorToU",
+      "DateTime",
+      "KWH/hh (per half hour) "
+    ],
+    "observed": [
+      "LCLid",
+      "stdorToU",
+      "DateTime",
+      "KWH/hh (per half hour) "
+    ],
+    "matches": true,
+    "expected_field_count": 4,
+    "observed_field_count": 4,
+    "fourth_column_trailing_space_preserved": true
+  },
+  "lines_vs_records": {
+    "physical_lines": 1000001,
+    "lf_terminators": 1000001,
+    "crlf_terminators": 1000001,
+    "lone_cr": 0,
+    "ends_with_newline": true,
+    "logical_records_excluding_header": 1000000,
+    "one_line_per_record_holds": true,
+    "note": "A quoted CSV field may contain a newline, so one physical line does not universally equal one record. Both are measured independently here."
+  },
+  "counts": {
+    "data_records_excluding_header": 1000000,
+    "structurally_valid_records": 1000000,
+    "malformed_records": 0,
+    "malformed_field_count_distribution": {},
+    "records_ok": 999971,
+    "records_with_issues": 29
+  },
+  "consumption": {
+    "categories_mutually_exclusive": {
+      "finite_numeric": 999971,
+      "null_token": 29,
+      "empty": 0,
+      "unexpected_token": 0,
+      "non_finite_numeric": 0
+    },
+    "diagnostics_overlapping": {
+      "zeros": 45538,
+      "negatives": 0,
+      "space_padded_raw_values": 999971
+    },
+    "distribution": {
+      "finite_value_count": 999971,
+      "finite_value_count_cross_check": 999971,
+      "counts_agree": true,
+      "minimum": "0",
+      "maximum": "6.5279999",
+      "range": "6.5279999",
+      "sum": "239572.7849879",
+      "mean": "0.239579733",
+      "percentiles_nearest_rank": {
+        "p1": {
+          "value_text": " 0 ",
+          "rank": 10000,
+          "record_no": 72644
+        },
+        "p5": {
+          "value_text": " 0.005 ",
+          "rank": 49999,
+          "record_no": 313138
+        },
+        "p25": {
+          "value_text": " 0.06 ",
+          "rank": 249993,
+          "record_no": 757366
+        },
+        "p50": {
+          "value_text": " 0.129 ",
+          "rank": 499986,
+          "record_no": 800603
+        },
+        "p75": {
+          "value_text": " 0.255 ",
+          "rank": 749979,
+          "record_no": 900247
+        },
+        "p90": {
+          "value_text": " 0.522 ",
+          "rank": 899974,
+          "record_no": 347686
+        },
+        "p95": {
+          "value_text": " 0.829 ",
+          "rank": 949973,
+          "record_no": 808413
+        },
+        "p99": {
+          "value_text": " 1.85 ",
+          "rank": 989972,
+          "record_no": 911718
+        }
+      },
+      "interquartile_range": "0.195",
+      "exactness": {
+        "finite_value_count": "EXACT - counted while streaming",
+        "minimum": "EXACT - Decimal comparison; the original value is reported",
+        "maximum": "EXACT - Decimal comparison; the original value is reported",
+        "sum": "EXACT - Decimal addition, no floating point",
+        "mean": "DERIVED from an exact sum and an exact count, then rounded to 9 decimal places (ROUND_HALF_EVEN). The exact ratio may not terminate, so this is the only rounded figure here.",
+        "percentiles": "EXACT SELECTION by nearest rank of an actually observed value; no interpolation, so no value is invented. Ordering is performed on IEEE-754 doubles, which represent these magnitudes and precisions exactly - a property of this data, not a guarantee of the method.",
+        "no_standard_deviation": "Deliberately omitted: it would require either a second pass or floating-point accumulation. Percentiles describe the spread without either cost."
+      }
+    },
+    "extreme_values": {
+      "smallest": [
+        {
+          "value_text": " 0 ",
+          "record_no": 1
+        },
+        {
+          "value_text": " 0 ",
+          "record_no": 2
+        },
+        {
+          "value_text": " 0 ",
+          "record_no": 3
+        },
+        {
+          "value_text": " 0 ",
+          "record_no": 4
+        },
+        {
+          "value_text": " 0 ",
+          "record_no": 5
+        }
+      ],
+      "largest": [
+        {
+          "value_text": " 6.5279999 ",
+          "record_no": 926552
+        },
+        {
+          "value_text": " 6.5100002 ",
+          "record_no": 943311
+        },
+        {
+          "value_text": " 6.5100002 ",
+          "record_no": 943312
+        },
+        {
+          "value_text": " 6.395 ",
+          "record_no": 910030
+        },
+        {
+          "value_text": " 6.381 ",
+          "record_no": 908493
+        }
+      ],
+      "note": "Bounded to 5 each. The household id and timestamp for these records go to the git-ignored examples file, not here."
+    },
+    "note": "zeros and negatives are SUBSETS of finite_numeric and are not additional categories. They must not be added to the partition above."
+  },
+  "timestamps": {
+    "valid_format": 1000000,
+    "invalid_format": 0,
+    "on_grid": 999971,
+    "off_grid": 29,
+    "min_text_in_member": "2011-12-06 13:00:00.0000000",
+    "max_text_in_member": "2014-02-28 00:00:00.0000000",
+    "note": "Timestamp text is preserved exactly. No timezone is assigned and no conversion is performed; the source convention is UNKNOWN."
+  },
+  "households": {
+    "distinct_in_member": 30,
+    "tariff_group_values": {
+      "Std": 1000000
+    },
+    "observations": [
+      {
+        "lclid": "MAC000002",
+        "rows": 24158,
+        "first_ts_in_member": "2012-10-12 00:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 17
+      },
+      {
+        "lclid": "MAC000003",
+        "rows": 35469,
+        "first_ts_in_member": "2012-02-20 13:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 24
+      },
+      {
+        "lclid": "MAC000004",
+        "rows": 31677,
+        "first_ts_in_member": "2012-05-08 13:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 22
+      },
+      {
+        "lclid": "MAC000006",
+        "rows": 36461,
+        "first_ts_in_member": "2012-01-30 11:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 25
+      },
+      {
+        "lclid": "MAC000007",
+        "rows": 25046,
+        "first_ts_in_member": "2012-09-24 12:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 17
+      },
+      {
+        "lclid": "MAC000008",
+        "rows": 26013,
+        "first_ts_in_member": "2012-05-05 09:00:00.0000000",
+        "last_ts_in_member": "2013-10-30 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 18
+      },
+      {
+        "lclid": "MAC000009",
+        "rows": 25238,
+        "first_ts_in_member": "2012-09-20 10:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 17
+      },
+      {
+        "lclid": "MAC000010",
+        "rows": 25049,
+        "first_ts_in_member": "2012-09-24 12:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 17
+      },
+      {
+        "lclid": "MAC000011",
+        "rows": 23705,
+        "first_ts_in_member": "2012-10-22 11:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 16
+      },
+      {
+        "lclid": "MAC000012",
+        "rows": 24670,
+        "first_ts_in_member": "2012-10-02 09:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 17
+      },
+      {
+        "lclid": "MAC000013",
+        "rows": 29614,
+        "first_ts_in_member": "2012-06-21 07:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 20
+      },
+      {
+        "lclid": "MAC000016",
+        "rows": 19524,
+        "first_ts_in_member": "2011-12-06 13:00:00.0000000",
+        "last_ts_in_member": "2013-01-16 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 13
+      },
+      {
+        "lclid": "MAC000018",
+        "rows": 39082,
+        "first_ts_in_member": "2011-12-07 09:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000019",
+        "rows": 39071,
+        "first_ts_in_member": "2011-12-07 15:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000020",
+        "rows": 39079,
+        "first_ts_in_member": "2011-12-07 09:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000021",
+        "rows": 39079,
+        "first_ts_in_member": "2011-12-07 10:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000022",
+        "rows": 39072,
+        "first_ts_in_member": "2011-12-07 10:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000023",
+        "rows": 39069,
+        "first_ts_in_member": "2011-12-07 10:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000024",
+        "rows": 39027,
+        "first_ts_in_member": "2011-12-07 11:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000025",
+        "rows": 39065,
+        "first_ts_in_member": "2011-12-07 11:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000026",
+        "rows": 39065,
+        "first_ts_in_member": "2011-12-07 11:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000027",
+        "rows": 39069,
+        "first_ts_in_member": "2011-12-07 11:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000028",
+        "rows": 32158,
+        "first_ts_in_member": "2011-12-07 11:30:00.0000000",
+        "last_ts_in_member": "2013-10-07 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 22
+      },
+      {
+        "lclid": "MAC000029",
+        "rows": 39064,
+        "first_ts_in_member": "2011-12-07 11:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000030",
+        "rows": 39067,
+        "first_ts_in_member": "2011-12-07 11:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000032",
+        "rows": 39069,
+        "first_ts_in_member": "2011-12-07 12:30:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000033",
+        "rows": 39071,
+        "first_ts_in_member": "2011-12-07 13:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000034",
+        "rows": 39070,
+        "first_ts_in_member": "2011-12-07 13:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000035",
+        "rows": 39024,
+        "first_ts_in_member": "2011-12-07 13:00:00.0000000",
+        "last_ts_in_member": "2014-02-28 00:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 27
+      },
+      {
+        "lclid": "MAC000036",
+        "rows": 16175,
+        "first_ts_in_member": "2011-12-07 15:00:00.0000000",
+        "last_ts_in_member": "2012-11-08 10:00:00.0000000",
+        "backwards_steps": 0,
+        "repeated_steps": 11
+      }
+    ],
+    "note": "Ranges are first/last OBSERVED IN THIS MEMBER. Households are known to span member boundaries, so this is not a completeness claim."
+  },
+  "duplicates": {
+    "exact_source_row_equality": {
+      "groups": 688,
+      "extra_rows": 688,
+      "rows_involved": 1376
+    },
+    "candidate_key_collisions": {
+      "colliding_keys": 688,
+      "extra_rows": 688,
+      "rows_involved": 1376,
+      "conflicting_groups": 0
+    },
+    "equality_rules": {
+      "exact_source_row": "all four raw field strings identical, whitespace included",
+      "candidate_key": "(LCLid, raw DateTime text)",
+      "conflicting": "candidate key repeats AND normalised value or tariff differs",
+      "normalised_value": "finite numbers compare numerically; all else by exact text"
+    },
+    "examples_candidate_keys": [
+      {
+        "lclid": "MAC000002",
+        "timestamp_text": "2012-10-20 00:00:00.0000000",
+        "rows_in_group": 2,
+        "first_record_no": 383,
+        "last_record_no": 384
+      },
+      {
+        "lclid": "MAC000002",
+        "timestamp_text": "2012-11-20 00:00:00.0000000",
+        "rows_in_group": 2,
+        "first_record_no": 1823,
+        "last_record_no": 1824
+      },
+      {
+        "lclid": "MAC000002",
+        "timestamp_text": "2012-12-21 00:00:00.0000000",
+        "rows_in_group": 2,
+        "first_record_no": 3312,
+        "last_record_no": 3313
+      },
+      {
+        "lclid": "MAC000002",
+        "timestamp_text": "2013-01-21 00:00:00.0000000",
+        "rows_in_group": 2,
+        "first_record_no": 4801,
+        "last_record_no": 4802
+      },
+      {
+        "lclid": "MAC000002",
+        "timestamp_text": "2013-02-21 00:00:00.0000000",
+        "rows_in_group": 2,
+        "first_record_no": 6290,
+        "last_record_no": 6291
+      }
+    ],
+    "examples_conflicting": [],
+    "note": "Scoped to this member only; says nothing about archive-wide uniqueness. A repeated naive timestamp is a candidate key collision whose physical meaning is unresolved while the timezone convention is UNKNOWN. Duplicates cut across every category above: a duplicate row may be valid."
+  },
+  "counter_semantics": {
+    "mutually_exclusive_partitions": {
+      "structure": [
+        "structurally_valid_records",
+        "malformed_records"
+      ],
+      "consumption": [
+        "finite_numeric",
+        "null_token",
+        "empty",
+        "unexpected_token",
+        "non_finite_numeric"
+      ],
+      "timestamp_format": [
+        "valid_format",
+        "invalid_format"
+      ],
+      "timestamp_grid": [
+        "on_grid",
+        "off_grid"
+      ],
+      "outcome": [
+        "records_ok",
+        "records_with_issues"
+      ]
+    },
+    "overlapping_diagnostics": {
+      "zeros": "subset of consumption.finite_numeric",
+      "negatives": "subset of consumption.finite_numeric",
+      "space_padded_raw_values": "subset of structurally_valid_records",
+      "off_grid": "subset of timestamps.valid_format",
+      "duplicates": "cuts across every partition; a duplicated row may be a perfectly valid record and is counted inside records_ok"
+    },
+    "note": "Only the partitions may be summed. Adding any overlapping diagnostic to a partition double-counts rows."
+  },
+  "reconciliation": {
+    "core_partitions": [
+      {
+        "name": "structure_partition",
+        "expression": "data_records == structurally_valid + malformed",
+        "left": 1000000,
+        "right": 1000000,
+        "holds": true
+      },
+      {
+        "name": "consumption_partition",
+        "expression": "structurally_valid == finite_numeric + null_token + empty + unexpected_token + non_finite_numeric",
+        "left": 1000000,
+        "right": 1000000,
+        "holds": true
+      },
+      {
+        "name": "timestamp_partition",
+        "expression": "structurally_valid == timestamp_valid + timestamp_invalid",
+        "left": 1000000,
+        "right": 1000000,
+        "holds": true
+      },
+      {
+        "name": "grid_partition",
+        "expression": "timestamp_valid == on_grid + off_grid",
+        "left": 1000000,
+        "right": 1000000,
+        "holds": true
+      },
+      {
+        "name": "outcome_partition",
+        "expression": "structurally_valid == records_ok + records_with_issues",
+        "left": 1000000,
+        "right": 1000000,
+        "holds": true
+      }
+    ],
+    "all_core_partitions_hold": true,
+    "source_shape_checks": [
+      {
+        "name": "ticket_raw_line_equation",
+        "expression": "physical_lines == header_lines + logical_records",
+        "left": 1000001,
+        "right": 1000001,
+        "holds": true
+      }
+    ],
+    "all_source_shape_checks_hold": true,
+    "note": "all_core_partitions_hold is the correctness signal. Source shape checks describe this file's physical layout: a quoted field containing a newline makes physical lines differ from logical records, which is legal CSV and not a reconciliation failure."
+  },
+  "examples_by_category": {
+    "null_token": [
+      {
+        "record_no": 3241,
+        "field_count": 4
+      },
+      {
+        "record_no": 38711,
+        "field_count": 4
+      },
+      {
+        "record_no": 70387,
+        "field_count": 4
+      },
+      {
+        "record_no": 106847,
+        "field_count": 4
+      },
+      {
+        "record_no": 131898,
+        "field_count": 4
+      }
+    ],
+    "off_grid_timestamp": [
+      {
+        "record_no": 3241,
+        "field_count": 4
+      },
+      {
+        "record_no": 38711,
+        "field_count": 4
+      },
+      {
+        "record_no": 70387,
+        "field_count": 4
+      },
+      {
+        "record_no": 106847,
+        "field_count": 4
+      },
+      {
+        "record_no": 131898,
+        "field_count": 4
+      }
+    ]
+  }
+}
