@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from decimal import Decimal
+from pathlib import Path
 
 from conftest import HEADER as HEADER_BYTES
 from conftest import MEMBER, build_archive
@@ -480,3 +483,128 @@ def test_exactness_is_declared_for_every_reported_statistic(
     assert ex["finite_value_count"].startswith("EXACT")
     assert ex["mean"].startswith("DERIVED")  # the one rounded figure
     assert "no interpolation" in ex["percentiles"]
+
+
+def test_report_records_no_absolute_local_paths(tmp_path, mixed_member):
+    """A committed report must not leak the developer's filesystem layout."""
+    report, _ = run(tmp_path, mixed_member)
+    argv = report["invocation"]["argv"]
+    assert argv, "argv should still be recorded for provenance"
+    assert not argv[0].startswith("/"), f"argv[0] leaks an absolute path: {argv[0]}"
+    assert "/home/" not in json.dumps(report["invocation"])
+
+
+# -- invocation recording: portable, but not lossy ----------------------------
+
+
+def test_portable_path_keeps_project_relative_paths_readable(tmp_path):
+    from energy_reconciliation.profiling.report import portable_path
+
+    base = tmp_path
+    (base / "data" / "raw").mkdir(parents=True)
+    inside = base / "data" / "raw" / "archive.zip"
+    inside.touch()
+    assert portable_path(inside, base) == "data/raw/archive.zip"
+    assert portable_path("data/raw/archive.zip", base) == "data/raw/archive.zip"
+
+
+def test_portable_path_elides_locations_outside_the_project(tmp_path):
+    from energy_reconciliation.profiling.report import portable_path
+
+    outside = Path("/somewhere/else/private/archive.zip")
+    result = portable_path(outside, tmp_path)
+    assert result == "<outside-project>/archive.zip"
+    assert "/somewhere/else" not in result
+    assert "archive.zip" in result, "the file name must survive"
+
+
+def test_redact_argv_keeps_flags_and_non_path_values(tmp_path):
+    from energy_reconciliation.profiling.report import redact_argv
+
+    argv = [
+        "/opt/venv/bin/profile-member",
+        "--archive",
+        str(tmp_path / "data" / "demo.zip"),
+        "--member",
+        "Small LCL Data/DEMO-sample_0.csv",
+        "--no-examples",
+    ]
+    out = redact_argv(argv, tmp_path)
+    assert out[0] == "profile-member"  # launcher path dropped
+    assert "--archive" in out and "--member" in out  # options preserved
+    assert "--no-examples" in out  # flags preserved
+    assert "Small LCL Data/DEMO-sample_0.csv" in out  # member survives intact
+    assert not any(tok.startswith("/") for tok in out)
+
+
+def test_non_default_member_invocation_is_fully_recorded(tmp_path, mixed_member):
+    """A non-default run must record which archive, member and output were used.
+
+    `argv` reflects the operating-system process, so calling `main()` in-process
+    records the test runner's argv rather than these arguments. That is exactly why
+    archive, member and output are recorded as their own fields: they are reliable
+    however the profiler was invoked. The subprocess test below covers real argv.
+    """
+    other = "Small LCL Data/LCL-June2015v2_42.csv"
+    archive = build_archive(tmp_path, {other: mixed_member})
+    out = tmp_path / "reports" / "custom.json"
+
+    exit_status = main(
+        [
+            "--archive",
+            str(archive),
+            "--member",
+            other,
+            "--output",
+            str(out),
+            "--no-examples",
+            "--work-dir",
+            str(tmp_path),
+        ]
+    )
+    assert exit_status == 0
+
+    inv = json.loads(out.read_text())["invocation"]
+    assert inv["member"] == other, "the selected member must be recoverable"
+    assert inv["archive"].endswith("test.zip")
+    assert inv["output"].endswith("custom.json")
+
+    blob = json.dumps(inv)
+    assert "/home/" not in blob
+    assert str(tmp_path) not in blob, "no machine-specific path may survive"
+
+
+def test_real_cli_process_records_its_options(tmp_path, mixed_member):
+    """Run the installed CLI as a real process and check the recorded argv."""
+    other = "Small LCL Data/LCL-June2015v2_42.csv"
+    archive = build_archive(tmp_path, {other: mixed_member})
+    out = tmp_path / "custom.json"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "energy_reconciliation.profiling.cli",
+            "--archive",
+            str(archive),
+            "--member",
+            other,
+            "--output",
+            str(out),
+            "--no-examples",
+            "--work-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    inv = json.loads(out.read_text())["invocation"]
+    assert "--no-examples" in inv["argv"], "flags must survive redaction"
+    assert "--member" in inv["argv"]
+    assert other in inv["argv"], "the member value is not a machine path; keep it"
+    assert inv["member"] == other
+    assert not any(tok.startswith("/") for tok in inv["argv"])
+    assert "/home/" not in json.dumps(inv)

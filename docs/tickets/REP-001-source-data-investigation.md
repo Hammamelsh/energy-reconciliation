@@ -325,8 +325,8 @@ The following are explicitly excluded from REP-001 and must not appear in its ou
 
 ## 13. Understanding checkpoints
 
-Before writing any investigation code, the maintainer should be able to explain, in plain language and
-in their own words:
+Before writing any investigation code, the maintainer should be able to explain, in plain language
+and in their own words:
 
 1. **Why raw data is preserved.** Why do we keep an untouched, read-only copy of the original
    download, and why is a checksum useful?
@@ -356,8 +356,8 @@ understanding.
 - The maintainer has explained the five section 13 checkpoints to the reviewer's satisfaction.
 - A written go / no-go recommendation on starting billing transformations exists, with its
   reasoning and its list of blockers.
-- `PROJECT_CONTEXT.md` is updated to reflect the new status (done as a separate step, not inside
-  this ticket).
+- The project status record is updated to reflect the new status (done as a separate step, not
+  inside this ticket).
 
 ## Unresolved questions (to be carried into the investigation)
 

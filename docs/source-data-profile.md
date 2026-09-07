@@ -2033,7 +2033,7 @@ Done. Outputs: [`rep-001-verified-facts.md`](rep-001-verified-facts.md) and
 | §11 criteria met and reviewer-checked | **MET**, pending review |
 | The maintainer explains the five §13 checkpoints | **NOT MET** — depends on a person, not on code |
 | Written go/no-go recommendation | **MET** — §16.3 below |
-| `PROJECT_CONTEXT.md` updated | **MET** |
+| Project status record updated | **MET** — kept locally, outside the repository |
 
 **The §§4–9 gap, precisely.** §4 (file-level inspection) and §§7–8 (timestamps, duplicates) are
 complete for member 0. Two shortfalls remain:

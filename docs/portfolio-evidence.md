@@ -36,9 +36,8 @@ orchestration, no transformation beyond profiling.
 | `docs/source-data-profile.md` | 1,745 lines, 14 sections, every claim labelled — **VERIFIED** exists |
 | `docs/tickets/REP-001-source-data-investigation.md` | Full investigation spec written before work began — **VERIFIED** exists |
 | `data/manifests/raw-file-manifest.csv` | Machine-readable integrity manifest, 6 files — **VERIFIED** exists |
-| `PROJECT_CONTEXT.md` | Maintained so a future session can resume from the repo alone — **VERIFIED** exists |
 | `src/energy_reconciliation/profiling/` | Reader, validation, aggregation, report, CLI — **VERIFIED** works; `uv run profile-member` |
-| `tests/` — 69 tests, synthetic fixtures | **VERIFIED** all pass; never touch `data/raw/` |
+| `tests/` — 83 tests, synthetic fixtures | **VERIFIED** all pass; never touch `data/raw/` |
 | `docs/roadmap.md` — 7 delivery milestones with completion conditions | **VERIFIED** exists |
 | `docs/rep-001-verified-facts.md` (47) and `…-assumptions-and-open-questions.md` (32) | **VERIFIED** exist; non-overlap machine-enforced |
 | `data/profiles/lcl-june2015v2-0-profile.json` | Machine-readable full-member profile — **VERIFIED** exists |

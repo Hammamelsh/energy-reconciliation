@@ -6,7 +6,7 @@
     "profiler_name": "energy_reconciliation.profiling",
     "profiler_version": "1.0.0",
     "authoritative_code_fingerprint": "package_source_sha256",
-    "package_source_sha256": "6ca5ee45ca7f66d16fad180cac0a1facd6a9713a090870e2370d12e8d195e559",
+    "package_source_sha256": "d61071ab75e79f9e7bc03060fb5089415a157c142b27a18c6979bbf1d19d1e6a",
     "source_files": [
       "__init__.py",
       "aggregate.py",
@@ -17,7 +17,7 @@
     ],
     "source_file_count": 6,
     "source_files_scope": "src/energy_reconciliation/profiling/*.py only. Tests, pyproject.toml and dependency versions are NOT covered by this digest.",
-    "git_commit": "7a8d5e7865401ec8a9c4f49a9a779f95d66cf1b1",
+    "git_commit": "223d62c882e129ee5585808c08d329e45ca28980",
     "git_tree_dirty": true,
     "git_identity_sufficient": false,
     "identity_note": "git_commit identifies the code ONLY when git_tree_dirty is false. With a dirty tree the commit is not a unique identifier of what ran; compare package_source_sha256 instead. Reproducing a dirty-tree run needs the same source bytes, not merely the same commit."
@@ -28,11 +28,13 @@
     ],
     "archive": "data/raw/Partitioned LCL Data.zip",
     "member": "Small LCL Data/LCL-June2015v2_0.csv",
+    "output": "data/profiles/lcl-june2015v2-0-profile.json",
     "python_version": "3.12.14",
     "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.43",
-    "started_at_utc": "2026-09-07T21:07:50.696553+00:00",
-    "finished_at_utc": "2026-09-07T21:08:01.666634+00:00",
-    "duration_seconds": 10.97
+    "started_at_utc": "2026-09-07T21:47:00.441963+00:00",
+    "finished_at_utc": "2026-09-07T21:47:11.586087+00:00",
+    "duration_seconds": 11.144,
+    "path_note": "Paths are recorded relative to the project directory. A path outside it is shown as <outside-project>/<file name>: the name is kept, the machine-specific location is not."
   },
   "source": {
     "archive_path": "data/raw/Partitioned LCL Data.zip",

@@ -44,6 +44,42 @@ REPORTED_PERCENTILES: tuple[int, ...] = (1, 5, 25, 50, 75, 90, 95, 99)
 MEAN_DECIMAL_PLACES = 9
 
 
+def portable_path(value: str | Path, base: Path | None = None) -> str:
+    """Express a path without leaking the machine it was run on.
+
+    A relative path is kept as written. An absolute path inside the project is
+    made relative to it, so `/home/someone/proj/data/raw/x.zip` becomes
+    `data/raw/x.zip` and stays meaningful to anyone reading the report. An
+    absolute path outside the project keeps only its file name, marked so the
+    reader knows something was elided rather than assuming it was relative.
+    """
+    base = base or Path.cwd()
+    path = Path(value)
+    if not path.is_absolute():
+        return path.as_posix()
+    try:
+        return path.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return f"<outside-project>/{path.name}"
+
+
+def redact_argv(argv: list[str], base: Path | None = None) -> list[str]:
+    """Keep the command line, minus machine-specific path prefixes.
+
+    Flags and their non-path values survive untouched, so a reader can see which
+    options a run used. Only tokens that look like paths are rewritten, and the
+    program name is reduced to its basename because the launcher's absolute
+    location says nothing about the run.
+    """
+    if not argv:
+        return []
+    redacted = [Path(argv[0]).name]
+    for token in argv[1:]:
+        looks_like_path = os.sep in token or token.startswith(("/", "~"))
+        redacted.append(portable_path(token, base) if looks_like_path else token)
+    return redacted
+
+
 def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(
@@ -201,6 +237,7 @@ def profile_member(
     archive: Path = DEFAULT_ARCHIVE,
     member: str = DEFAULT_MEMBER,
     work_dir: Path | None = None,
+    output: Path | None = None,
 ) -> tuple[dict, list[dict]]:
     """Stream one member end to end. Returns ``(report, row_level_examples)``."""
     started = time.time()
@@ -387,14 +424,20 @@ def profile_member(
         "incomplete_reason": outcome.failure,
         "code_identity": code_identity(),
         "invocation": {
-            "argv": sys.argv,
-            "archive": str(archive),
+            "argv": redact_argv(sys.argv),
+            "archive": portable_path(archive),
             "member": member,
+            "output": portable_path(output) if output is not None else None,
             "python_version": platform.python_version(),
             "platform": platform.platform(),
             "started_at_utc": datetime.fromtimestamp(started, UTC).isoformat(),
             "finished_at_utc": datetime.now(UTC).isoformat(),
             "duration_seconds": round(time.time() - started, 3),
+            "path_note": (
+                "Paths are recorded relative to the project directory. A path "
+                "outside it is shown as <outside-project>/<file name>: the name is "
+                "kept, the machine-specific location is not."
+            ),
         },
         "source": asdict(identity) | {"member_content_sha256": tally.sha256},
         "encoding_evidence": {

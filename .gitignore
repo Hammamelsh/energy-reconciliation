@@ -6,4 +6,12 @@ __pycache__/
 data/raw/
 data/processed/
 data/sample/
+# The demo fixture itself is tracked; profiler output over it is not.
+data/demo/*-profile.json
 *.duckdb
+
+# Local learning-context files: kept on disk, not published.
+# Root-anchored so only these top-level files are ignored.
+/AGENTS.md
+/CLAUDE.md
+/PROJECT_CONTEXT.md

@@ -7,8 +7,8 @@ with what it delivers and the condition under which it is complete.
 Completing a milestone means an artefact exists and its completion condition is satisfied — nothing
 more. No milestone carries a date; completion conditions are the only measure used here.
 
-**Status:** M1 is in progress. See `PROJECT_CONTEXT.md` for current state and
-`docs/source-data-profile.md` section 16 for the REP-001 assessment.
+**Status:** M1 is in progress. See [`../README.md`](../README.md) for what runs today, and
+[`source-data-profile.md`](source-data-profile.md) section 16 for the REP-001 assessment.
 
 ---
 
@@ -25,8 +25,8 @@ more. No milestone carries a date; completion conditions are the only measure us
 **Complete when**
 
 - Remaining REP-001 requirements are assessed honestly.
-- The maintainer can explain one record, missing vs zero, duplicate risk, source tracing and the profiler's
-  counting equation.
+- The maintainer can explain one record, missing vs zero, duplicate risk, source tracing and the
+  profiler's counting equation.
 - Unresolved time semantics have explicit downstream restrictions.
 
 ## M2 — Reliable ingestion and standardisation

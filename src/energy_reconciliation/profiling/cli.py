@@ -68,7 +68,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: archive not found: {args.archive}", file=sys.stderr)
         return 2
 
-    report, row_examples = profile_member(args.archive, args.member, args.work_dir)
+    report, row_examples = profile_member(
+        args.archive, args.member, args.work_dir, output=args.output
+    )
     write_json_atomically(args.output, report)
 
     if not args.no_examples and row_examples:
