@@ -76,6 +76,21 @@ Over the finite consumption values only (`Null`, empty and non-finite values are
 Standard deviation is deliberately omitted: it would need a second pass or floating-point
 accumulation, and percentiles describe the spread without either cost.
 
+## A note on `git_commit` in older reports
+
+Repository history was rewritten on 2026-09-07 to remove files that were only ever meant to be
+local. Every commit hash changed.
+
+Profile reports produced before that rewrite record a `code_identity.git_commit` value that **no
+longer exists in this repository's history**. Those values have deliberately not been edited: they
+record the commit the run actually saw, and rewriting them to a post-rewrite hash would assert that
+the run happened at a commit that did not exist at the time. The pre-rewrite history is preserved in
+a local mirror backup, where those hashes still resolve.
+
+`code_identity.package_source_sha256` is unaffected by the rewrite. It is computed from the bytes of
+the profiler's source files, not from Git, so it remains the authoritative way to tell whether two
+reports were produced by the same code.
+
 ## What the report will not tell you
 
 By design, and per REP-001 sections 6, 7 and 9, the profiler:
