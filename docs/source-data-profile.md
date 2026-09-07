@@ -4,11 +4,13 @@
 **Phases recorded here:**
   - **A** — Source provenance and licence verification (page evidence only), 2026-09-06 — sections 1-8
   - **B** — Raw-file inventory and archive validation (file metadata only), 2026-09-07 — section 9
+  - **C** — First CSV member: header and 20-record sample, 2026-09-07 — section 10
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
-downloaded files' metadata and archive structure. **No CSV row has been read or parsed, and no
-workbook cell has been read**, at any point.
+downloaded files' metadata and archive structure. Phase C read the header and the first 20 data
+records of one CSV member, streamed from the archive. **No workbook cell has been read, no file has
+been extracted, and no whole-file profiling has been performed**, at any point.
 
 ---
 
@@ -216,6 +218,11 @@ that way until actual file contents are inspected under a later phase of REP-001
 | Column order | UNKNOWN | Not stated |
 | Whether headers repeat inside a file | UNKNOWN | Requires reading the file |
 | Whether all 168 files share one structure | UNKNOWN | Requires reading multiple files |
+
+> **Update 2026-09-07:** Phase C (section 10) closed the delimiter, header spelling and column
+> order **for one file only**, and partly closed encoding. The remaining rows above are still
+> UNKNOWN. Section 10.9 tracks each one. The Phase A statements in this table are left unchanged as
+> the record of what the *page* could not answer.
 
 ### Value-level unknowns
 
@@ -464,7 +471,12 @@ a coincidental combination of content differences — have not been ruled out. T
 **prediction to be tested in Phase C**, and it is a good one precisely because it is falsifiable:
 reading the first line of any one member will either show a 49-byte header or not.
 
-Until tested, **do not** assume the two archives are interchangeable.
+**VERDICT (added 2026-09-07): the 49-byte prediction was CONFIRMED by measurement** — see section
+10.4. The header of `Small LCL Data/LCL-June2015v2_0.csv` is 47 bytes of text plus a 2-byte CRLF
+terminator, exactly 49. This raises confidence but does not make the two archives *proven*
+equivalent: equal header sizes are necessary, not sufficient. Until a content comparison is possible
+— currently blocked by the deflate64 issue in section 9.4 — **do not** assume the two archives are
+interchangeable.
 
 ### 9.8 Tariff workbook — structural check only
 
@@ -579,3 +591,220 @@ archive we have proven sound, and either confirms or kills the section 9.7 infer
 
 *Phase B of REP-001, performed 2026-09-07. No raw file altered, renamed, extracted or deleted.
 No CSV row read. No workbook cell read.*
+
+---
+
+## 10. Phase C — first CSV member: header and 20-record sample
+
+**Phase:** C — file-level inspection of a single member (REP-001 section 4, partial).
+**Date performed:** 2026-09-07.
+**Member inspected:** `Small LCL Data/LCL-June2015v2_0.csv` from the CRC-verified `Partitioned LCL Data.zip`.
+**Bytes read:** 1,024 of 50,755,532 — reading stopped as soon as 21 line terminators were present.
+**Method:** the member was streamed in memory with `zipfile.ZipFile.open()`. Nothing was
+extracted, and nothing in `data/raw/` was modified. Raw bytes were examined before decoding so
+that byte-order marks and line terminators could not be hidden by a text tool.
+
+### 10.1 Encoding — partly VERIFIED, partly UNKNOWN
+
+| Check | Result | Label |
+|---|---|---|
+| UTF-8 / UTF-16 / UTF-32 byte-order mark | **absent** — file starts `4c 43 4c 69 64` = `LCLid` | **VERIFIED** |
+| Bytes >= 0x80 (non-ASCII) in the sample | **0** | **VERIFIED (sample only)** |
+| Line terminator | **CRLF** (`\r\n`) on every sampled line — 21 CR and 21 LF | **VERIFIED** |
+
+**The honest limit of this evidence.** Every sampled byte is 7-bit ASCII. ASCII is a subset of
+UTF-8, Latin-1 *and* Windows-1252, so on this sample those encodings are **indistinguishable**.
+We have verified the file is *ASCII-compatible* and carries no BOM; we have **not** determined
+its encoding. That stays **UNKNOWN** until the whole file is scanned for bytes >= 0x80.
+
+**CRLF is an operational hazard worth naming.** These are Windows line endings on a Linux
+machine. Splitting lines on `\n` alone leaves a stray `\r` welded to the final field:
+
+```
+correct (split on b'\r\n') : ['MAC000002', 'Std', '2012-10-12 00:30:00.0000000', ' 0 ']
+naive   (split on b'\n')   : ['MAC000002', 'Std', '2012-10-12 00:30:00.0000000', ' 0 \r']
+```
+The consumption value would then be the string `' 0 \r'`. Python's `csv` module handles this
+correctly when the file is opened with `newline=''`; hand-rolled line splitting does not.
+
+### 10.2 Delimiter — VERIFIED
+
+| Candidate | Occurrences per line across the 21 sampled lines |
+|---|---|
+| comma `,` | **3 on every line** |
+| semicolon `;` | 0 |
+| tab | 0 |
+| pipe `\|` | 0 |
+
+**VERIFIED: the delimiter is a comma.** The evidence is not merely that commas are present, but
+that the count is *identical* on every line — 3 separators giving 4 fields. No quoting characters
+appeared, and a strict CSV parse accepted all 21 lines without a single rejection.
+
+### 10.3 Header — VERIFIED verbatim
+
+Reproduced exactly as bytes, then decoded:
+
+```
+raw   : b'LCLid,stdorToU,DateTime,KWH/hh (per half hour) \r\n'
+hex   : 4c 43 4c 69 64 2c 73 74 64 6f 72 54 6f 55 2c 44 61 74 65 54 69 6d 65 2c 4b 57 48 2f 68 68 20 28 70 65 72 20 68 61 6c 66 20 68 6f 75 72 29 20 0d 0a
+length: 47 bytes without terminator, 49 bytes with CRLF
+```
+**4 columns**, in this order:
+
+| # | Column name (exact) | Note |
+|---|---|---|
+| 0 | `'LCLid'` | Household identifier. |
+| 1 | `'stdorToU'` | Tariff-group flag. **Not predicted** — see 10.7. |
+| 2 | `'DateTime'` | Reading timestamp. |
+| 3 | `'KWH/hh (per half hour) '` | **Name ends with a trailing space.** See warning below. |
+
+**Trap — the fourth column name contains a trailing space.** It is
+`'KWH/hh (per half hour) '`, not `'KWH/hh (per half hour)'`. Code that refers to the column without that space
+will raise a KeyError, or worse, silently miss the column in a tolerant tool. It also contains a
+`/` and parentheses, which are awkward in SQL identifiers. Any later model should rename this
+column explicitly and record the mapping — but the **source** spelling is as printed above.
+
+### 10.4 The 49-byte prediction — CONFIRMED
+
+Phase B (section 9.7) inferred from arithmetic alone that the partitioned archive repeats a
+**49-byte** header in each of its 167 extra files, because the two archives' uncompressed totals
+differ by exactly 8,183 = 167 x 49 bytes. Measured directly:
+
+```
+header text                    : 47 bytes
+CRLF terminator                : 2 bytes
+total                          : 49 bytes
+Phase B prediction             : 49 bytes
+match                          : True
+```
+**VERIFIED.** The prediction was made before any byte of CSV was read and it held exactly. This
+**raises** confidence that the two archives contain the same underlying data, split differently.
+It does **not** prove it: identical header sizes are necessary but not sufficient. Confirming the
+archives are equivalent would need a content comparison, which is blocked anyway because
+`LCL-FullData.zip` cannot be decompressed by any tool on this machine (section 9.4). The
+**INFERRED** label in 9.7 is upgraded to *strongly supported*, not to VERIFIED.
+
+### 10.5 Record structure — VERIFIED
+
+First three records verbatim, terminators visible:
+
+```
+b'MAC000002,Std,2012-10-12 00:30:00.0000000, 0 \r\n'
+b'MAC000002,Std,2012-10-12 01:00:00.0000000, 0 \r\n'
+b'MAC000002,Std,2012-10-12 01:30:00.0000000, 0 \r\n'
+```
+- Field count across all 20 records: **[4]** — every record has exactly
+  4 fields, matching the header. **VERIFIED.**
+- Strict CSV parse: **20/20 records accepted, 0 rejected.**
+- Distinct `LCLid` in sample: **['MAC000002']** — one household only.
+- Distinct `stdorToU` in sample: **['Std']**.
+- **Values carry surrounding whitespace.** The consumption field is literally `' 0 '`, with a
+  leading and a trailing space. Any numeric conversion must strip first; `float(' 0 ')` happens
+  to work in Python, but a strict SQL cast or a `CASE WHEN value = '0'` comparison would not.
+
+### 10.6 Timestamps — format VERIFIED, meaning UNKNOWN
+
+| Item | Observation | Label |
+|---|---|---|
+| Observed format | `YYYY-MM-DD HH:MM:SS.fffffff` — 27 characters, 7 fractional-second digits | **VERIFIED** |
+| Example (first) | `2012-10-12 00:30:00.0000000` | **VERIFIED** |
+| Example (last of sample) | `2012-10-12 10:00:00.0000000` | **VERIFIED** |
+| Fractional seconds | always `.0000000` in this sample — no sub-second precision actually used | **VERIFIED (sample)** |
+| Spacing between consecutive rows | **[1800.0] seconds** = exactly 30 minutes, on all 19 gaps | **VERIFIED (sample)** |
+| Timezone offset in the string | **none** — no `Z`, no `+00:00`, no `T` separator | **VERIFIED** |
+| Timezone convention | | **UNKNOWN** |
+| Interval start vs interval end | | **UNKNOWN** |
+
+**Why the timezone must stay UNKNOWN.** The string carries no offset. The information is simply
+not present in the file, so no amount of inspection can recover it — it can only come from
+authoritative documentation. Ticket section 7 forbids guessing, and nothing here overrides that.
+
+**Why interval start-vs-end must stay UNKNOWN, including one observation that is NOT evidence.**
+The first reading is `2012-10-12 00:30:00.0000000` — 00:30, not 00:00. It is tempting to argue that a day starting at
+00:30 implies the timestamp marks the interval *end*. **That argument does not hold.** This is
+this household's first-ever reading, not necessarily a day boundary; a meter commissioned partway
+through 2012-10-12 would produce exactly this pattern under either convention. The observation is
+recorded so it can be re-examined later against many households, but it proves nothing now.
+The seven-digit fractional-second format is characteristic of SQL Server `datetime2`, hinting the
+data was exported from such a system — also **INFERRED**, also not evidence of timezone.
+
+### 10.7 Consumption values — the interval-vs-cumulative question
+
+This is the single most consequential question for billing, and **the sample cannot answer it.**
+
+All 20 sampled values are `0`. Measured: min=0.0, max=0.0, distinct values
+= [0.0], sum = 0.0.
+
+A naive test — *a cumulative register never decreases, so zero decreases implies cumulative* —
+returns `True` here and would be **wrong to trust**:
+
+```
+increasing steps : 0/19
+decreasing steps : 0/19
+unchanged steps  : 19/19   <- the series is constant; it carries no information
+```
+A constant series is technically non-decreasing, so it passes the cumulative test — but a real
+cumulative register would *increase* whenever any energy was consumed, and this one never does.
+The series is consistent with both readings and discriminates between neither.
+
+**Label: UNKNOWN.** Whether these are per-interval values or cumulative register readings is
+**not determined** by this evidence. This matters enormously: if they are per-interval you SUM
+them to bill; if they are cumulative you must DIFFERENCE consecutive readings. Summing cumulative
+readings produces a bill wrong by orders of magnitude.
+
+**The one supporting signal, labelled honestly.** The source's own column name is
+`'KWH/hh (per half hour) '` — the publisher naming the unit as *per half hour*, which is a per-interval
+description. This agrees with the dataset page quoted in section 2 ("energy consumption, in kWh
+(per half hour)"). Two independent documentary statements both describe per-interval values.
+That is **INFERRED — strongly supported by documentation, not yet confirmed by observed value
+behaviour.** A column label is a claim by the publisher, not a demonstration. It is confirmed the
+moment we observe values that rise and fall, which a cumulative register cannot do.
+
+**Also UNKNOWN: why 20 consecutive zeros.** A run of exact zeros at a household's first readings
+could be a meter installed but not yet reporting, a genuinely empty property, or a recording
+artefact. Ticket section 6 forbids interpreting absence or zero without evidence. No
+interpretation is offered here.
+
+### 10.8 Null tokens — UNKNOWN from this sample
+
+Scanning all four fields of all 20 records for `Null`, `NULL`, `null`, `NA`, `N/A`, `nan`, `NaN`,
+`-` and empty strings found **none**, and **0 empty fields**.
+
+**This is not evidence that the file contains no nulls.** Twenty consecutive rows from one
+household is far too small a sample to conclude anything about null representation. Ticket
+section 0 lists "a literal token such as `Null`" as an unverified claim; it remains **UNKNOWN**,
+neither confirmed nor refuted. The exact spelling and casing still has to be established before
+any missing-reading count can be trusted, because `Null`, `NULL` and `null` are three different
+strings and a filter written for one silently passes the others into your totals.
+
+### 10.9 What this step closed, and what it did not
+
+Answers below apply to **one member of one archive**. Section 2b of the ticket requires
+re-testing across files before any of it is treated as archive-wide.
+
+| Section 7 unknown | Status after Phase C |
+|---|---|
+| File encoding | **partly closed** — no BOM, ASCII-compatible, CRLF; exact encoding still UNKNOWN |
+| Field delimiter | **CLOSED (this file)** — comma, VERIFIED |
+| Exact column header names and spelling | **CLOSED (this file)** — VERIFIED verbatim, incl. trailing space |
+| Column order | **CLOSED (this file)** — VERIFIED |
+| Whether headers repeat inside a file | **still UNKNOWN** — 20 records cannot show this |
+| Whether all 168 files share one structure | **still UNKNOWN** — only one file inspected |
+| Null representation | **still UNKNOWN** — none seen in 20 records |
+| Zero readings — presence and meaning | presence **VERIFIED**; meaning **UNKNOWN** |
+| Negative readings | **still UNKNOWN** |
+| Timestamp string format | **CLOSED (this file)** — VERIFIED |
+| Timezone convention | **still UNKNOWN** — not present in the data at all |
+| Interval start vs end | **still UNKNOWN** — not determinable from data |
+| Interval vs cumulative values | **still UNKNOWN** — sample was constant; INFERRED per-interval from column name |
+| Row counts of any kind | **still UNKNOWN** — no counting performed |
+
+**Go / no-go on billing work: still NO.** Phase C resolved how to *read* the file. It did not
+resolve what the numbers *mean*. The timezone convention, the interval-start-vs-end semantics and
+the interval-vs-cumulative question are all still open, and each on its own is enough to make a
+billing calculation confidently wrong.
+
+---
+
+*Phase C of REP-001, performed 2026-09-07. One member streamed read-only from the archive;
+1,024 bytes read; nothing extracted, nothing in `data/raw/` modified.*
