@@ -7,6 +7,7 @@
   - **C** — First CSV member: header and 20-record sample, 2026-09-07 — section 10
   - **D** — Bounded non-zero consumption window, 2026-09-07 — section 11
   - **E** — Zeros, missing tokens and absent intervals across households, 2026-09-07 — section 12
+  - **F** — Structural consistency across all 168 members, 2026-09-07 — section 13
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
@@ -128,6 +129,13 @@ Resource names, formats, sizes and descriptions as displayed. **VERIFIED.**
   own row count is itself approximate ("around 167million"), so this figure is approximate twice
   over and must not be used as an expected count for reconciliation.
 
+> **CORRECTED BY MEASUREMENT IN PHASE F (section 13.5).** The split is **exactly 1,000,000 rows per
+> file**, with the remainder (932,474) in the final member — measured in members 0, 4, 5, 135 and
+> 167. The "approximately one million rows" phrasing is therefore **VERIFIED**, and the 994,048
+> even-split inference above was **wrong by 5,952 rows per file**. It was correctly labelled
+> INFERRED and correctly flagged as unusable as an expected count; this is what that caution was
+> for. Inferred archive total: **167,932,474 rows**.
+
 **Consequence for REP-001:** the actual row count of any downloaded file must be measured, not
 assumed. The page figures serve only as a sanity check on the order of magnitude.
 
@@ -222,9 +230,12 @@ that way until actual file contents are inspected under a later phase of REP-001
 | Whether all 168 files share one structure | UNKNOWN | Requires reading multiple files |
 
 > **Update 2026-09-07:** Phase C (section 10) closed the delimiter, header spelling and column
-> order **for one file only**, and partly closed encoding. The remaining rows above are still
-> UNKNOWN. Section 10.9 tracks each one. The Phase A statements in this table are left unchanged as
-> the record of what the *page* could not answer.
+> order **for one file only**, and partly closed encoding. **Phase F (section 13.2) then censused
+> all 168 members and closed delimiter, header spelling, column order, line endings and
+> "whether all 168 files share one structure" ARCHIVE-WIDE.** Encoding remains partly open: headers
+> and first rows are ASCII in all 168, but the bodies have never been scanned for bytes >= 0x80.
+> The Phase A statements in this table are left unchanged as the record of what the *page* could
+> not answer.
 
 ### Value-level unknowns
 
@@ -1232,6 +1243,11 @@ this member*, and are **UNKNOWN** as archive-wide quantities. In particular the 
 members spread across the 0-167 range, and from different offsets within each member, rather than
 more rows from the same place.
 
+> **ACTED ON IN PHASE F (section 13).** The stratified sample was performed (members 0, 42, 84, 126,
+> 167, shallow and deep windows) and the header census covered all 168 members. Structure is now
+> census-verified archive-wide. Phase F also revealed that member 0 is **not** representative in one
+> respect: it contains only `Std` households, so Phases C-E never saw the `ToU` tariff group at all.
+
 ### 12.12 Status after Phase E
 
 | Question | Status |
@@ -1262,3 +1278,256 @@ policy has been put to the reviewer separately and must be decided in its own ti
 
 *Phase E of REP-001, 2026-09-07. 152,812 rows streamed read-only; bounds pre-registered and not
 reached; nothing filled, interpolated or deleted; `data/raw/` unmodified.*
+
+---
+
+## 13. Phase F — structural consistency across the partitioned archive
+
+**Phase:** F — cross-member structural verification (REP-001 section 2b, partial).
+**Date:** 2026-09-07. **Source:** `Partitioned LCL Data.zip`, streamed read-only.
+Nothing extracted; `data/raw/` unmodified.
+
+### 13.1 Census versus sample — why the two halves carry different weight
+
+| Evidence type | Coverage | What it can establish |
+|---|---|---|
+| **Census** — headers + first data row of every member | **168 of 168 (100%)** | Findings are **VERIFIED archive-wide** |
+| **Sample** — bounded record windows | 5 of 168 members | Can **refute** uniformity; can never **prove** it |
+
+Pre-registered before scanning: members **0, 42, 84, 126, 167**; **5,000** records per window;
+a **shallow** window (from row 1) and a **deep** window (skip 500,000 rows) in each, to test
+whether position *within* a member matters; **50,000** rows maximum.
+
+Three further checks were **declared before running** after the census raised specific questions:
+(a) `stdorToU` in the first 200 rows of members 128-140; (b) the full household-ID sets of
+members 4 and 135; (c) full row counts and household-block sequences of members 0, 4, 5 and 167.
+
+### 13.2 Header census — all 168 members. VERIFIED ARCHIVE-WIDE
+
+```
+distinct header byte-strings across 168 members : 1
+sha256  : 4980f3cc398ca4b241006c8bcd617fedb4d5df221c94dbf945aae788880233f4
+repr    : b'LCLid,stdorToU,DateTime,KWH/hh (per half hour) '
+length  : 47 bytes text + 2 bytes CRLF = 49 bytes
+```
+| Property | Result | Coverage |
+|---|---|---|
+| Member count | **168** | census |
+| Distinct headers | **exactly 1** | census |
+| Column names and order | `LCLid`, `stdorToU`, `DateTime`, `KWH/hh (per half hour) ` — identical everywhere | census |
+| Trailing space in column 4 | present in **all 168** | census |
+| Delimiter | comma; 3 per header line in all 168 | census |
+| Line ending | **CRLF** in all 168 | census |
+| First data row field count | 4 fields in **168/168** | census |
+| Non-ASCII bytes in header or first row | **0** across all 168 | census |
+
+**VERIFIED for the whole archive:** every member has the same header, byte for byte, the same
+four columns in the same order, the same comma delimiter and CRLF line endings. This is the
+first archive-wide structural fact the project has, and it retires the Phase B/C caveat
+"one file only" for schema, delimiter and line endings.
+
+It also confirms the Phase B arithmetic independently: 168 identical 49-byte headers is exactly
+what the 8,183 = 167 x 49 byte difference between the two archives predicted.
+
+### 13.3 The archive is two blocks, split by tariff group — VERIFIED
+
+The first-household census revealed the ID sequence **restarts once**:
+
+```
+member 134 first household = MAC005555   stdorToU = Std
+member 135 first household = MAC000146   stdorToU = ToU     <- sequence restarts
+```
+Checking `stdorToU` across members 128-140 shows a clean boundary:
+
+| Members | Count | `stdorToU` | First household |
+|---|---:|---|---|
+| **0 - 134** | 135 | **`Std`** | `MAC000002` -> `MAC005555` ascending |
+| **135 - 167** | 33 | **`ToU`** | `MAC000146` -> `MAC005470` ascending |
+
+**VERIFIED:** the partitioned archive is ordered by *(tariff group, household ID, timestamp)*.
+The single ordering break is the boundary between the two groups, not corruption.
+
+**INFERRED — the ToU block is the dToU trial cohort.** 33 of 168 members is 19.6% of the archive.
+Phase A recorded ~1,100 dToU customers out of 5,567, which is 19.8%. The agreement is close but
+this is **INFERRED, not VERIFIED** — we have not counted households in the ToU block.
+
+**VERIFIED: the two blocks hold disjoint households.** Member 4 (`MAC000131`-`MAC000166`, all
+`Std`) and member 135 (`MAC000146`-`MAC000298`, all `ToU`) share **zero** household IDs, even
+though their ID ranges interleave: `MAC000146` falls inside member 4's range but is **not** in
+member 4. So a household belongs to exactly one tariff block.
+
+**This does NOT mean `stdorToU` is safe to use as a tariff rate selector.** It is a per-household
+group label. Phase A established the dToU tariff ran only during **2013**, while the data spans
+Nov 2011 - Feb 2014. A `ToU` household's 2012 readings carry the `ToU` label but predate the
+tariff. Whether the label is time-varying is still **UNKNOWN**.
+
+### 13.4 Households SPAN member boundaries — VERIFIED, and it changes how the data must be read
+
+```
+member 4 : 1,000,000 rows, 30 household blocks, first=MAC000131, LAST =MAC000166
+member 5 : 1,000,000 rows, 27 household blocks, FIRST=MAC000166, last =MAC000200
+shared household ids: ['MAC000166']
+```
+**VERIFIED: `LCLid` is not unique to a file.** `MAC000166`'s readings are split across members 4
+and 5. This answers REP-001 section 2b's first question directly: **the household identifier
+repeats across files.**
+
+**Consequence for any pipeline:** a household's readings cannot be analysed from a single member.
+Any per-household calculation — first/last reading, gap analysis, totals — must union the
+adjacent member, or it will silently truncate the household at the file boundary.
+
+**Correction to a Phase E method (not to its results).** Phase E treated a household run as
+"complete" when the `LCLid` changed within member 0. That test is **only valid for households
+wholly interior to a member.** The five households Phase E analysed (`MAC000002`-`MAC000007`) sit
+at the very start of member 0, far from the 1,000,000-row boundary, so **their results stand.**
+The *method*, however, must not be reused near a member boundary.
+
+### 13.5 Row counts — the split rule is 1,000,000 rows per file. Phase B's inference CORRECTED
+
+| Member | Data rows | Household blocks |
+|---|---:|---:|
+| 0 | **1,000,000** | 30 |
+| 4 | **1,000,000** | 30 |
+| 5 | **1,000,000** | 27 |
+| 135 | **1,000,000** | 27 |
+| 167 (last) | **932,474** | 31 |
+
+**VERIFIED for these five members. INFERRED for the rest:** the archive is split at exactly
+1,000,000 data rows per file, with the remainder in the final member.
+
+```
+members 0-166 at 1,000,000 rows (inferred) : 167,000,000
+member 167 (measured)                      :     932,474
+inferred archive total                     : 167,932,474 rows
+```
+**Independent corroboration from Phase B's byte measurements, with no further reading:**
+
+```
+total uncompressed 8,542,826,421 - (168 headers x 49) = 8,542,818,189 data bytes
+  / 167,932,474 rows                                  =  50.871 bytes/row
+median member 50,884,769 bytes / 1,000,000 rows       =  50.885 bytes/row   <- agrees
+smallest member / median size ratio                    =  0.9323
+member 167 rows / 1,000,000                            =  0.9325           <- agrees
+```
+Two independent routes agree to about 0.02 bytes per row, and the smallest member's **size**
+ratio matches the last member's measured **row** ratio.
+
+**A Phase B inference is hereby corrected.** Phase B (section 4) inferred 167,000,000 / 168 =
+**994,048** rows per file on the assumption of an even split. Measurement says **1,000,000**.
+The inference was reasonable, clearly labelled INFERRED, and **wrong by 5,952 rows per file** —
+which is exactly why Phase B recorded that it "must not be used as an expected count".
+
+**Phase A's UNVERIFIED claim is now settled.** Section 4 recorded "approximately one million rows
+per file" as UNVERIFIED because the phrase could not be confirmed as displayed page text. It is
+now **VERIFIED by measurement** — and it is exact, not approximate, for every member but the last.
+
+### 13.6 Bounded record samples — 50,000 rows across 5 members
+
+| Member | Window | Rows | Field fails | TS-format fails | `stdorToU` | Numeric | Zeros | Negatives | Empty | Tokens |
+|---|---|---:|---:|---:|---|---:|---:|---:|---:|---|
+| 0 | shallow | 5,000 | 0 | 0 | Std | 4,999 | 21 | 0 | 0 | `'Null'` x1 |
+| 0 | deep | 5,000 | 0 | 0 | Std | 4,999 | 0 | 0 | 0 | `'Null'` x1 |
+| 42 | shallow | 5,000 | 0 | 0 | Std | 5,000 | 0 | 0 | 0 | none observed |
+| 42 | deep | 5,000 | 0 | 0 | Std | 5,000 | 0 | 0 | 0 | none observed |
+| 84 | shallow | 5,000 | 0 | 0 | Std | 5,000 | 13 | 0 | 0 | none observed |
+| 84 | deep | 5,000 | 0 | 0 | Std | 5,000 | 0 | 0 | 0 | none observed |
+| 126 | shallow | 5,000 | 0 | 0 | Std | 5,000 | 0 | 0 | 0 | none observed |
+| 126 | deep | 5,000 | 0 | 0 | Std | 5,000 | 0 | 0 | 0 | none observed |
+| 167 | shallow | 5,000 | 0 | 0 | ToU | 5,000 | 0 | 0 | 0 | none observed |
+| 167 | deep | 5,000 | 0 | 0 | ToU | 5,000 | 0 | 0 | 0 | none observed |
+| **Total** | | **50,000** | **0** | **0** | `Std` 40,000 / `ToU` 10,000 | **49,998** | **34** | **0** | **0** | `'Null'` x2 |
+
+**Shallow and deep windows agree** on every structural measure in every member. Position within
+a member does not change the structure — the residual selection risk flagged in Phase E is
+**reduced**, though not eliminated.
+
+**Zero field-count failures and zero timestamp-format failures in 50,000 rows across 5 members**
+spanning both tariff blocks.
+
+### 13.7 A new value discovered: `ToU` — VERIFIED
+
+| Column | Values observed to date | Exact form |
+|---|---|---|
+| `stdorToU` | `Std`, **`ToU`** | `'Std'`, `'ToU'` — no surrounding whitespace |
+
+Phases C-E only ever saw `Std`, because they only ever read member 0. **`ToU` is new** and was
+found exactly where the census predicted it would be. Both values are unpadded, unlike the
+space-padded numeric column.
+
+**Required wording (REP-001 discipline):** other `stdorToU` values were **not observed within
+this scope**. That is not a claim that the domain is exactly two values.
+
+### 13.8 Timestamps are ordered per household, NOT per file — VERIFIED
+
+Several sampled windows end at an *earlier* timestamp than they start:
+
+```
+member  84 shallow: 2014-01-24 08:30 .. 2012-12-12 22:30   (2 households in window)
+member 126 shallow: 2013-12-19 20:00 .. 2012-03-12 10:00   (2 households in window)
+```
+This is **not** disorder. Each household's block is internally non-decreasing (Phase E); when the
+`LCLid` changes, the timestamp restarts at that household's own earliest reading.
+
+**Consequence:** the file is sorted by *(group, household, timestamp)*, **not** by timestamp. Any
+code that assumes a globally time-ordered stream — a windowed read, an incremental watermark, an
+early-exit on date — will be wrong.
+
+### 13.9 Do the proposed ingestion rules survive Phase F?
+
+| Rule proposed from member 0 | Verdict |
+|---|---|
+| 4 columns, exact names, trailing space in column 4 | **HOLDS — now census-verified across all 168** |
+| Comma delimiter, CRLF line endings | **HOLDS — census-verified** |
+| Timestamp `YYYY-MM-DD HH:MM:SS.fffffff` | **HOLDS** — 0 failures in 50,000 rows, 5 members |
+| Numeric values are space-padded; parse after strip | **HOLDS** |
+| `Null` token, unpadded, parse to NULL never 0 | **HOLDS** — seen again in member 0's deep window |
+| Quarantine off-grid rows | **HOLDS** — no counter-example |
+| Never fill an absent interval | **HOLDS** |
+| Fail loudly on conflicting duplicates | **HOLDS** — none seen |
+| ~~A household is contained in one file~~ | **BROKEN — see 13.4.** Never assumed in the rules, but it must now be explicitly forbidden. |
+| ~~The stream is globally time-ordered~~ | **BROKEN — see 13.8.** |
+| `stdorToU` domain | **EXTENDED** — `ToU` added; domain still not closed |
+
+**No sampled row contradicted any parsing rule.** The two broken assumptions are about *file
+organisation*, not row structure, and neither was part of the proposed parsing rules — but both
+would have produced silently wrong per-household results.
+
+### 13.10 What Phase F did NOT establish
+
+- **Row-level uniformity beyond the sample.** 50,000 rows of ~167.9 million is 0.03%. An anomaly
+  in an unsampled member remains entirely possible. Per instruction, no unobserved token is
+  claimed impossible.
+- **Cross-file duplicate keys.** Whether `household + timestamp` is unique *archive-wide* is
+  still **UNKNOWN** and now demonstrably harder: households straddle file boundaries, so the
+  check must union adjacent members.
+- **The 1,000,000-row rule for the 163 unmeasured members** — INFERRED, corroborated by byte
+  arithmetic, not measured.
+- **Timezone, interval start-vs-end, the consumption unit, causes of any anomaly** — all
+  unchanged and still **UNKNOWN**.
+- **File encoding.** Headers and first rows are ASCII across all 168, but a scan for bytes >=
+  0x80 in the body has never been run.
+
+### 13.11 Status after Phase F
+
+| Question | Status |
+|---|---|
+| Member count | **VERIFIED 168** |
+| Header identical in every member | **VERIFIED (census)** |
+| Column names, order, delimiter, line endings | **VERIFIED (census)** |
+| Archive ordering scheme | **VERIFIED** — (tariff group, household, timestamp) |
+| `stdorToU` domain | `Std`, `ToU` observed; **domain not closed** |
+| Household IDs repeat across files | **VERIFIED YES** |
+| Rows per file | **VERIFIED 1,000,000** (5 members); INFERRED archive-wide |
+| Archive row total | **INFERRED 167,932,474** |
+| Global time ordering | **VERIFIED absent** |
+| Cross-file key uniqueness | **UNKNOWN** |
+| Timezone / interval semantics / unit | **UNKNOWN** |
+| Cause of any zero, token, gap or duplicate | **UNKNOWN** |
+
+**Go / no-go on billing: still NO** — timezone and interval-start-vs-end are untouched by this
+phase and remain blocking.
+
+---
+
+*Phase F of REP-001, 2026-09-07. 168 headers censused; 50,000 sampled rows plus four declared
+targeted checks; nothing extracted; `data/raw/` unmodified.*
