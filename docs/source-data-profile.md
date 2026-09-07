@@ -6,6 +6,7 @@
   - **B** — Raw-file inventory and archive validation (file metadata only), 2026-09-07 — section 9
   - **C** — First CSV member: header and 20-record sample, 2026-09-07 — section 10
   - **D** — Bounded non-zero consumption window, 2026-09-07 — section 11
+  - **E** — Zeros, missing tokens and absent intervals across households, 2026-09-07 — section 12
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
@@ -944,6 +945,10 @@ leading zero-run terminating at a gap. Until then it is a coincidence we have wr
   values, no `Null`/`NULL`/`null`/`NA` in any field. **Still UNKNOWN for the file**: 300 records
   from one household cannot establish how the source represents a missing reading. Ticket
   section 0's "a literal token such as `Null`" is neither confirmed nor refuted.
+  > **RESOLVED IN PHASE E (section 12.5): the token exists and is `Null`.** A 152,811-row scan
+  > across 5 households found 5 occurrences, spelled `Null` with **no surrounding whitespace**,
+  > unlike numeric values which are space-padded. Phase D's null-free result was correct for its
+  > 300-row scope and is a good illustration of why "not observed" is not "does not exist".
 - **`stdorToU`: only `Std` observed**, on every record. Per your
   instruction this label is **not** assumed to determine the applicable tariff. Two reasons it
   cannot be taken at face value yet: the dToU tariff ran only during **2013** while this data is
@@ -1003,3 +1008,257 @@ wrong billing period.
 
 *Phase D of REP-001, 2026-09-07. 300 records streamed read-only; bounds declared in advance and
 not reached; nothing extracted; `data/raw/` unmodified.*
+
+---
+
+## 12. Phase E — zeros, explicit missing tokens and absent intervals across households
+
+**Phase:** E — missing-value characterisation (REP-001 sections 6, 8, 9; partial).
+**Date:** 2026-09-07. **Member:** `Small LCL Data/LCL-June2015v2_0.csv`, streamed read-only from
+`Partitioned LCL Data.zip`. Nothing extracted; `data/raw/` unmodified.
+
+### 12.1 The three cases, kept separate
+
+| Case | Definition | Why it must not be merged with the others |
+|---|---|---|
+| **Numeric zero** | A row exists; its value parses as `0`. | The source asserts a measurement of zero. It is data. |
+| **Explicit missing token** | A row exists; its value is empty or non-numeric. | The source asserts *it has no value here*. Silently coercing it to 0 under-bills. |
+| **Absent interval** | **No row exists** for an expected half-hourly slot. | Nothing was asserted at all. Filling it with 0 invents a measurement (REP-001 section 6 forbids this). |
+
+### 12.2 Pre-registered bounds
+
+Fixed in writing before the scan, so the stopping point could not be chosen to suit the result.
+
+| Bound | Value | Outcome |
+|---|---|---|
+| Primary stop | 5 **complete** household runs | **triggered** |
+| Hard cap — records | 500,000 | not reached (152,812 read) |
+| Hard cap — bytes | 32 MiB | not reached |
+| Gap analysis input | complete runs only | 5 households |
+| Pooling | never across households | honoured |
+
+**Why only complete runs.** The last household in any bounded scan is cut off mid-stream. Using
+it would give a false "last reading" and misclassify real internal gaps as edge periods. The
+sixth household (`MAC000008`, 1 row) was therefore **excluded** from all analysis.
+
+### 12.3 A narrower gap check than REP-001 section 9 — reasoning recorded for challenge
+
+Section 9 states that the **expected interval count** may only be computed from *documented*
+timestamp semantics, and that while interval-start-vs-end is UNKNOWN the check is "deferred, not
+approximated". That remains true and **section 9's full check is still deferred.**
+
+What was done here is narrower and does not depend on those semantics. Absences are counted
+**strictly between each household's own first and last observed timestamp**:
+
+```
+absent = (last_observed - first_observed) / 1800s + 1 - distinct_observed_timestamps
+```
+Shifting every timestamp label by half an hour (the start-vs-end ambiguity) moves both endpoints
+equally, so this count is **invariant** to which convention is correct. What the ambiguity does
+affect — which billing period a reading belongs to — is not claimed anywhere in this phase.
+
+**Ceiling on these numbers.** If the timestamps are UK local time, a spring daylight-saving
+transition legitimately skips slots. We do not know the timezone, and section 7 forbids DST
+analysis until we do. **Every absent-interval figure below is therefore an UPPER BOUND** on
+genuinely missing readings.
+
+### 12.4 Measured results — 5 complete households, 152,811 rows
+
+| Measure | Value |
+|---|---|
+| Rows inspected | **152,811** |
+| Distinct households (complete) | **5** — `MAC000002`, `MAC000003`, `MAC000004`, `MAC000006`, `MAC000007` |
+| Valid numeric values | **152,806** |
+| Numeric zeros | **26,229** |
+| **Negative values** | **0** |
+| Empty values (`''`) | **0** |
+| Non-numeric token values | **5** |
+| Malformed field counts | **0** — every row has exactly 4 fields |
+
+**Reconciliation (all rows accounted for):**
+
+```
+152,806 numeric rows  +  5 'Null' rows  =  152,811 rows            OK
+152,706 distinct keys + 105 duplicate extras = 152,811 rows        OK
+```
+### 12.5 The missing-value token — OBSERVED, recorded exactly
+
+A missing-value token **was** found. Recorded verbatim, whitespace preserved:
+
+| Token (exact `repr`) | Count | Casing |
+|---|---|---|
+| `'Null'` | 5 | capital `N`, lower-case `ull` |
+
+**Critical formatting asymmetry — VERIFIED.** Numeric values are wrapped in spaces; the token is
+**not**:
+
+```
+numeric value : ' 0.2 '     <- leading and trailing space
+missing token : 'Null'      <- no surrounding whitespace at all
+```
+A parser that assumes a uniform ` value ` shape, or that compares against `' Null '`, will miss
+every one of these. Ticket section 0 listed "a literal token such as `Null`" as unverified; the
+spelling is now **VERIFIED as `Null`** within this scope.
+
+**Scope limit — required wording.** Other tokens (`NULL`, `null`, `NA`, `-`, empty strings) were
+**not observed within this scope**. That is *not* a claim that none exist elsewhere in the
+archive. 152,811 rows from 5 households in 1 of 168 members cannot establish that.
+
+### 12.6 Every `Null` row is off the half-hour grid — VERIFIED co-occurrence
+
+| Household | Timestamp | Value | On half-hour grid? |
+|---|---|---|---|
+| `MAC000002` | `2012-12-19 12:37:27.0000000` | `Null` | **no** |
+| `MAC000003` | `2012-12-19 12:37:26.0000000` | `Null` | **no** |
+| `MAC000004` | `2012-12-19 12:32:40.0000000` | `Null` | **no** |
+| `MAC000006` | `2012-12-19 12:37:26.0000000` | `Null` | **no** |
+| `MAC000007` | `2012-12-19 12:37:27.0000000` | `Null` | **no** |
+
+The correlation is **perfect in this sample**: all 5 `Null` rows are off-grid (seconds and
+minutes not at `:00:00` or `:30:00`), and all 5 off-grid rows are `Null` rows. All five fall on
+**2012-12-19**, within about five minutes of each other, one per household.
+
+**Structural consequence.** These rows are **not missing half-hourly readings**. They are extra
+rows that do not belong to the half-hour series at all. Counting them as absent intervals, or as
+gaps in the grid, would be wrong. They are counted separately throughout this section.
+
+**Cause: UNKNOWN.** REP-001 sections 6 and 9 forbid attributing a cause without evidence. The
+co-occurrence is recorded as an observation and as a hypothesis for a later, wider test.
+
+### 12.7 Absent intervals — per household, grid rows only
+
+Computed after removing the 5 off-grid rows, so the arithmetic describes the half-hour grid only.
+Never pooled across households (REP-001 section 9).
+
+| Household | Grid rows | First observed | Last observed | Span (slots) | Distinct observed | **Absent** | % of span |
+|---|---:|---|---|---:|---:|---:|---:|
+| `MAC000002` | 24,157 | 2012-10-12 00:30 | 2014-02-28 00:00 | 24,192 | 24,140 | **52** | 0.215% |
+| `MAC000003` | 35,468 | 2012-02-20 13:00 | 2014-02-28 00:00 | 35,447 | 35,444 | **3** | 0.008% |
+| `MAC000004` | 31,676 | 2012-05-08 13:00 | 2014-02-28 00:00 | 31,703 | 31,654 | **49** | 0.155% |
+| `MAC000006` | 36,460 | 2012-01-30 11:30 | 2014-02-28 00:00 | 36,458 | 36,435 | **23** | 0.063% |
+| `MAC000007` | 25,045 | 2012-09-24 12:00 | 2014-02-28 00:00 | 25,033 | 25,028 | **5** | 0.020% |
+| **Total** | | | | **152,833** | | **132** | **0.086%** |
+
+These are **internal** gaps only — between each household's own first and last reading. **Edge
+periods** (before a household's first reading, after its last) are a different thing entirely and
+are **not** counted here: they are absence of observation, not gaps in service. Note the five
+households start on five different dates but all end on **2014-02-28**.
+
+Largest observed single gaps: 88,200s (24.5 hours) in `MAC000002` and `MAC000004`; 19,800s
+(5.5 hours) twice in `MAC000006`. **Causes UNKNOWN, and no gap is filled, interpolated or
+deleted.**
+
+### 12.8 Duplicates — REP-001 section 8, three separate figures
+
+| Question | Result |
+|---|---|
+| 1. Exact duplicate rows (every field identical) | **105 extra rows** |
+| 2. Duplicate candidate keys (`household` + `timestamp`) | **105 colliding keys** |
+| 3. **Conflicting** duplicates (same key, different value) | **0** |
+
+**The reassuring result is (3).** Every duplicate pair is identical in *all four* fields, so the
+source never disagrees with itself within this scope. Had (3) been non-zero, a later model would
+have had to choose between competing values and justify the choice.
+
+**Structural pattern — VERIFIED, cause UNKNOWN.** All 105 duplicate timestamps occur at exactly
+`00:00:00`, across **25 distinct dates** spread from 2012-02-15 to 2014-02-28 at roughly monthly
+intervals (15th-28th of successive months).
+
+In section 12.3 a daylight-saving transition was raised as a candidate explanation for duplicate
+timestamps. **The evidence does not support that**: DST occurs once a year in late October, not on
+25 dates at roughly monthly spacing. That candidate is set aside on structural grounds without
+performing any DST analysis. **The actual cause remains UNKNOWN.**
+
+**Not yet a valid key.** REP-001 section 8 warns against concluding `household + timestamp` is a
+valid unique key from one file. It is **not** unique even here — 105 collisions. Whether the
+collisions are always benign duplicates elsewhere in the archive is **UNKNOWN**.
+
+### 12.9 Timestamp ordering
+
+All five households store rows in **non-decreasing** timestamp order: zero backwards steps, with
+the only non-increasing steps being the exact repeats from 12.8.
+
+| Household | Backwards steps | Exact repeats |
+|---|---:|---:|
+| `MAC000002` | 0 | 17 |
+| `MAC000003` | 0 | 24 |
+| `MAC000004` | 0 | 22 |
+| `MAC000006` | 0 | 25 |
+| `MAC000007` | 0 | 17 |
+
+**VERIFIED:** the file is not shuffled. Earlier phases reported "not strictly increasing", which
+is true but was ambiguous; the cause is duplicate timestamps, **not** out-of-order data.
+
+### 12.10 Zero rates vary enormously between households — VERIFIED, unexplained
+
+| Household | Zeros | Rows | Zero rate |
+|---|---:|---:|---:|
+| `MAC000002` | 21 | 24,158 | 0.1% |
+| `MAC000003` | 0 | 35,469 | **0.0%** |
+| `MAC000004` | 24,307 | 31,677 | **76.7%** |
+| `MAC000006` | 1,901 | 36,461 | 5.2% |
+| `MAC000007` | 0 | 25,046 | **0.0%** |
+
+**This is the most consequential finding for later modelling.** Zero rates range from 0.0% to
+76.7% among five neighbouring household IDs. Two households record *no* zero in over 60,000 rows
+combined; one records zero in three readings out of four.
+
+**No explanation is adopted.** REP-001 section 6 forbids labelling a zero without evidence. What
+this does establish is that **any aggregate zero statistic computed across households would be
+meaningless** — it would average together populations that behave completely differently. Zero
+analysis must stay per-household until the variation is understood.
+
+### 12.11 Selection risk — two layers, both material
+
+**This scan is not a random sample of the dataset, and its results must not be generalised.**
+
+1. **One member of 168.** Approximately 0.6% of the archive, and the only member ever inspected
+   in any phase. If member 0 differs structurally from the others, every finding since Phase C
+   inherits that bias. Phase B established that members vary in size by about 7%, which is
+   consistent with, but not evidence of, structural variation.
+2. **The first records of that member — the sharper problem.** Rows are grouped by household in
+   ascending ID order, so these are the five lowest household IDs in the file. Household IDs
+   plausibly track recruitment order, which may track trial cohort and meter installation date.
+   "The first five households" is therefore potentially the **earliest-installed** group —
+   precisely the population most likely to show unusual early-life meter behaviour, which is
+   exactly what this phase measures. The 5 households are also drawn from only 6 consecutive IDs
+   (`MAC000002`-`MAC000008`, with `MAC000005` absent from this member).
+
+**Consequence for every number in this section:** they are VERIFIED *for these five households in
+this member*, and are **UNKNOWN** as archive-wide quantities. In particular the `Null` count, the
+0.086% absence rate and the 105 duplicates must not be extrapolated.
+
+**Proposed mitigation (for a later phase):** a stratified sample — a bounded window from several
+members spread across the 0-167 range, and from different offsets within each member, rather than
+more rows from the same place.
+
+### 12.12 Status after Phase E
+
+| Question | Status |
+|---|---|
+| Does an explicit missing token exist? | **VERIFIED — yes, `Null`** (within scope) |
+| Exact spelling / casing / whitespace of the token | **VERIFIED** — `'Null'`, unpadded |
+| Are there other tokens? | **UNKNOWN** — not observed within this scope |
+| Are empty fields used? | **not observed within this scope** |
+| Do absent intervals exist? | **VERIFIED — yes**, 132 across 5 households (upper bound) |
+| Cause of any absence, zero or token | **UNKNOWN** |
+| Negative values | **none observed** in 152,811 rows |
+| Malformed rows | **none observed** in 152,811 rows |
+| Is `household + timestamp` unique? | **VERIFIED NO** — 105 collisions, all benign here |
+| Are duplicates ever conflicting? | **none observed within this scope** |
+| Is the file time-ordered? | **VERIFIED non-decreasing** per household |
+| Timezone convention | **UNKNOWN** |
+| Interval start vs end | **UNKNOWN** |
+| Consumption unit | **UNKNOWN** — publisher's word only |
+| Archive-wide generality of all the above | **UNKNOWN** — see 12.11 |
+
+**Handling policy is deliberately absent.** REP-001 section 12 places "deciding *how* to handle
+nulls, duplicates or gaps" out of scope: this ticket measures and describes them only. A proposed
+policy has been put to the reviewer separately and must be decided in its own ticket.
+
+**Go / no-go on billing: still NO.** Timezone and interval-start-vs-end remain unresolved.
+
+---
+
+*Phase E of REP-001, 2026-09-07. 152,812 rows streamed read-only; bounds pre-registered and not
+reached; nothing filled, interpolated or deleted; `data/raw/` unmodified.*
