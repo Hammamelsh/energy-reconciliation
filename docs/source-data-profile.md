@@ -9,6 +9,8 @@
   - **E** — Zeros, missing tokens and absent intervals across households, 2026-09-07 — section 12
   - **F** — Structural consistency across all 168 members, 2026-09-07 — section 13
   - **G** — Authoritative documentation research (time-boxed), 2026-09-07 — section 14
+  - **H** — Full-member profile, executable and reproducible, 2026-09-07 — section 15
+  - **Closure assessment** — acceptance criteria and go/no-go, 2026-09-07 — section 16
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
@@ -1804,3 +1806,300 @@ require knowing the convention. Ingestion work can proceed now; billing cannot.
 
 *Phase G of REP-001, 2026-09-07. Time-boxed to 8 network calls; official sources only; no raw data
 read, modified or extracted.*
+
+---
+
+## 15. Phase H — full-member profile (executable, reproducible)
+
+**Phase:** H — the executable half of REP-001 sections 4-9. **Date:** 2026-09-07.
+**Command:** `uv run profile-member` — see [`docs/profiling.md`](profiling.md).
+**Machine-readable result:** [`data/profiles/lcl-june2015v2-0-profile.json`](../data/profiles/lcl-june2015v2-0-profile.json)
+(metadata only; row-level examples go to a git-ignored path).
+
+This is the first phase to read a **complete** member rather than a bounded window. Commands are
+not transcribed here — the profiler is the reproducible record, and its JSON output carries every
+number below plus source, code, configuration and run identity.
+
+### 15.1 Result
+
+| Measure | Value |
+|---|---:|
+| Status | **COMPLETE** |
+| Data records (excluding header) | **1,000,000** |
+| Structurally valid | 1,000,000 |
+| Malformed | **0** |
+| Records OK | 999,971 |
+| Records with issues | 29 |
+| Header matches contract byte-for-byte | **True** |
+| Runtime / peak memory | 10.2 s / ~38 MB |
+
+**VERIFIED: the member holds exactly 1,000,000 data records**, confirming by direct count the
+split rule Phase F inferred from five members.
+
+### 15.2 Counts reconcile end to end — acceptance criterion 11.4
+
+All six equations hold. Categories are mutually exclusive partitions:
+
+```
+[OK] data_records == structurally_valid + malformed
+       1,000,000 == 1,000,000
+[OK] structurally_valid == finite_numeric + null_token + empty + unexpected_token + non_finite_numeric
+       1,000,000 == 1,000,000
+[OK] structurally_valid == timestamp_valid + timestamp_invalid
+       1,000,000 == 1,000,000
+[OK] timestamp_valid == on_grid + off_grid
+       1,000,000 == 1,000,000
+[OK] structurally_valid == records_ok + records_with_issues
+       1,000,000 == 1,000,000
+[OK] physical_lines == header_lines + parsed_records + malformed_records
+       1,000,001 == 1,000,001
+```
+The last equation is the ticket's own `raw lines = header + parsed + rejected` check. It holds
+**for this member** because one physical line does equal one logical record here
+(`1,000,001` line terminators, all CRLF, `0` lone CR). That is a
+**measured property of this file, not a CSV guarantee** — a quoted field may legally contain a
+newline, and a regression test proves the profiler reports the equation as *failing* when it does.
+
+### 15.3 Consumption
+
+| Mutually exclusive category | Count |
+|---|---:|
+| `finite_numeric` | 999,971 |
+| `null_token` | 29 |
+| `empty` | 0 |
+| `unexpected_token` | 0 |
+| `non_finite_numeric` | 0 |
+
+| Overlapping diagnostic (**not** categories) | Count |
+|---|---:|
+| zeros | 45,538 |
+| negatives | 0 |
+| space_padded_raw_values | 999,971 |
+
+**Zeros (45,538) and negatives (0) are subsets of `finite_numeric`**
+and must never be added to the partition. **No negative value exists in this member.** No empty
+field, no unexpected token and no non-finite value occur either — so the `Null` token is the only
+missing-value representation present here.
+
+**The whitespace asymmetry holds across the whole member:** 999,971
+values are space-padded, exactly equal to the 999,971 finite numbers. The
+29 `Null` tokens are **not** padded — the Phase E observation, now confirmed at
+full scale.
+
+**Distribution of the 999,971 finite values** (REP-001 §6). Count, minimum, maximum and sum are
+accumulated exactly with `Decimal` while streaming — no floating point, constant memory. The mean is
+the only rounded figure. Percentiles use **nearest rank**, so each reported figure is an *actually
+observed value*, never an interpolation.
+
+| Statistic | Value | Exactness |
+|---|---|---|
+| Finite values | 999,971 | EXACT (streaming count, cross-checked against the store) |
+| Minimum | `0` | EXACT |
+| Maximum | `6.5279999` | EXACT |
+| Range | `6.5279999` | EXACT |
+| Sum | `239572.7849879` | EXACT — Decimal addition |
+| Mean | `0.239579733` | DERIVED from exact sum ÷ exact count, rounded to 9 dp |
+| Interquartile range | `0.195` | from observed p25 and p75 |
+
+| Percentile | Rank | Observed value |
+|---|---:|---|
+| p1 | 10,000 | `0` |
+| p5 | 49,999 | `0.005` |
+| p25 | 249,993 | `0.06` |
+| p50 | 499,986 | `0.129` |
+| p75 | 749,979 | `0.255` |
+| p90 | 899,974 | `0.522` |
+| p95 | 949,973 | `0.829` |
+| p99 | 989,972 | `1.85` |
+
+**The distribution is strongly right-skewed**: the median is `0.129` while the maximum is `6.528`,
+roughly fifty times larger. Half the readings fall between `0.06` and `0.255`.
+
+**Internal cross-check.** 45,538 zeros is 4.554% of finite values, so ranks 1–45,538 must all be
+zero. p1 (rank 10,000) is `0` and p5 (rank 49,999) is `0.005` — the zero run ends between those
+ranks, exactly as the zero count predicts. The two figures were computed by different routes.
+
+**Extreme values, bounded to five each.** Smallest: five `0` readings. Largest: `6.5279999`,
+`6.5100002`, `6.5100002`, `6.395`, `6.381`. Record numbers are in the report; the household id and
+timestamp for each go to the git-ignored examples file.
+
+**OBSERVATION — the source appears to contain binary-float artefacts.** `6.5279999` and `6.5100002`
+are what `6.528` and `6.51` look like after a round-trip through an IEEE-754 float. This is in the
+**source data**, not in our arithmetic — the profiler uses `Decimal` throughout and reports the
+original text. **Cause UNKNOWN**; no explanation is adopted. It is one more reason not to introduce
+float anywhere downstream.
+
+**Plausibility, noted and not relied upon.** A mean of `0.2396` kWh per half hour is about 11.5 kWh
+per day if sustained, which is an ordinary household figure. REP-001 §6 states plainly that
+plausibility of the observed range may be noted but **does not confirm the unit** — the unit rests on
+the publisher's documentation (§14.4), not on this.
+
+### 15.4 Timestamps
+
+- Valid format: **1,000,000**; invalid: **0**.
+- On grid: 999,971; **off grid: 29**.
+- Text range in this member: `2011-12-06 13:00:00.0000000` to `2014-02-28 00:00:00.0000000`.
+
+**The Phase E correlation holds at full-member scale: off-grid rows = 29 =
+`Null` rows = 29**, the same record numbers in both. Every off-grid row is a
+`Null` row and vice versa, across 1,000,000 records and 30 households.
+
+**No timezone was assigned and no conversion performed.** Timestamp text is preserved exactly.
+
+### 15.5 Households — observations, not completeness claims
+
+- Distinct households in this member: **30**
+- Tariff values observed: **{'Std': 1000000}** (member 0 is entirely `Std`)
+- Per-household row counts sum to exactly 1,000,000.
+- **Zero backwards timestamp steps** in any household: the member is non-decreasing per household.
+
+Ranges are recorded as **first/last observed in this member**. Phase F proved households span
+member boundaries, so the profiler makes no completeness claim — and a test asserts that it
+cannot, using a fixture where one household straddles two members.
+
+### 15.6 Duplicates — two equality rules, kept separate
+
+| Rule | Result |
+|---|---:|
+| Exact source-row equality (all four raw fields identical) | **688 groups, 688 extra rows** |
+| Candidate key collisions (`LCLid` + raw `DateTime` text) | **688 keys, 688 extra rows** |
+| **Conflicting** groups (same key, different meaning) | **0** |
+
+Every collision is an exact duplicate; **the source never disagrees with itself in this member**.
+Scoped to this member only — it says nothing about archive-wide uniqueness, which is harder
+because households straddle boundaries. A repeated naive timestamp is a *candidate key collision*
+whose physical meaning stays unresolved while the timezone convention is UNKNOWN.
+
+**Duplicates are not an error category.** All 1,376 rows involved are otherwise valid records and
+are counted inside `records_ok`.
+
+### 15.7 Encoding — an item open since Phase C, now closed for this member
+
+**0 bytes >= 0x80** in the entire
+50,755,532-byte member. The member is **VERIFIED ASCII-compatible**.
+This still does not distinguish UTF-8 from Latin-1 or Windows-1252, which agree on ASCII — but
+it removes the risk that a non-ASCII byte is lurking somewhere unread.
+
+### 15.8 Reproducibility
+
+The report carries the four identities Phase G specified:
+
+| Identity | Value |
+|---|---|
+| Source | member `Small LCL Data/LCL-June2015v2_0.csv`, content SHA-256 `4997141df1efb624…`, CRC32 `41139d72` |
+| Code | profiler v1.0.0, package source SHA-256 `96831cb60b4cee15…`, git commit + dirty flag |
+| Configuration | archive, member and output paths recorded in `invocation` |
+| Run | start/finish UTC, duration, argv, Python version, platform |
+
+Reports are written to a temporary file and atomically renamed, so an interrupted run cannot
+leave a truncated file that looks complete. A test asserts two runs over identical bytes produce
+identical analytical results.
+
+---
+
+*Phase H of REP-001, 2026-09-07. One member read in full, read-only; archive not extracted or
+modified; nothing filled, interpolated or deleted.*
+
+---
+
+## 16. REP-001 closure assessment and go / no-go recommendation
+
+**Date:** 2026-09-07. Assessed against the ticket's own acceptance criteria (§11) and Definition of
+Done. Outputs: [`rep-001-verified-facts.md`](rep-001-verified-facts.md) and
+[`rep-001-assumptions-and-open-questions.md`](rep-001-assumptions-and-open-questions.md).
+
+### 16.1 Acceptance criteria (§11)
+
+| # | Criterion | Verdict |
+|---|---|---|
+| 11.1 | Reproducible from a clean environment | **MET** — `uv run profile-member`, documented in `docs/profiling.md`, no new dependencies. Acquisition steps are written down but not scripted. |
+| 11.2 | Raw input preserved, checksums recorded, working copy matches | **MET with caveat** — SHA-256 recorded and reproduces; before/after `stat` identical every phase. Raw files are **not** filesystem-write-protected (AQ-28). |
+| 11.3 | No unsupported assumptions | **MET** — no timezone, unit, billing-semantics or missingness-cause claim beyond cited evidence. |
+| 11.4 | Counts reconcile end to end for one file | **MET** — five logical partitions plus the raw-line check hold over 1,000,000 records (§15.2). |
+| 11.5 | Every finding supported | **MET** — each statement carries a command, query result or citation. |
+| 11.6 | Both output lists exist and are non-overlapping | **MET** — 47 verified facts, 32 open items; disjointness enforced by `tests/test_rep001_lists.py`. |
+| 11.7 | Provenance complete (real value or explicit UNKNOWN) | **MET** — download date recorded as explicit UNKNOWN (AQ-04). |
+| 11.8 | Scope respected | **MET** — no billing, tariff join, dbt, Airflow, Spark or dashboard work. |
+
+**All eight acceptance criteria are met.**
+
+### 16.2 Definition of Done — two items outstanding, stated plainly
+
+| Item | Verdict |
+|---|---|
+| One CSV profiled through §§4–9 | **PARTIAL** — see below |
+| Both output lists exist, non-overlapping | **MET** |
+| §3 provenance complete | **MET** (explicit UNKNOWN) |
+| §11 criteria met and reviewer-checked | **MET**, pending review |
+| The maintainer explains the five §13 checkpoints | **NOT MET** — depends on a person, not on code |
+| Written go/no-go recommendation | **MET** — §16.3 below |
+| `PROJECT_CONTEXT.md` updated | **MET** |
+
+**The §§4–9 gap, precisely.** §4 (file-level inspection) and §§7–8 (timestamps, duplicates) are
+complete for member 0. Two shortfalls remain:
+
+- **§6 distribution summary — RESOLVED 2026-09-07.** The profiler now reports an exact finite-value
+  count, minimum, maximum, range, sum and mean, eight nearest-rank percentiles, the interquartile
+  range, and the five most extreme values at each end with source record references (§15.3). Each
+  statistic declares whether it is exact or derived.
+- **§5 column-level profiling is partial.** Distinct counts and observed values exist for `LCLid`,
+  `stdorToU` and `DateTime`; per-column documented meanings are recorded in this profile rather
+  than in the machine-readable result.
+
+**§9 (missing-interval checks) is DEFERRED by the ticket's own rule**, not omitted. §9 states that
+the expected interval count may be computed "only from *documented* timestamp semantics" and that
+while those are UNKNOWN "the check is deferred, not approximated". AQ-01 and AQ-02 are UNKNOWN, so
+§9 is correctly deferred. Phase E's absence counts were a deliberately narrower measurement, valid
+because they are invariant to the unknown convention, and were recorded as upper bounds.
+
+### 16.3 Go / no-go recommendation on billing transformations
+
+**Recommendation: NO-GO for billing. GO for ingestion and profiling work.**
+
+**Reasoning.** Everything needed to *read* this source correctly is now established: schema, header,
+delimiter, encoding compatibility, value categories, the `Null` token, per-interval semantics, the
+unit as a publisher contract, duplicate behaviour, and file organisation including the fact that
+households span members. A pipeline can ingest this data losslessly today.
+
+What is missing is not about reading, it is about **meaning in time**. Three unknowns block a
+defensible bill:
+
+| Blocker | Consequence if guessed |
+|---|---|
+| AQ-01 timezone convention | Energy assigned to the wrong day, month and tariff period |
+| AQ-02 interval start vs end | Every reading shifted 30 minutes across period boundaries |
+| AQ-03 DST representation | Duplicate or missing hours misread as data-quality defects, or real defects hidden |
+
+None can be recovered from the data — the timestamps carry no offset — and none were found in the
+sources searched (VF-47). They require documentation (AQ-26) or a decision recorded as an explicit,
+reversible assumption.
+
+**Secondary blockers**, which do not prevent ingestion but must be resolved before a bill is
+published: AQ-08 (`LCL-FullData.zip` integrity unverified), AQ-12 (archive-wide key uniqueness),
+AQ-22 (whether `stdorToU` determines the applicable tariff), and AQ-27 (handling policy for zeros,
+tokens, duplicates and gaps).
+
+**What unblocks the go decision:** either authoritative documentation resolving AQ-01–AQ-03, or an
+explicit decision to proceed under a recorded assumption using the reversible design in §14.6 —
+where the convention is a configuration value, every output is stamped with the assumptions that
+produced it, and a later correction is a re-derivation rather than a migration.
+
+### 16.4 Can REP-001 close?
+
+**All engineering requirements are now met. One human requirement remains, and it is not ours to
+mark.**
+
+| Remaining item | Owner | Status |
+|---|---|---|
+| §13 learning checkpoints — the maintainer explains raw-data preservation, null vs zero, exact duplicate vs duplicate candidate key, missing interval ≠ zero usage, and why timezone evidence is needed before conversion | **The maintainer, with the reviewer** | **NOT MET — and explicitly not marked on their behalf** |
+
+The ticket states plainly: *"The reviewer checks these answers before implementation begins. Working
+code is not evidence of understanding."* Automated checks cannot satisfy that, and this document does
+not pretend otherwise. Every automated criterion is listed in §16.1 with its evidence; the checkpoint
+above is deliberately kept separate from them.
+
+**§9 (missing-interval checks) remains DEFERRED** under the ticket's own rule, which forbids
+computing an expected interval count while timestamp semantics are UNKNOWN. That is a recorded
+deferral, not a quiet write-off.
+
+**Everything else is met.** REP-001 can close as soon as the §13 checkpoints are reviewed.
