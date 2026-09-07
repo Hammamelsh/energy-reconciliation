@@ -5,6 +5,7 @@
   - **A** — Source provenance and licence verification (page evidence only), 2026-09-06 — sections 1-8
   - **B** — Raw-file inventory and archive validation (file metadata only), 2026-09-07 — section 9
   - **C** — First CSV member: header and 20-record sample, 2026-09-07 — section 10
+  - **D** — Bounded non-zero consumption window, 2026-09-07 — section 11
 **Official page:** https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d
 **Access date (page):** 2026-09-06
 **Method:** Phase A was an automated fetch of the official dataset page above. Phase B measured the
@@ -747,8 +748,15 @@ A constant series is technically non-decreasing, so it passes the cumulative tes
 cumulative register would *increase* whenever any energy was consumed, and this one never does.
 The series is consistent with both readings and discriminates between neither.
 
-**Label: UNKNOWN.** Whether these are per-interval values or cumulative register readings is
-**not determined** by this evidence. This matters enormously: if they are per-interval you SUM
+**Label: UNKNOWN at the time of Phase C.** Whether these are per-interval values or cumulative
+register readings was **not determined** by this evidence.
+
+> **RESOLVED IN PHASE D (section 11.3): VERIFIED per-interval.** A 300-record window from the same
+> household showed **142 decreases** against 134 increases, with a maximum value of 1.164 — far
+> below any register rollover threshold, and far too many decreases for meter exchanges. Cumulative
+> register readings are ruled out by observed behaviour, not by the column label alone.
+
+The Phase C reasoning below is retained because the discipline it demonstrates still applies. This matters enormously: if they are per-interval you SUM
 them to bill; if they are cumulative you must DIFFERENCE consecutive readings. Summing cumulative
 readings produces a bill wrong by orders of magnitude.
 
@@ -808,3 +816,190 @@ billing calculation confidently wrong.
 
 *Phase C of REP-001, performed 2026-09-07. One member streamed read-only from the archive;
 1,024 bytes read; nothing extracted, nothing in `data/raw/` modified.*
+
+---
+
+## 11. Phase D — bounded non-zero consumption window
+
+**Phase:** D — consumption behaviour (REP-001 section 6, partial). **Date:** 2026-09-07.
+**Member:** `Small LCL Data/LCL-June2015v2_0.csv`, streamed read-only from
+`Partitioned LCL Data.zip`. Nothing extracted; `data/raw/` unmodified.
+
+### 11.1 Bounds, declared before the scan
+
+Thresholds were fixed **in advance and in writing** so that the qualifying window could not be
+chosen after seeing which window gave a preferred answer.
+
+| Bound | Value | Outcome |
+|---|---|---|
+| Max records scanned | 200,000 | not reached |
+| Max bytes read | 16 MiB | not reached |
+| Qualifying window | >= 300 consecutive records, one `LCLid`, >= 100 non-zero numeric values | met at record 299 |
+| Household boundary | window terminates at any `LCLid` change | single household throughout |
+
+**Scan stopped after 300 records** — the first qualifying window was also the first 300 records,
+so no window selection took place at all. There was nothing to cherry-pick from.
+
+### 11.2 Window contents — VERIFIED counts
+
+Household `MAC000002`, records 0-299, `2012-10-12` to `2012-10-18`.
+
+| Measure | Value |
+|---|---|
+| Records inspected | 300 |
+| Field-count distribution | `{4: 300}` — every record has 4 fields |
+| Numeric values | 300 |
+| Zero values | 21 |
+| Non-zero values | 279 |
+| Empty fields | 0 |
+| Non-numeric values | 0 |
+| **Negative values** | **0** |
+| Minimum | 0.0 |
+| Maximum | 1.164 |
+
+Ticket section 6 requires negatives to be counted and characterised: **none occur in this
+window.** That is a window-scoped result, not a statement about the file.
+
+### 11.3 Step behaviour — the decisive evidence
+
+Across 299 consecutive pairs:
+
+| Transition | Count |
+|---|---|
+| Increases | 134 |
+| **Decreases** | **142** |
+| Equal | 23 |
+| Monotonically non-decreasing (cumulative signature) | **False** |
+
+**VERIFIED: these are not cumulative register readings.** The reasoning, stated carefully
+because a single decrease would prove nothing:
+
+- A cumulative register *can* decrease, but only by **rollover** (the dial passes its maximum,
+  e.g. 99999.9, and wraps to 0) or by **meter exchange**. The maximum value observed is
+  **1.164** — nowhere near any rollover threshold.
+- 142 decreases occurred in **six days**. Neither rollover nor meter replacement can happen
+  142 times in six days for one household.
+- Increases (134) and decreases (142) are almost balanced and interleaved throughout,
+  which is the signature of a quantity that rises and falls — consumption during each interval —
+  not of a total that only accumulates.
+
+Combined with the publisher's own column name
+`'KWH/hh (per half hour) '` and the dataset page's "energy consumption, in kWh (per half hour)" (section 2),
+**the values represent per-interval consumption, not a cumulative register. VERIFIED by observed
+behaviour, corroborated by two independent documentary statements.**
+
+**Billing consequence:** these values are **summed** over a billing period. They must **not** be
+differenced.
+
+**What this does NOT establish.** The *unit* is still taken on the publisher's word. Ticket
+section 6 requires the unit to come from authoritative documentation, and states plainly that
+plausibility of the observed range may be noted but **does not confirm the unit**. Accordingly:
+
+> Corroborating note only: 48 consecutive values from the first non-zero reading sum to
+> **12.4530**, with individual values from 0.106 to 0.933. If the unit is kWh
+> per half hour, that is a plausible daily total for a single household. This is **noted, not
+> relied upon.** It is consistent with the documented unit; it does not prove it.
+
+### 11.4 Timestamps and one missing interval
+
+| Item | Observation |
+|---|---|
+| First / last | `2012-10-12 00:30:00.0000000` -> `2012-10-18 06:30:00.0000000` |
+| Strictly increasing | **True** — no out-of-order or duplicate timestamps |
+| Distinct gaps | {1800s: 298, 3600s: 1} |
+
+**One 3600-second gap — a genuinely missing half-hourly reading. VERIFIED.**
+
+```
+record 20 : 2012-10-12 10:30:00.0000000
+record 21 : 2012-10-12 11:30:00.0000000     <- the 11:00 reading is ABSENT
+```
+Ticket section 9 calls this an **internal gap**: it lies between the household's first and last
+observed reading, not at an edge. It is **one absent row**, not a row containing zero — the two
+must never be conflated, and ticket section 6 forbids filling it with zero.
+
+**Cause: UNKNOWN.** No interpretation is offered, and no daylight-saving analysis was performed
+(ticket section 7 defers that until the timezone convention is known).
+
+### 11.5 An observed co-occurrence — recorded, deliberately not explained
+
+The 21 zero values are **not scattered**. They form a single unbroken run at indices 0-20,
+`00:30` to `10:30` on 2012-10-12. The very next expected reading (11:00) is the missing one, and
+the first non-zero value — `' 0.143 '` — is at 11:30.
+
+```
+00:30 .. 10:30   21 consecutive readings, all ' 0 '
+11:00            MISSING
+11:30            0.143    <- first non-zero; normal variation continues from here
+```
+**This pattern is recorded as an observation. Its cause is UNKNOWN and no explanation is adopted
+here.** It is tempting to read it as a meter being commissioned mid-morning, but ticket section 6
+forbids labelling a zero or a gap without evidence, and a single household proves nothing. It is
+a **hypothesis for a later phase**, testable by checking whether other households also show a
+leading zero-run terminating at a gap. Until then it is a coincidence we have written down.
+
+### 11.6 Null tokens and tariff flag
+
+- **Null tokens: none found** across all 300 scanned records — 0 empty fields, 0 non-numeric
+  values, no `Null`/`NULL`/`null`/`NA` in any field. **Still UNKNOWN for the file**: 300 records
+  from one household cannot establish how the source represents a missing reading. Ticket
+  section 0's "a literal token such as `Null`" is neither confirmed nor refuted.
+- **`stdorToU`: only `Std` observed**, on every record. Per your
+  instruction this label is **not** assumed to determine the applicable tariff. Two reasons it
+  cannot be taken at face value yet: the dToU tariff ran only during **2013** while this data is
+  from **2012**, and we have not established whether the flag is fixed per household or can vary
+  over time. Treating a static label as a time-varying tariff assignment is exactly the kind of
+  error this project exists to catch. **UNKNOWN.**
+
+### 11.7 Human-viewable preview
+
+`data/sample/lcl-june2015v2-0-preview.csv` — **git-ignored, never committed** (`.gitignore`
+line 8, `data/sample/`).
+
+| Property | Value |
+|---|---|
+| Source member | `Small LCL Data/LCL-June2015v2_0.csv` |
+| Source records | 0-based data indices **11-60**, contiguous |
+| Rows | 1 header + **50** data rows |
+| Bytes | 2,556 |
+| SHA-256 | `04affe9fdfa6374cfadf62ae38159f106534972ecc614b0b28cb9496991a6f9e` |
+| Span | `2012-10-12 06:00` to `2012-10-13 07:00` |
+| Contents | 10 zeros, the missing 11:00 interval, then 40 non-zero readings |
+
+**Faithfulness.** The file was built by copying **raw bytes** from the decompressed stream, not
+by re-serialising parsed values. Verified: the header line and all 50 record lines appear
+verbatim in the source, and the 50 records form one contiguous run. Surrounding spaces (` 0.143 `)
+and CRLF line endings are preserved. Nothing was cleaned, trimmed or reformatted.
+
+**Provenance is recorded here, not in the CSV**, precisely so the CSV stays byte-faithful.
+
+**This file is derived data, not source data.** The originals in `data/raw/` remain the only
+authoritative copy. The preview is fully regenerable from the record range above.
+
+### 11.8 Status after Phase D
+
+| Question | Status |
+|---|---|
+| Per-interval vs cumulative | **VERIFIED per-interval** (142 decreases; max 1.164) |
+| Negative values | **none in window** (window-scoped) |
+| Missing intervals exist | **VERIFIED** — one internal gap observed |
+| Cause of missing interval | **UNKNOWN** |
+| Meaning of the zero run | **UNKNOWN** |
+| Consumption unit | **UNKNOWN** — publisher's word only; range noted, not relied on |
+| Null token representation | **UNKNOWN** — none seen in 300 records |
+| Timezone convention | **UNKNOWN** — not present in the data |
+| Interval start vs end | **UNKNOWN** — not determinable from data |
+| Whether `stdorToU` determines the tariff | **UNKNOWN** |
+| File encoding | **UNKNOWN** — all sampled bytes ASCII |
+| Whether all 168 files share one structure | **UNKNOWN** |
+| Row counts | **UNKNOWN** — no counting performed |
+
+**Go / no-go on billing: still NO.** Phase D removed one of the three blocking semantic unknowns
+— we now know to sum rather than difference. The timezone convention and the
+interval-start-vs-end question remain open, and either alone is enough to place energy in the
+wrong billing period.
+
+---
+
+*Phase D of REP-001, 2026-09-07. 300 records streamed read-only; bounds declared in advance and
+not reached; nothing extracted; `data/raw/` unmodified.*
