@@ -233,6 +233,13 @@ Measured on `MAC000131`'s ten largest errors:
 - For the **weekday models**, a large error does coincide with a target unlike its weekday
   lag. 8 Jan 2014: observed 11.242 against a lag of 21.388, and `seasonal_naive_7` — which
   *is* that lag — is wrong by exactly 10.146.
+- For **`weekday_mean_4`** the previous-week column alone explains nothing — its input is
+  the four preceding same weekdays, and both of its top-ten misses are targets outside the
+  range of all four. 9 Nov 2013: observed 17.965 against 9.544 · 6.706 · 7.253 · 11.546,
+  whose mean is exactly the 8.762 predicted. 25 Dec 2013: observed 21.369 against
+  14.205 · 11.965 · 12.638 · 14.445, mean 13.313. No averaging of those inputs reaches the
+  target. (The explorer's worst-days table now shows the four values and the dates the
+  model read for every row; classifying this cohort-wide is idea I-13.)
 - For **`persistence_1`** the largest error of all occurs where the weekday lag was nearly
   exact. 1 Jan 2014: observed 21.388, the previous Wednesday 21.369, a difference of
   **0.019** — yet persistence predicted 11.061, because it repeats the origin day, and the

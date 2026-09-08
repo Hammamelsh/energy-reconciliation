@@ -532,7 +532,13 @@ def observed_vs_predicted_chart(frame: pd.DataFrame) -> alt.Chart | alt.LayerCha
 
 
 def model_error_chart(frame: pd.DataFrame, title: str) -> alt.Chart:
-    """MAE per model, horizontal so the names sit beside their bars."""
+    """MAE per model, horizontal so the names sit beside their bars.
+
+    The renderer truncates axis labels wider than 180 px by default, which cut every
+    model name to "4-week weekda..." at the widths this page is read at. ``labelLimit=0``
+    removes the limit, so the left margin grows to fit the longest name at full size
+    rather than the name shrinking or being cut.
+    """
     if frame.empty:
         return empty_note("No scored predictions in this scope.")
     order = list(frame.sort_values("mae_kwh")["model"])
@@ -542,7 +548,7 @@ def model_error_chart(frame: pd.DataFrame, title: str) -> alt.Chart:
             "model:N",
             title=None,
             sort=order,
-            axis=alt.Axis(labelFontSize=LABEL_SIZE + 1),
+            axis=alt.Axis(labelFontSize=LABEL_SIZE + 1, labelLimit=0),
         ),
         "x": alt.X(
             "mae_kwh:Q",

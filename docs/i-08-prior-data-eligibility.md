@@ -75,13 +75,27 @@ the point of the experiment, and why §5 separates the cases.
 
 ## 5. Shared with FORE-001, versus newly included
 
+**Which set this split is over.** Three case counts appear in this report and they are
+different sets. *Scheduled* is every (household, origin, horizon) on the calendar:
+66,234. *Scored by at least one model* is the subset where some model issued a prediction
+**and** the target was usable: **58,604**. *Scored by every model* is the common frame §4
+uses: 57,885. The shared/new split is over the **at-least-one-model set**, so
+1,722 + 56,882 = 58,604, and it must not be read against 66,234 (which includes 7,630
+cases no model scored) or against 57,885 (which drops 719 cases one or two models
+declined). Verified from the cases themselves: the union across models has 58,604
+members, and it coincides with `persistence_1`'s own scored set, because every other
+model's decline reasons include persistence's (origin day unusable, thin window) and add
+their own (missing lag day, insufficient same-weekday history). FORE-001's 9,555 is the
+same kind of set, and there the union and the common frame coincide because its models
+are scored on identical cases.
+
 | | Cases |
 |---|---:|
-| FORE-001 scored | 9,555 |
-| I-08 scored | 58,604 |
+| FORE-001, scored by at least one model (= by every model) | 9,555 |
+| I-08, scored by at least one model | 58,604 |
 | **Shared** (same household, origin and horizon) | **1,722** |
 | New to I-08 | 56,882 |
-| In FORE-001 only | 7,833 |
+| In FORE-001 only (origins this calendar does not have) | 7,833 |
 
 The two calendars differ by construction — FORE-001 places origins relative to each
 household's own clean-run start, I-08 uses one shared calendar — so only 74 of 402 origin
@@ -91,11 +105,21 @@ dates coincide and most cases do not overlap.
 pairs compared, **0 absolute-error mismatches**. That is a correctness check, not a
 comparison population.
 
-| Model | MAE on shared cases | MAE on newly included cases |
-|---|---:|---:|
-| `weekday_mean_4` | 1.446 | 2.088 |
-| `seasonal_naive_7` | 1.653 | 2.340 |
-| `persistence_1` | 2.179 | 2.254 |
+Each model's figure on either side is over the cases **that model itself scored** there,
+so its denominator can be below the set size; the denominators are stated.
+
+| Model | Shared cases it scored | MAE on shared | New cases it scored | MAE on new |
+|---|---:|---:|---:|---:|
+| `weekday_mean_4` | 1,722 | 1.446 | 56,595 | 2.088 |
+| `seasonal_naive_7` | 1,722 | 1.653 | 56,447 | 2.340 |
+| `persistence_1` | 1,722 | 2.179 | 56,882 | 2.254 |
+
+All three scored every shared case — the shared cases sit inside FORE-001 clean runs,
+where no lag is missing. On the new side the counts differ by each model's extra declines
+on cases whose target was usable: 435 for the naive (of its 453 missing-lag declines; the
+other 18 had no usable target either) and 287 for the mean (of its 289). The same two
+differences separate the per-model scored counts in §3 (58,604 − 58,169 and
+58,604 − 58,317).
 
 The shared cases are markedly **easier** for the weekday models — they sit inside clean
 runs, which is what FORE-001 selected for. The newly included cases are where the

@@ -289,3 +289,102 @@ def test_models_and_settings_are_unchanged_from_fore_001():
     assert names == ["seasonal_naive_7", "weekday_mean_4", "persistence_1"]
     assert WEEKDAY_MEAN_WEEKS == 4
     assert WeekdayMean().weeks == 4
+
+
+# ------------------------------------------------- the shared/new split is one set
+def test_shared_and_new_partition_the_cases_scored_by_at_least_one_model(tmp_path):
+    """Shared + new must equal the cases scored by at least one model, which is a
+    superset of the every-model frame; and each model's shared/new count must be the
+    cases it scored there, never more than the set size. 200 usable days makes the
+    household eligible for FORE-001 too, so the shared set is non-empty."""
+    database = _warehouse(tmp_path, _usable(200), name="overlap.zip")
+    report = run_prior_eligibility(database, PriorConfig())
+    overlap = report["overlap_with_fore_001"]
+    assert overlap["shared_cases"] > 0
+    assert (
+        overlap["shared_cases"] + overlap["new_to_i08"] == overlap["i08_scored_cases"]
+    )
+    assert (
+        overlap["i08_cases_scored_by_every_model"]
+        == report["accuracy"]["common_scoreable_cases"]
+    )
+    assert overlap["i08_cases_scored_by_every_model"] <= overlap["i08_scored_cases"]
+    assert "at least one model" in overlap["i08_scored_cases_definition"]
+    for model in report["models"]:
+        assert (
+            0 < overlap["scored_per_model_on_shared"][model] <= overlap["shared_cases"]
+        )
+        assert overlap["scored_per_model_on_new"][model] <= overlap["new_to_i08"]
+    # the union is what the cases themselves say it is
+    scored = {
+        (c.household_id, c.origin, c.horizon) for c in report["_cases"] if c.scored
+    }
+    assert len(scored) == overlap["i08_scored_cases"]
+
+
+def test_overlap_tables_name_their_sets():
+    from energy_reconciliation.explorer import forecast_view as fc
+
+    prior = {
+        "models": ["seasonal_naive_7", "weekday_mean_4", "persistence_1"],
+        "universe": {
+            "households": 2,
+            "origin_calendar": {
+                "origins": 3,
+                "first": "2013-02-03",
+                "last": "2013-02-17",
+            },
+            "household_origins_qualifying": 5,
+            "household_origins_scheduled": 6,
+            "scheduled_cases_per_model": 42,
+        },
+        "accuracy": {"common_scoreable_cases": 30},
+        "overlap_with_fore_001": {
+            "fore_001_scored_cases": 20,
+            "i08_scored_cases": 33,
+            "i08_cases_scored_by_every_model": 30,
+            "shared_cases": 10,
+            "new_to_i08": 23,
+            "in_fore_001_only": 10,
+            "shared_pairs_compared": 30,
+            "shared_absolute_error_mismatches": 0,
+            "reproduces_fore_001_on_shared_cases": True,
+            "scored_per_model_on_shared": {
+                "seasonal_naive_7": 9,
+                "weekday_mean_4": 10,
+                "persistence_1": 10,
+            },
+            "scored_per_model_on_new": {
+                "seasonal_naive_7": 20,
+                "weekday_mean_4": 21,
+                "persistence_1": 23,
+            },
+            "mae_on_shared": {
+                "seasonal_naive_7": "1.0",
+                "weekday_mean_4": "0.5",
+                "persistence_1": "2.0",
+            },
+            "mae_on_new": {
+                "seasonal_naive_7": "1.5",
+                "weekday_mean_4": "1.0",
+                "persistence_1": "2.5",
+            },
+        },
+    }
+    population = fc.prior_population_table(prior)
+    values = dict(zip(population["Measure"], population["Value"], strict=True))
+    assert values["Cases scored by at least one model"].startswith(
+        "33 of the scheduled"
+    )
+    assert (
+        "30 of these were scored by every model"
+        in values["Cases scored by at least one model"]
+    )
+    assert values["— of which new to this experiment"] == "23 (10 + 23 = 33)"
+    table = fc.prior_overlap_table(prior)
+    by_model = table.set_index("Model")
+    assert (
+        by_model.loc["Same weekday, previous week", "Shared cases this model scored"]
+        == "9"
+    )
+    assert by_model.loc["4-week weekday mean", "MAE (kWh), new"] == "1.0"

@@ -1439,8 +1439,20 @@ with forecast_tab:
                     "Coverage and accuracy must be read together: a model can look "
                     "better by declining harder cases, so both are shown against the "
                     "same denominator of scheduled cases. Accuracy is on the cases "
-                    "**every** model scored. This is an as-of-source-date simulation, "
-                    "not a reconstruction of historical production availability, and it "
+                    "**every** model scored."
+                )
+                st.markdown("**Shared with FORE-001, against newly included**")
+                st.dataframe(
+                    fc.prior_overlap_table(prior), width="stretch", hide_index=True
+                )
+                st.caption(
+                    "The shared/new split is over the cases scored by **at least one** "
+                    "model (the population table above), not the every-model frame. "
+                    "Each MAE here is over the cases that model itself scored on that "
+                    "side, so its count can be below the set size. Shared cases are a "
+                    "correctness check; the newly included cases are where the "
+                    "population differs. This is an as-of-source-date simulation, not a "
+                    "reconstruction of historical production availability, and it "
                     "re-uses the same dates as FORE-001 including its already-inspected "
                     "holdout — it is **not** a fresh independent holdout. Full account: "
                     "`docs/i-08-prior-data-eligibility.md`."
@@ -1451,13 +1463,17 @@ with forecast_tab:
                 worst = fc.worst_days(series, fc.default_models(), fc.config_from(cfg))
                 st.markdown(
                     f"The ten largest absolute errors for **{household_pick}**, across "
-                    "every origin in its run. **The reason differs by model.** For the "
-                    "weekday models a large error means the target was unlike its "
-                    "weekday lag — compare *Observed kWh* with *Same weekday a week "
-                    "earlier*. For *Origin day repeated*, the weekday lag can be almost "
-                    "exact while the prediction is far out, because it repeats the "
-                    "origin day whatever fell on it. Read the two columns together "
-                    "rather than assuming a single explanation."
+                    "every origin in its run. **Each model's input has its own column, "
+                    "so read the row against the column its model used.** *Same "
+                    "weekday, previous week* repeats *Same weekday, 1 week earlier*. "
+                    "*4-week weekday mean* averages the four values in *Same weekday, "
+                    "4 → 1 weeks earlier*, and its prediction is exactly their mean — "
+                    "so one unusual week among the four shifts it by a quarter of that "
+                    "week's excess, and a target unlike all four is a miss no averaging "
+                    "could avoid. *Origin day repeated* repeats *Origin day*, so its "
+                    "weekday lag can be almost exact while the prediction is far out. "
+                    "*Dates the model read* lists the inputs recorded with each "
+                    "prediction."
                 )
                 st.dataframe(worst, width="stretch", hide_index=True)
             st.markdown(

@@ -415,7 +415,17 @@ def _overlap(
 
     scored = [c for c in cases if c.scored]
     prior_cases = {(h, o, x) for h, o, x, _ in prior}
+    # The I-08 side of the split is every case scored by AT LEAST ONE model. That is
+    # deliberately not the common frame (cases every model scored): a case one model
+    # scored and another declined still belongs to the population, and the per-model
+    # figures below count only the cases that model itself scored. In FORE-001 the two
+    # sets coincide because its models are scored on identical cases.
     mine = {(c.household_id, c.origin, c.horizon) for c in scored}
+    per_case: dict[tuple[str, date, int], int] = {}
+    for c in scored:
+        k = (c.household_id, c.origin, c.horizon)
+        per_case[k] = per_case.get(k, 0) + 1
+    every = {k for k, n in per_case.items() if n == len(model_names)}
     shared, new = prior_cases & mine, mine - prior_cases
 
     mismatches = 0
@@ -434,39 +444,37 @@ def _overlap(
             else None
         )
 
+    def in_set(model: str, keys: set[tuple[str, date, int]]) -> list[Case]:
+        return [
+            c
+            for c in scored
+            if c.model == model and (c.household_id, c.origin, c.horizon) in keys
+        ]
+
     return {
         "fore_001_scored_cases": len(prior_cases),
         "i08_scored_cases": len(mine),
+        "i08_scored_cases_definition": (
+            "(household, origin, horizon) cases scored by at least one model -- a "
+            "prediction was issued and the target was usable. Not the common frame."
+        ),
+        "i08_cases_scored_by_every_model": len(every),
         "shared_cases": len(shared),
         "new_to_i08": len(new),
         "in_fore_001_only": len(prior_cases - mine),
+        "scored_per_model_on_shared": {m: len(in_set(m, shared)) for m in model_names},
+        "scored_per_model_on_new": {m: len(in_set(m, new)) for m in model_names},
         "shared_pairs_compared": compared,
         "shared_absolute_error_mismatches": mismatches,
         "reproduces_fore_001_on_shared_cases": mismatches == 0,
-        "mae_on_shared": {
-            m: mae(
-                [
-                    c
-                    for c in scored
-                    if c.model == m and (c.household_id, c.origin, c.horizon) in shared
-                ]
-            )
-            for m in model_names
-        },
-        "mae_on_new": {
-            m: mae(
-                [
-                    c
-                    for c in scored
-                    if c.model == m and (c.household_id, c.origin, c.horizon) in new
-                ]
-            )
-            for m in model_names
-        },
+        "mae_on_shared": {m: mae(in_set(m, shared)) for m in model_names},
+        "mae_on_new": {m: mae(in_set(m, new)) for m in model_names},
         "note": (
             "The origin calendars differ by construction, so most cases do not coincide. "
             "Shared cases are a correctness check that the two implementations agree, "
             "not a population for comparison; the newly included cases are where this "
-            "experiment's population actually differs."
+            "experiment's population actually differs. Shared + new = the cases scored "
+            "by at least one model; each model's MAE on either side is over the cases "
+            "that model itself scored there, so its denominator is at most the set size."
         ),
     }

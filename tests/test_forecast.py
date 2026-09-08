@@ -508,3 +508,60 @@ def test_cohort_members_are_described_in_numeric_order_with_spanning_households(
         "26 in member 4 only, 1 spanning members 4 and 5, 8 in member 5 only, "
         "5 in member 135 only"
     )
+
+
+def test_mae_chart_does_not_truncate_model_names(tmp_path):
+    """The renderer's default 180 px label limit cut every name to "4-week weekda...".
+
+    ``labelLimit`` 0 means no limit, so the margin grows to the longest name instead.
+    """
+    from energy_reconciliation.explorer import charts
+    from energy_reconciliation.explorer import forecast_view as fc
+
+    report = run_experiment(
+        _warehouse(
+            tmp_path,
+            [r for i in range(250) for r in _day("H1", START + timedelta(days=i))],
+            name="labels.zip",
+        ),
+        ExperimentConfig(),
+    )
+    spec = charts.model_error_chart(
+        fc.model_frame(report["evaluation"][HOLDOUT]), "MAE"
+    ).to_dict()
+    for layer in spec["layer"]:
+        assert layer["encoding"]["y"]["axis"]["labelLimit"] == 0
+
+
+def test_worst_days_show_each_models_own_inputs():
+    """The 4-week mean is explained by the four same-weekday values it averaged, the
+    one-week naive by the previous week, persistence by the origin day. The values shown
+    must be the ones the model actually read (recorded on the prediction), and for the
+    4-week mean their mean must be the prediction itself."""
+    from energy_reconciliation.explorer import forecast_view as fc
+
+    values = {START + timedelta(days=i): Decimal(i) for i in range(200)}
+    spike = START + timedelta(days=150)
+    values[spike] = Decimal(1000)  # one unusual day, so the errors are not all alike
+    series = HouseholdSeries("H1", START, START + timedelta(days=199), values)
+    table = fc.worst_days(series, default_models(), ExperimentConfig())
+    assert "Same weekday, 4 → 1 weeks earlier" in table.columns
+    assert "Origin day" in table.columns
+    assert "Dates the model read" in table.columns
+
+    mean_rows = table[table["Model"] == "4-week weekday mean"]
+    assert not mean_rows.empty
+    for _, r in mean_rows.iterrows():
+        four = [
+            Decimal(v.replace(",", ""))
+            for v in r["Same weekday, 4 → 1 weeks earlier"].split(" · ")
+        ]
+        assert len(four) == 4
+        assert sum(four) / 4 == Decimal(r["Predicted kWh"].replace(",", ""))
+        assert len(r["Dates the model read"].split(", ")) == 4
+    naive_rows = table[table["Model"] == "Same weekday, previous week"]
+    for _, r in naive_rows.iterrows():
+        assert r["Same weekday, 1 week earlier"] == r["Predicted kWh"]
+    persist_rows = table[table["Model"] == "Origin day repeated (reference)"]
+    for _, r in persist_rows.iterrows():
+        assert r["Origin day"].endswith(f"= {r['Predicted kWh']}")

@@ -47,6 +47,7 @@ __all__ = [
     "origin_table",
     "origins_for",
     "prior_comparison_table",
+    "prior_overlap_table",
     "prior_population_table",
     "series_for",
     "sweep_table",
@@ -94,9 +95,20 @@ def prior_comparison_table(prior: dict[str, Any]) -> pd.DataFrame:
 
 
 def prior_population_table(prior: dict[str, Any]) -> pd.DataFrame:
-    """What the population change actually was, before any accuracy is read."""
+    """What the population change actually was, before any accuracy is read.
+
+    Three case counts appear on this page and they are different sets, so each row
+    names its own. *Scheduled* is every (household, origin, horizon) on the calendar.
+    *Scored by at least one model* is the subset with an issued prediction and a usable
+    target for some model -- the set the shared/new split is over. *Scored by every
+    model* is the smaller common frame the accuracy table uses.
+    """
     universe, overlap = prior["universe"], prior["overlap_with_fore_001"]
     calendar = universe["origin_calendar"]
+    every = overlap.get(
+        "i08_cases_scored_by_every_model",
+        prior["accuracy"]["common_scoreable_cases"],
+    )
     return pd.DataFrame(
         [
             {
@@ -119,12 +131,28 @@ def prior_population_table(prior: dict[str, Any]) -> pd.DataFrame:
                 "Value": f"{universe['scheduled_cases_per_model']:,}",
             },
             {
-                "Measure": "Cases shared with FORE-001",
-                "Value": f"{overlap['shared_cases']:,}",
+                "Measure": "Cases scored by at least one model",
+                "Value": (
+                    f"{overlap['i08_scored_cases']:,} of the scheduled cases; "
+                    f"{every:,} of these were scored by every model"
+                ),
             },
             {
-                "Measure": "Cases new to this experiment",
-                "Value": f"{overlap['new_to_i08']:,}",
+                "Measure": "— of which shared with FORE-001",
+                "Value": (
+                    f"{overlap['shared_cases']:,} (same household, origin and days "
+                    f"ahead; FORE-001 scored {overlap['fore_001_scored_cases']:,}, "
+                    f"{overlap['in_fore_001_only']:,} of them on origins this calendar "
+                    "does not have)"
+                ),
+            },
+            {
+                "Measure": "— of which new to this experiment",
+                "Value": (
+                    f"{overlap['new_to_i08']:,} "
+                    f"({overlap['shared_cases']:,} + {overlap['new_to_i08']:,} = "
+                    f"{overlap['i08_scored_cases']:,})"
+                ),
             },
             {
                 "Measure": "Reproduces FORE-001 on shared cases",
@@ -136,6 +164,32 @@ def prior_population_table(prior: dict[str, Any]) -> pd.DataFrame:
             },
         ]
     )
+
+
+def prior_overlap_table(prior: dict[str, Any]) -> pd.DataFrame:
+    """Shared-with-FORE-001 against newly included, per model, with the count each MAE
+    is over. A model's count on either side is the cases *it* scored there, so it can be
+    below the set size; the set sizes are on the population table."""
+    overlap = prior["overlap_with_fore_001"]
+    shared_n = overlap.get("scored_per_model_on_shared", {})
+    new_n = overlap.get("scored_per_model_on_new", {})
+    rows = []
+    for name in prior["models"]:
+        rows.append(
+            {
+                "Model": MODEL_LABELS.get(name, name),
+                "Shared cases this model scored": (
+                    f"{shared_n[name]:,}" if name in shared_n else "—"
+                ),
+                "MAE (kWh), shared": overlap["mae_on_shared"].get(name) or "—",
+                "New cases this model scored": (
+                    f"{new_n[name]:,}" if name in new_n else "—"
+                ),
+                "MAE (kWh), new": overlap["mae_on_new"].get(name) or "—",
+            }
+        )
+    order = {v: i for i, v in enumerate(MODEL_ONLY)}
+    return pd.DataFrame(sorted(rows, key=lambda r: order.get(r["Model"], 99)))
 
 
 def config_from(recorded: dict[str, Any]) -> ExperimentConfig:
@@ -270,12 +324,19 @@ def worst_days(
     """The largest absolute errors for one household, with the days each model used.
 
     Shown so a reader can see *what kind of day* the models miss, rather than being told.
+    Each model's input is visible in its own column: the one-week naive repeats *Same
+    weekday, 1 week earlier*; the 4-week mean averages the four values in *Same weekday,
+    4 → 1 weeks earlier* (its prediction is exactly their mean); persistence repeats
+    *Origin day*. The dates in the last column are the ones the model actually read,
+    taken from the prediction record rather than recomputed here.
     """
     rows = [r for r in evaluate_series(series, models, config) if r.scored]
     rows.sort(key=lambda r: r.abs_error, reverse=True)
     out = []
     for r in rows[:limit]:
         previous = series.at(r.target_date - timedelta(days=7))
+        four = [series.at(r.target_date - timedelta(days=7 * k)) for k in (4, 3, 2, 1)]
+        origin_value = series.at(r.origin)
         out.append(
             {
                 "Target source date": f"{r.target_date:%a %-d %b %Y}",
@@ -284,12 +345,21 @@ def worst_days(
                 "Observed kWh": f"{round_kwh(r.actual):,}",
                 "Predicted kWh": f"{round_kwh(r.predicted):,}",
                 "Absolute error kWh": f"{round_kwh(r.abs_error):,}",
-                "Same weekday a week earlier": (
-                    f"{round_kwh(previous):,}" if previous is not None else "not usable"
+                "Same weekday, 1 week earlier": _kwh_or_not_usable(previous),
+                "Same weekday, 4 → 1 weeks earlier": " · ".join(
+                    _kwh_or_not_usable(v) for v in four
                 ),
+                "Origin day": (
+                    f"{r.origin:%a %-d %b} = {_kwh_or_not_usable(origin_value)}"
+                ),
+                "Dates the model read": ", ".join(f"{d:%-d %b}" for d in r.inputs),
             }
         )
     return pd.DataFrame(out)
+
+
+def _kwh_or_not_usable(value: Decimal | None) -> str:
+    return f"{round_kwh(value):,}" if value is not None else "not usable"
 
 
 def household_daily_series(series: HouseholdSeries) -> pd.DataFrame:
