@@ -36,6 +36,7 @@ run-forecast-experiment = "energy_reconciliation.forecast.cli:main"
 run-prior-eligibility = "energy_reconciliation.forecast.prior_cli:main"
 render-dbt-macros = "energy_reconciliation.dbt_macros:main"
 run-dbt = "energy_reconciliation.dbt_run:main"
+build-candidate = "energy_reconciliation.candidate:main"
 publication = "energy_reconciliation.publication:main"
 
 [tool.pytest.ini_options]

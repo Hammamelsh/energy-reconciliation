@@ -263,7 +263,7 @@ than charging the wrong group). The product stays
 DuckDB is exact, and the singular test in D7 recomputes it row by row. After D5 the SQL constants in `models.py` are **deleted**, so the
 dbt models are the definition and Python holds no copy.
 
-### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED and PROVED 2026-09-08; the **core is implemented** in `publication.py`; the build command and the dashboard switch are not)
+### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED and PROVED 2026-09-08; the **core and the candidate workflow are implemented**; the dashboard switch is not)
 
 **Why the first draft below was wrong.** It built into a `scenario_build` schema inside
 the live warehouse and published with one transaction. Measured (table further down):
@@ -357,6 +357,18 @@ fields format 1 lacks as *absent*, not as mismatches.
 | Stale request | formed against v1, submitted after v2: refused; v2 stayed |
 | Rollback | manifest change under five seconds; reader saw v1's data |
 | Retention | protected versions and the grace window respected; an open connection survived the unlink; a new open failed |
+
+**Implemented (step 5(b)).** `uv run build-candidate` owns the candidate lifecycle:
+validate, snapshot, clear inherited build history, build once into a fresh file, require
+passing models *and* tests, seal. It never promotes and never reuses a file. Two measured
+defects were closed by it — a snapshot inheriting the source's build record, and a stale
+record outliving the tables it described — the second by adding `built_output_sha256` to
+the build record and recomputing it at `finalise`. Real-data check: a candidate built from
+the three-member warehouse matched the Python path exactly (456,096 charged rows with 0
+differing over every column, 2,541,866 excluded with 0 differing, total
+`£11675.4339216532500000`, per-band and per-household identical). **It does not complete
+published-run identity integration**: `calculation_files()` still omits `dimensions.py`
+and the dbt project, `RUNTIME_PACKAGES` still omits dbt, and baselines are still format 1.
 
 **Implemented (step 5(a)).** `src/energy_reconciliation/publication.py` carries the proof's
 primitives over with three additions: **`finalise`** seals a built candidate (exactly one

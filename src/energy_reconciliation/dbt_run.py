@@ -90,10 +90,50 @@ _BUILD_RUN_COLUMNS: Final[tuple[str, ...]] = (
     "dbt_command",
     "dbt_project_sha256",
     "macro_sha256",
+    "built_output_sha256",
     "policy_sha256",
     "calculation_code_sha256",
     "note",
 )
+
+
+#: Schema dbt builds into, and the one table in it that is not a build output.
+_OUTPUT_SCHEMA: Final[str] = BUILD_SCHEMA
+_RECORD_TABLE: Final[str] = "dbt_build_run"
+
+
+def build_output_digest(con) -> str:
+    """A digest of what dbt actually left in the build schema.
+
+    Recorded with the build and re-checked before a candidate is sealed. Without it a
+    build record only says "a build succeeded in this file once", which a later failed
+    rebuild does not invalidate: dbt fails per model, so a second attempt can replace
+    some tables, skip others and leave the earlier record standing over contents it no
+    longer describes. Measured, not hypothetical -- that is exactly what a duplicated
+    schedule label does.
+
+    Base tables only. Views are excluded because their contents come from ``main``,
+    which a build never writes, and hashing one would mean re-reading every reading.
+    ``bit_xor`` of a row hash is order-independent, so an unchanged table digests the
+    same however it was written, and a single changed cell changes the result.
+    """
+    tables = [
+        name
+        for (name,) in con.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = ? "
+            "AND table_type = 'BASE TABLE' AND table_name <> ? ORDER BY table_name",
+            [_OUTPUT_SCHEMA, _RECORD_TABLE],
+        ).fetchall()
+    ]
+    digest = hashlib.sha256()
+    for name in tables:
+        rows, checksum = con.execute(
+            # the name comes from the catalogue, quoted, never from a caller
+            f"SELECT COUNT(*), CAST(bit_xor(hash(t)) AS VARCHAR) "
+            f'FROM {_OUTPUT_SCHEMA}."{name}" t'
+        ).fetchone()
+        digest.update(f"{name}|{rows}|{checksum}\n".encode())
+    return digest.hexdigest()
 
 
 def candidate_run_id(project: Path, when: datetime) -> str:
@@ -239,6 +279,7 @@ def record_build(
         "macro_sha256": hashlib.sha256(
             (project / "macros" / "generated_policy.sql").read_bytes()
         ).hexdigest(),
+        "built_output_sha256": "",  # filled in below, from the database being written
         "policy_sha256": identity.policy_digest(),
         "calculation_code_sha256": identity.calculation_digest(),
         "note": (
@@ -252,6 +293,7 @@ def record_build(
     con = duckdb.connect(str(database))
     try:
         con.execute(f"CREATE SCHEMA IF NOT EXISTS {BUILD_SCHEMA}")
+        record["built_output_sha256"] = build_output_digest(con)
         existing = tuple(
             r[0]
             for r in con.execute(

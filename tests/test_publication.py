@@ -364,9 +364,39 @@ def test_promotion_requires_the_exact_sealed_bytes(root):
     with pytest.raises(pub.PromotionRefused, match="changed after validation"):
         pub.publish(candidate, expected_previous="v0001", root=root)
     assert pub.read_manifest(root)["version"] == "v0001"
-    with pytest.raises(pub.PromotionRefused, match="changed after sealing"):
+    # Re-sealing is refused too, and by the more specific of the two guards: the built
+    # tables no longer digest to what the build record says, which names the real cause.
+    with pytest.raises(pub.PromotionRefused, match="changed them after that build"):
         pub.finalise(candidate)
     assert seal.sha256 != pub._sha256(candidate)
+
+
+def test_a_change_outside_the_built_tables_is_still_caught_by_the_seal(root):
+    """The seal's own digest covers the whole file, not just what dbt built.
+
+    Editing a table the built-output digest does not cover leaves that digest intact, so
+    this is the guard that has to catch it -- which is why both exist.
+    """
+    source = _source_warehouse(root)
+    _publish_v1(root, source)
+    candidate = _candidate(root, source, "0002")
+    seal = pub.finalise(candidate)
+    before_outputs = pub.build_output_digest(
+        duckdb.connect(str(candidate), read_only=True)
+    )
+    candidate.chmod(stat.S_IRUSR | stat.S_IWUSR)
+    con = duckdb.connect(str(candidate))
+    con.execute("CREATE TABLE main.unrelated AS SELECT 1 AS x")
+    con.close()
+    assert (
+        pub.build_output_digest(duckdb.connect(str(candidate), read_only=True))
+        == before_outputs
+    ), "the built tables really are untouched"
+    assert pub._sha256(candidate) != seal.sha256
+    with pytest.raises(pub.PromotionRefused, match="changed after validation"):
+        pub.publish(candidate, expected_previous="v0001", root=root)
+    with pytest.raises(pub.PromotionRefused, match="changed after sealing"):
+        pub.finalise(candidate)
 
 
 def test_a_file_outside_versions_is_not_publishable(root):

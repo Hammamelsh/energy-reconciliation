@@ -49,7 +49,7 @@ from typing import Any, Final
 
 import duckdb
 
-from .dbt_run import BUILD_RUN_TABLE
+from .dbt_run import BUILD_RUN_TABLE, build_output_digest
 
 #: Where publications live unless a caller says otherwise. Git-ignored under ``data/``.
 DEFAULT_ROOT: Final[Path] = Path("data/published")
@@ -174,15 +174,24 @@ class Seal:
     dbt_duckdb_version: str
     tariff_group: str
     schedule_variant: str
+    built_output_sha256: str
     sealed_at_utc: str
 
 
 def build_record(candidate: Path) -> dict[str, Any]:
-    """The single successful ``run-dbt`` record inside a candidate, read-only.
+    """The single successful ``run-dbt`` record inside a candidate, and proof it still
+    describes the file, read-only.
 
     ``run-dbt`` records only successful builds, so a row's presence *is* the success. A
     candidate is one attempt: zero rows means it was never built or the build failed, and
     more than one means the file was reused, which the design forbids.
+
+    **A record alone is not enough, and that was measured rather than assumed.** dbt fails
+    per model, so a second attempt in the same file can replace some tables, skip others
+    and leave the first attempt's record standing over contents it no longer describes --
+    a duplicated schedule label does exactly that, and before this check `finalise`
+    accepted the result. So the record carries a digest of the built tables, and it is
+    recomputed here: the record must describe **this file, as it is now**.
     """
     if _wal(candidate).exists():
         raise PromotionRefused(
@@ -194,7 +203,8 @@ def build_record(candidate: Path) -> dict[str, Any]:
         try:
             rows = con.execute(
                 "SELECT run_id, CAST(built_at_utc AS VARCHAR), dbt_core_version, "
-                f"dbt_duckdb_version, tariff_group, schedule_variant FROM {BUILD_RUN_TABLE}"
+                "dbt_duckdb_version, tariff_group, schedule_variant, "
+                f"built_output_sha256 FROM {BUILD_RUN_TABLE}"
             ).fetchall()
         except duckdb.Error as error:
             raise PromotionRefused(
@@ -207,7 +217,9 @@ def build_record(candidate: Path) -> dict[str, Any]:
     if len(rows) != 1:
         raise PromotionRefused(
             f"{candidate.name}: {len(rows)} build records; a candidate is one attempt "
-            "and must carry exactly one."
+            "and must carry exactly one. A snapshot of a warehouse that was itself built "
+            "inherits its history, which is why a candidate starts with the build schema "
+            "cleared."
         )
     keys = (
         "run_id",
@@ -216,8 +228,22 @@ def build_record(candidate: Path) -> dict[str, Any]:
         "dbt_duckdb_version",
         "tariff_group",
         "schedule_variant",
+        "built_output_sha256",
     )
-    return dict(zip(keys, rows[0], strict=True))
+    record = dict(zip(keys, rows[0], strict=True))
+    con = duckdb.connect(str(candidate), read_only=True)
+    try:
+        current = build_output_digest(con)
+    finally:
+        con.close()
+    if record["built_output_sha256"] != current:
+        raise PromotionRefused(
+            f"{candidate.name}: the built tables digest {current[:12]}… but the build "
+            f"record describes {str(record['built_output_sha256'])[:12]}…. Something "
+            "changed them after that build -- most likely a later attempt that failed "
+            "part way. This candidate cannot be sealed; build a fresh one."
+        )
+    return record
 
 
 def finalise(candidate: Path) -> Seal:
