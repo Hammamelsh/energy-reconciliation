@@ -25,7 +25,7 @@ from ..forecast.evaluate import (
     origins_for,
     round_kwh,
 )
-from .charts import MODEL_LABELS
+from .charts import MODEL_LABELS, MODEL_ONLY
 
 REPORT_DIR = Path("data/forecasts")
 OBSERVED = "observed"
@@ -39,12 +39,15 @@ __all__ = [
     "exclusion_frame",
     "horizon_frame",
     "load_latest_report",
+    "load_prior_report",
     "long_frame",
     "model_frame",
     "model_table",
     "observed_vs_predicted",
     "origin_table",
     "origins_for",
+    "prior_comparison_table",
+    "prior_population_table",
     "series_for",
     "sweep_table",
     "worst_days",
@@ -59,6 +62,80 @@ def load_latest_report(directory: Path = REPORT_DIR) -> dict[str, Any] | None:
     if not reports:
         return None
     return json.loads(reports[-1].read_text())
+
+
+def load_prior_report(directory: Path = REPORT_DIR) -> dict[str, Any] | None:
+    """The most recent I-08 prior-data-eligibility report, or None."""
+    if not directory.is_dir():
+        return None
+    reports = sorted(directory.glob("i-08-*.json"), key=lambda p: p.stat().st_mtime)
+    return json.loads(reports[-1].read_text()) if reports else None
+
+
+def prior_comparison_table(prior: dict[str, Any]) -> pd.DataFrame:
+    """Accuracy beside coverage, so neither can be read without the other."""
+    accuracy = prior["accuracy"]["common_per_model"]
+    rows = []
+    for name, coverage in prior["coverage"].items():
+        metric = accuracy.get(name, {})
+        rows.append(
+            {
+                "Model": MODEL_LABELS.get(name, name),
+                "MAE (kWh), common cases": metric.get("mae_kwh", "—"),
+                "Prediction coverage": f"{coverage['prediction_coverage']:.1%}",
+                "Scoring coverage": f"{coverage['scoring_coverage']:.1%}",
+                "Predictions issued": f"{coverage['predictions_issued']:,}",
+                "Scored": f"{coverage['scored']:,}",
+                "Scheduled": f"{coverage['scheduled']:,}",
+            }
+        )
+    order = {v: i for i, v in enumerate(MODEL_ONLY)}
+    return pd.DataFrame(sorted(rows, key=lambda r: order.get(r["Model"], 99)))
+
+
+def prior_population_table(prior: dict[str, Any]) -> pd.DataFrame:
+    """What the population change actually was, before any accuracy is read."""
+    universe, overlap = prior["universe"], prior["overlap_with_fore_001"]
+    calendar = universe["origin_calendar"]
+    return pd.DataFrame(
+        [
+            {
+                "Measure": "Households considered",
+                "Value": f"{universe['households']:,}",
+            },
+            {
+                "Measure": "Origins (shared calendar)",
+                "Value": f"{calendar['origins']} · {calendar['first']} to {calendar['last']}",
+            },
+            {
+                "Measure": "Household-origins qualifying",
+                "Value": (
+                    f"{universe['household_origins_qualifying']:,} of "
+                    f"{universe['household_origins_scheduled']:,}"
+                ),
+            },
+            {
+                "Measure": "Scheduled cases per model",
+                "Value": f"{universe['scheduled_cases_per_model']:,}",
+            },
+            {
+                "Measure": "Cases shared with FORE-001",
+                "Value": f"{overlap['shared_cases']:,}",
+            },
+            {
+                "Measure": "Cases new to this experiment",
+                "Value": f"{overlap['new_to_i08']:,}",
+            },
+            {
+                "Measure": "Reproduces FORE-001 on shared cases",
+                "Value": (
+                    f"{overlap['reproduces_fore_001_on_shared_cases']} "
+                    f"({overlap['shared_pairs_compared']:,} pairs, "
+                    f"{overlap['shared_absolute_error_mismatches']} mismatches)"
+                ),
+            },
+        ]
+    )
 
 
 def config_from(recorded: dict[str, Any]) -> ExperimentConfig:

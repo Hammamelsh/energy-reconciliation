@@ -1413,6 +1413,39 @@ with forecast_tab:
                     f"{sweep['note']}"
                 )
 
+        prior = fc.load_prior_report()
+        if prior:
+            with st.expander(
+                "A different experiment — eligibility from prior data only (I-08)"
+            ):
+                st.markdown(
+                    "**A separate experiment, not a restatement of the figures above.** "
+                    "FORE-001 chose households by a clean run found over their whole "
+                    "history. This one decides eligibility at each origin from source "
+                    "dates on or before it, over **every** household and one shared "
+                    "origin calendar. The models and their settings are unchanged."
+                )
+                st.markdown(
+                    "**The population changed first — read this before the accuracy**"
+                )
+                st.dataframe(
+                    fc.prior_population_table(prior), width="stretch", hide_index=True
+                )
+                st.markdown("**Accuracy beside coverage**")
+                st.dataframe(
+                    fc.prior_comparison_table(prior), width="stretch", hide_index=True
+                )
+                st.caption(
+                    "Coverage and accuracy must be read together: a model can look "
+                    "better by declining harder cases, so both are shown against the "
+                    "same denominator of scheduled cases. Accuracy is on the cases "
+                    "**every** model scored. This is an as-of-source-date simulation, "
+                    "not a reconstruction of historical production availability, and it "
+                    "re-uses the same dates as FORE-001 including its already-inspected "
+                    "holdout — it is **not** a fresh independent holdout. Full account: "
+                    "`docs/i-08-prior-data-eligibility.md`."
+                )
+
         with st.expander("Where the predictions fail"):
             if series is not None:
                 worst = fc.worst_days(series, fc.default_models(), fc.config_from(cfg))
