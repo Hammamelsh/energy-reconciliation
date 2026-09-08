@@ -336,10 +336,10 @@ applied — and changed — without reprocessing.
 
 - No billing or settlement calculation, no forecasting, no AI features. The tariff figures are a
   scenario under a stated, unresolved assumption, not a cost anyone paid. No dbt models, Airflow
-  DAGs, Spark jobs or cloud deployment. A dbt project exists but is an early slice: it holds a
-  staging view and the two shared-policy models, whose SQL is generated from `policy.py` so the
-  rules keep one definition. **The tariff models that produce the charge are still Python**, and
-  `build-tariff-scenario` does every scenario build. Design in
+  DAGs, Spark jobs or cloud deployment. A dbt project exists but is an early slice: a staging
+  view, the two shared-policy models whose SQL is generated from `policy.py` so the rules keep
+  one definition, and the two tariff dimensions. **The models that produce the charge are still
+  Python**, and `build-tariff-scenario` does every scenario build from its own dimensions. Design in
   [`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md), progress in
   [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md). See
   [`docs/roadmap.md`](docs/roadmap.md) for what is planned.

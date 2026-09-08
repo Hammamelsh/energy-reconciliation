@@ -1,9 +1,10 @@
 # ANL-003 — Design: porting the tariff models to dbt
 
-**Date:** 2026-09-08. **Status: steps 0–2 BUILT; steps 3–7 not built.** The staging view
-and the two policy models exist and run; **no tariff fact, dimension or publisher does**.
-dbt is installed (versions in D1). Every figure in §2 is still the acceptance target, not
-a claim about dbt output. The ticket that would build
+**Date:** 2026-09-08. **Status: steps 0–3 BUILT; steps 4–7 not built.** The staging view,
+the two policy models and **both tariff dimensions** exist and run. **No fact and no
+publisher does**, and the published scenario is still built entirely by
+`build-tariff-scenario`. dbt is installed (versions in D1). Every figure in §2 is still the
+acceptance target, not a claim about dbt output. The ticket that would build
 it is [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). The roadmap entry it
 answers is `roadmap.md` § M3 → ANL-003.
 
@@ -78,6 +79,16 @@ figures, and in steps 0–2 dbt produces no stored figure at all. Recording it n
 the over-inclusion that `identity.py` already warns about: an invalidation signal that
 fires for things that cannot change a result stops being believed. dbt joins
 `RUNTIME_PACKAGES` and `calculation_files()` in **step 5**, when it first writes a fact.
+
+**The supported entry point is `uv run run-dbt`, and the guarantee is its, not dbt's.**
+`env_var()` without a default stops an *unset* variable, but a variable set to a *wrong*
+path is worse: DuckDB creates a database at any path it is given, so dbt would open — and
+thereby create — an empty warehouse, and the in-project `on-run-start` hook only rejects it
+afterwards. `run-dbt` validates first: non-empty string, then `exists`, then a
+**read-only** connection (which DuckDB never creates a file for), then `main.readings`.
+A refused path leaves nothing on disk. **Running `dbt` directly is unguarded** — it still
+creates the empty file before the hook fires — and the hook stays as the backstop for that
+route. Neither replaces the other, and the ticket says so where the commands are listed.
 
 *Rejected:* a separate repository or a `dbt/` package that vendors its own copy of the
 warehouse path. The models must read the warehouse that ingestion writes; one path, one
@@ -168,6 +179,34 @@ def model(dbt, session):
   after a build: both price columns must be `DECIMAL`, with the scales above.
 - The synthetic schedule is selected with `--vars '{schedule: demo}'`, which is how the
   committed demo archive keeps working without the workbook.
+
+**BUILT 2026-09-08, and it works as designed.** `dim_tariff_band_schedule` and
+`dim_tariff_price` are dbt Python models calling `dimensions.schedule_table` /
+`dimensions.price_table`, which return `pyarrow` tables whose schema names the scales.
+Measured on the persisted tables, not on the Arrow schema:
+`price_pence_per_kwh DECIMAL(9,4)`, `price_gbp_per_kwh DECIMAL(9,6)`, both `effective_*`
+columns `DATE` and NULL for the flat rate. All four prices equal the published figures,
+and `price_gbp_per_kwh * 100 = price_pence_per_kwh` exactly in the database. From the
+publisher's workbook the schedule dimension is 17,520 rows, and both dimensions are
+**row-for-row identical to the ones the Python path builds** (0 rows differ, comparing
+every column except the build timestamp). The design's fallback was not needed.
+
+**Discovery — `CREATE TABLE AS SELECT` drops constraints.** dbt materialises a table with
+CTAS, which carries column names and types and **not** `PRIMARY KEY` or `NOT NULL`. So a
+dbt-built dimension has `models.SCHEMA`'s types but not its key. The duplicate-label
+refusal is unaffected, because it happens in `schedule._validate` before a row exists, but
+the *declared* uniqueness is gone and has to be re-asserted by a dbt test (step 4).
+Restoring the constraints themselves would need dbt model contracts — recorded as I-15,
+not done here.
+
+**Discovery — the failure boundary is per model, not per build.** When the schedule model
+raises `ScheduleError`, dbt fails that model and **still builds the models that do not
+depend on it**. Measured: on a fresh target the schedule dimension is not created at all
+(not empty, not partial — absent), and where a valid one already exists its rows and
+column layout are byte-identical afterwards, with no `__dbt_tmp` relation left behind. But
+`dim_tariff_price` and `stg_readings` are built in the same failing run. That is a real
+guarantee and a real limit, and step 5's publisher cannot infer whole-build atomicity
+from it.
 
 *Rejected — keep `_load_dimensions` in Python and declare the dims as dbt sources:* it
 works, and is the fallback if the Python-model path proves awkward, but then
@@ -280,6 +319,20 @@ comparison as the skip rule:* it compares model source, not schedule contents, p
 version, runtime or input identity, all of which the fingerprint must cover.
 
 ### D6 — Run identity extends to the dbt files; nothing is dropped
+
+**Already done at step 3, because dbt now persists analytical tables.** The dimensions are
+real outputs, so which dbt produced them is part of what they are. `run-dbt` writes one row
+to `scenario_build.dbt_build_run` after a successful build: `dbt-core` and `dbt-duckdb`
+versions, Python version, the schedule variant, a digest over the dbt project files, and
+the policy and calculation digests. It is **separate from `scenario_run`** and creates
+nothing in `main`, because these are *candidate* outputs: the published scenario is still
+built by `build-tariff-scenario` from its own dimensions and consumes none of them. A
+failed build records nothing. `identity.RUNTIME_PACKAGES` and `calculation_files()` are
+still unchanged for the same reason, and `tariff/dimensions.py` joins
+`CALCULATION_TARIFF_FILES` at **step 5**, the moment a dbt dimension feeds a published
+figure.
+
+The rest of this decision applies from step 5:
 
 - `identity.calculation_files()` gains every file under `dbt/models/`, `dbt/macros/` and
   `dbt/dbt_project.yml`. A new test globs those directories and fails if a file is present

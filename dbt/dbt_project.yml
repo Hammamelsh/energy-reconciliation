@@ -29,3 +29,11 @@ models:
       +materialized: view
     policy:
       +materialized: ephemeral
+    tariff:
+      +materialized: table
+      # Which schedule to read. `workbook` is the publisher's Tariffs.xlsx; `demo` is the
+      # project's INVENTED one-day schedule, and every row it produces says so in
+      # schedule_source. An unrecognised value raises rather than falling back.
+      +schedule: "{{ var('schedule', 'workbook') }}"
+      # Optional explicit workbook path; empty means the packaged default location.
+      +workbook: "{{ var('workbook', '') }}"

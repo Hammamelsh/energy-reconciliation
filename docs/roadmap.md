@@ -94,21 +94,25 @@ Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.m
 
 ### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
 
-**Status: steps 0–2 implemented 2026-09-08; steps 3–7 not started.** Decisions in
+**Status: steps 0–3 implemented 2026-09-08; steps 4–7 not started.** Decisions in
 [`anl-003-dbt-design.md`](anl-003-dbt-design.md), sequenced in
 [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md).
 
 **What runs today:** `dbt-core 1.12.4` / `dbt-duckdb 1.11.0` installed and pinned; a `dbt/`
-project with a staging view over `readings` and the two policy models, whose SQL bodies
-are a macro **generated from `policy.py`** so the rules still have one definition. `dbt
-build` runs, and on the three-member warehouse dbt returns the same distinct-reading
-count, keys and category counts as the Python path (2,997,962), with row-level equality
-checked on fixtures.
+project with a staging view over `readings`, the two policy models whose SQL bodies are a
+macro **generated from `policy.py`** so the rules still have one definition, and **both
+tariff dimensions** as Python models over the project's own schedule reader and price
+catalogue. On the three-member warehouse dbt returns the same distinct-reading count, keys
+and category counts as the Python path (2,997,962), with row-level equality checked on
+fixtures; both dimensions come out row-for-row identical to the Python-built ones, with
+`DECIMAL(9,4)` / `DECIMAL(9,6)` prices verified in `information_schema` after
+materialisation. `uv run run-dbt` is the supported entry point and validates the database
+path before anything can create it.
 
-**What does not exist:** the tariff dimensions, the classification model, both facts, the
-dbt tests and the publisher. The scenario is still built entirely by
-`build-tariff-scenario` in Python. **The "Expressed as dbt models" row above stays *not
-done*** — the models that produce the charge are not in dbt.
+**What does not exist:** the classification model, both facts, the dbt tests and the
+publisher. The scenario is still built entirely by `build-tariff-scenario` in Python, from
+its own dimensions — it consumes nothing dbt produces. **The "Expressed as dbt models" row
+above stays *not done*** — the models that produce the charge are not in dbt.
 
 **Not a copy-and-paste job.** The SQL is written and tested, which is the starting point,
 not the whole task. The port has to decide model boundaries and materialisations, wire
