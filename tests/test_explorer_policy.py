@@ -414,3 +414,79 @@ def test_mixed_selection_keeps_bars_for_valid_days(conflict_day):
     spec = charts.daily_chart(daily).to_dict()
     assert "layer" in spec and spec["layer"][0]["mark"]["type"] == "bar"
     assert len(spec["datasets"][spec["layer"][0]["data"]["name"]]) == 1
+
+
+# ------------------------------------------------- DetailFrames contract (ANL-002)
+#
+# A running Streamlit server once raised ``AttributeError: 'DetailFrames' object has no
+# attribute 'off_grid'``. No committed state can produce it -- the commit that added the
+# field also added every use of it -- so the contract is pinned here rather than the
+# error being caught anywhere. If a field is ever dropped, or a construction path
+# returns something without one, these fail instead of a page failing in front of a user.
+DETAIL_FIELDS = ("series", "conflicts", "off_grid")
+
+DETAIL_CASES = [
+    ("no rows on the chosen day", [r("2013-01-02 00:30:00", " 0.1 ")]),
+    ("a single point", [r("2013-01-01 00:30:00", " 0.1 ")]),
+    (
+        "conflict only",
+        [r("2013-01-01 00:30:00", " 0.1 "), r("2013-01-01 00:30:00", " 0.9 ")],
+    ),
+    ("off-grid only", [r("2013-01-01 00:17:23", "Null")]),
+    (
+        "gap, conflict, missing value and off-grid together",
+        [
+            r("2013-01-01 00:17:23", "Null"),
+            r("2013-01-01 01:00:00", " 0.1 "),
+            r("2013-01-01 01:00:00", "Null"),
+            r("2013-01-01 03:00:00", " 0.3 "),
+        ],
+    ),
+]
+
+
+@pytest.mark.parametrize(("case", "rows"), DETAIL_CASES)
+def test_every_detail_path_returns_all_three_frames(tmp_path, case, rows):
+    detail = q.half_hour_detail(build(tmp_path, rows), HH, D1)
+    for field in DETAIL_FIELDS:
+        assert isinstance(getattr(detail, field), pd.DataFrame), f"{case}: {field}"
+    # Every frame keeps its columns even with no rows, so a chart can be built from it.
+    assert "recorded_kwh" in detail.series.columns
+    assert "source_record_no" in detail.conflicts.columns
+    assert "source_record_no" in detail.off_grid.columns
+
+
+@pytest.mark.parametrize(("case", "rows"), DETAIL_CASES)
+def test_every_detail_path_renders_a_three_layer_chart(tmp_path, case, rows):
+    detail = q.half_hour_detail(build(tmp_path, rows), HH, D1)
+    spec = charts.detail_chart(
+        detail.series, detail.conflicts, detail.off_grid
+    ).to_dict()
+    assert len(spec["layer"]) == 3, case
+
+
+def test_detail_frames_declares_exactly_the_fields_the_app_uses():
+    """A field rename would break the page; it breaks this first."""
+    assert tuple(q.DetailFrames.__dataclass_fields__) == DETAIL_FIELDS
+
+
+def test_a_day_whose_only_rows_are_off_grid_is_still_inspectable(tmp_path):
+    """The day picker offers days with any rows, not only days with a total.
+
+    A day holding nothing but an off-grid observation, or nothing but a conflict, has
+    something to look at. Keying the picker on contributing readings hid both.
+    """
+    database = build(
+        tmp_path,
+        [
+            r("2013-01-01 00:17:23", "Null"),
+            r("2013-01-02 00:30:00", " 0.4 "),
+            r("2013-01-03 00:30:00", " 0.1 "),
+            r("2013-01-03 00:30:00", " 0.9 "),
+        ],
+    )
+    daily = q.daily_totals(database, HH, D1, D3)
+    inspectable = list(daily.loc[daily["has_rows"], "source_date"].dt.date)
+    assert D1 in inspectable, "off-grid-only day must be inspectable"
+    assert D3 in inspectable, "conflict-only day must be inspectable"
+    assert len(inspectable) == 3

@@ -51,10 +51,13 @@ entry survive untouched. A partially written load is never visible and never mar
 
 ## Decimal handling
 
-Consumption is stored as `DECIMAL(18,7)` — up to 7 decimal places, which matches the highest
-precision REP-001 observed (`6.5279999`), with 11 integer digits of headroom.
+Consumption is stored as `DECIMAL(28,10)` — up to 10 decimal places, with 18 integer digits of
+headroom. The highest precision REP-001 observed is 7 decimal places (`6.5279999`), so a
+`DECIMAL(18,7)` column would have had no headroom at all: one member carrying an eighth digit
+would start rejecting real readings. *(Corrected 2026-09-08: this section said `DECIMAL(18,7)`;
+the shipped schema in `ingest/warehouse.py` has always been `DECIMAL(28,10)`.)*
 
-**Values are never silently rounded.** A value whose scale exceeds 7 decimal places, or whose
+**Values are never silently rounded.** A value whose scale exceeds 10 decimal places, or whose
 magnitude exceeds the precision, is **not** stored as a reading; it is written to
 `rejected_records` with reason `excessive_precision` or `value_overflow`, keeping the source text.
 Rounding a meter reading to fit a column is a silent data change and is prohibited here.

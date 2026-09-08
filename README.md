@@ -7,10 +7,13 @@ What exists today:
 - a **profiler** that reads one CSV member, classifies every value and writes a JSON report whose
   totals reconcile;
 - an **ingestion command** that loads members into a local DuckDB database with a stable schema;
-- a **household explorer** for looking at one household's data quality.
+- a **household explorer** for looking at one household's data quality;
+- a **tariff scenario**: the dToU band schedule and the publisher-documented prices, modelled in
+  DuckDB and joined to consumption under a clearly stated, stored assumption.
 
 This is the groundwork for billing and reconciliation work. It is not a billing system and produces
-no bills.
+no bills. The tariff figures are a **scenario**, not a cost anyone was charged — see
+[Tariff scenario](#tariff-scenario) below for exactly what that means.
 
 ## Try it without downloading anything
 
@@ -58,8 +61,16 @@ Load the synthetic demo into a local DuckDB database and browse it:
 
 ```bash
 uv run ingest-member --demo --database data/warehouse/demo.duckdb
-uv run streamlit run src/energy_reconciliation/explorer/app.py
+uv run build-tariff-scenario --demo --database data/warehouse/demo.duckdb
+PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
 ```
+
+`PYTHONPATH=src` matters while editing. Streamlit's file watcher only reloads modules in the
+folder holding the script or on `PYTHONPATH`, so without it `policy.py`, `tariff/` and `ingest/`
+stay loaded from their first import: edits to them appear to have no effect, and a half-applied
+change can raise an `AttributeError` from a module the rest of the app has already moved past.
+With it, every project module is watched. After changing model code, restarting the server is
+still the certain option.
 
 Choose the dataset under **Data source** in the sidebar — each option is labelled by what
 it contains (synthetic demo, or which Low Carbon London members are loaded). Household and
@@ -69,8 +80,8 @@ around the current date would be empty. *Custom* exposes explicit start and end 
 
 Everything on the page is computed for the same household and the same source-date range:
 
-- **Overview** — recorded kWh, contributing readings, and issues requiring review (missing
-  values + gaps + conflicting timestamps in the period); a status that says what was and
+- **Overview** — recorded kWh, contributing readings, and items for review (missing values
+  + gaps + conflicting timestamps + off-grid observations in the period); a status that says what was and
   was not detected, with the standing caveat that boundary coverage and clock semantics are
   unresolved; daily bars grouped by source date, with a day inside the recorded span but
   with no rows shown as "no readings recorded" rather than omitted; half-hour detail for a
@@ -78,6 +89,9 @@ Everything on the page is computed for the same household and the same source-da
 - **Data quality** — the counters for the period, findings first (conflicts, gaps, repeated
   timestamps, missing values) with source references, definitions collapsed below, and the
   whole-history figures in a separately labelled expander.
+- **Tariff scenario** — the band schedule, the prices, and the scenario charge under
+  assumption `A1`, for this household and for every charged household, with the schedule's
+  own shape kept separate from what the loaded households did. See below.
 - **Source records** — rows exactly as loaded, paginated, each with its member and record
   number, followed by the loaded-file inventory.
 
@@ -95,19 +109,96 @@ With the real dataset, load two adjacent members:
 uv run ingest-member \
   --member "Small LCL Data/LCL-June2015v2_4.csv" \
   --member "Small LCL Data/LCL-June2015v2_5.csv"
-uv run streamlit run src/energy_reconciliation/explorer/app.py
+PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
 ```
 
 Those two members share household `MAC000166`, whose readings run to `2012-02-14 15:00`
 in member 4 and continue from `15:30` in member 5 — a good household to select first.
+
+Members 0–134 hold only `Std` households, so add member 135 for the `ToU` group the dynamic
+tariff applies to:
+
+```bash
+uv run ingest-member --member "Small LCL Data/LCL-June2015v2_135.csv"
+```
 
 Re-running an ingest is a no-op only when **both** the source file and the
 transformation code are unchanged. Changing either replaces that member's rows, so a
 code change rebuilds rather than silently keeping rows built by older logic. Superseded
 loads stay in the registry as history, though their readings are replaced.
 
-Two members out of 168 are not a household's complete history, and the explorer says so
+Three members out of 168 are not a household's complete history, and the explorer says so
 on every page.
+
+## Tariff scenario
+
+The dynamic Time-of-Use tariff ran through 2013. `Tariffs.xlsx` supplies **a schedule of price
+bands and no prices at all** — the prices are on the dataset page. Both are modelled, separately:
+
+```bash
+uv run build-tariff-scenario --demo --database data/warehouse/demo.duckdb   # synthetic schedule
+uv run build-tariff-scenario --database data/warehouse/energy.duckdb        # the real workbook
+```
+
+Then open the **Tariff scenario** tab in the explorer.
+
+If that tab reports it cannot read the scenario, the running process and the database were
+written by different generations of the code — usually a long-lived server against a
+rebuilt database. **Restart the app first**; that loads the current code and rebuilds
+nothing. Only if the message survives a restart is `build-tariff-scenario` the fix. Either
+way your readings, load history and baselines are untouched: the tariff tables are derived.
+The other three tabs keep working throughout.
+
+```
+energy_charge_gbp = consumption_kwh × price_pence_per_kwh ÷ 100
+```
+
+All `Decimal`. **Nothing is rounded per row**; rounding happens once for display, to 2 decimal
+places for money, half up, with the exact unrounded figure shown beside it. The `÷ 100` is done in
+Python when the price catalogue is built, not in SQL, because DuckDB evaluates a `DECIMAL` divided
+by 100 as a binary float.
+
+**This is a scenario, not a bill.** Every charged row carries assumption `A1`:
+
+> the consumption timestamp label and the schedule label denote corresponding half-hour intervals
+
+That is **not established**. The consumption timestamps carry no timezone. The schedule's own
+regularity — 17,520 labels, exact half-hour steps, both 2013 clock-change hours present once —
+shows the schedule is a fixed nominal grid, and says nothing about the consumption data. A unique
+schedule key stops the join multiplying rows; that is arithmetic, not semantics.
+
+The charge is an **energy** charge only. **No separate tax adjustment is applied**, and whether
+the published rates are quoted inclusive or exclusive of VAT or any levy is **not established** —
+the publisher gives pence per kWh and does not say. No standing charge, discount or settlement
+adjustment is modelled. No one was ever billed it.
+
+**Nothing becomes zero.** Every distinct reading is either charged or excluded with one explicit
+reason — ineligible tariff group, outside the schedule's coverage, conflicting readings, off-grid,
+missing value, unmatched label — and `charged + excluded = distinct readings` is asserted on every
+run.
+
+The tab has three separate views — **selected household**, **loaded ToU sample**, **published
+schedule** — with their own period control, bounded by the schedule's coverage and independent of
+the period selector at the top of the page. A household with no charged readings is told the
+**measured** reason with its count, and offered an explicit button to switch to one that has some.
+
+### Reproducing a result
+
+A fingerprint stored inside a warehouse is not historical replay: the warehouse is mutable, and
+once another member is loaded the rows the fingerprint described are gone. So capture a baseline
+first, then rebuild from it into a database that does not yet exist:
+
+```bash
+uv run capture-baseline --database data/warehouse/energy.duckdb
+uv run replay-baseline  --baseline data/baselines/<id>.json
+```
+
+Replay re-ingests each recorded member after checking its decompressed content digest, rebuilds,
+and compares field by field — per band, per household, per exclusion reason, the fingerprint, and
+a digest over every charged row. It exits non-zero if anything differs. Baselines are git-ignored.
+
+Measurements over members 4, 5 and 135 (27 real `ToU` households, 2013), what they show and what
+they do not: [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md).
 
 ## Tests
 
@@ -115,8 +206,13 @@ on every page.
 uv run pytest -q
 ```
 
-83 tests, all synthetic. **No dataset needed** — every fixture builds a small zip archive in a
-temporary directory.
+231 tests, all synthetic. **No dataset needed** — every fixture builds a small zip archive in a
+temporary directory. The tariff tests check hand-computed figures written in each test's
+docstring: price-unit conversion, band boundaries, a duplicated schedule key, an unmatched
+reading, readings outside the schedule period, conflicts, and repeated autumn timestamp labels.
+Others assert the rendered chart specification, that every scope's two shares come from the same
+rows, that an empty selection produces no zero substitutes, and that the calculation fingerprint
+covers the shared policy module — checked against the models' real import closure, not assumed.
 
 ## What the profiler does
 
@@ -207,10 +303,21 @@ applied — and changed — without reprocessing.
 
 ## Limitations
 
-- No billing or settlement calculation, no forecasting, no AI features. No dbt models, Airflow DAGs,
-  Spark jobs or cloud deployment. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
-- One member of 168 has been profiled in full, and two loaded into the database. Findings are not
-  archive-wide, and two members are not any household's complete history.
+- No billing or settlement calculation, no forecasting, no AI features. The tariff figures are a
+  scenario under a stated, unresolved assumption, not a cost anyone paid. No dbt models, Airflow
+  DAGs, Spark jobs or cloud deployment. Porting the tariff models to dbt is a design task, not a
+  move of the SQL. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
+- One member of 168 has been profiled in full, and three loaded into the database. Findings are not
+  archive-wide, and three members are not any household's complete history. The 27 `ToU` households
+  in member 135 are a **bounded, non-representative subset** — the households that happen to occupy
+  one file, not a sample drawn from the trial. Nothing here is representative of the trial or of
+  London, and no figure should be scaled up.
+- A household charged for far fewer readings than its neighbours has **limited observed coverage**
+  in the loaded members. Why readings are absent is not established and is not guessed at.
+- No geographic breakdown is produced. One would be legitimate only from metadata properly linked
+  to these households, and none has been linked.
+- No causal claim is made about the tariff. Nothing measured here can show whether anyone responded
+  to a price signal.
 - Ingestion holds a whole member in one transaction so that a failure cannot publish partial data.
   That costs about 1 GB of memory per million-row member.
 - The explorer withholds a consumption total for any household whose readings conflict, rather than
@@ -230,8 +337,8 @@ claimable.
 Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 The profiler imports only the Python standard library — `csv`, `zipfile`, `sqlite3`, `decimal` and
-similar. `uv sync` also installs `duckdb`, `pandas` and `pyarrow`, which `pyproject.toml` declares for
-planned work but this code does not use, plus `pytest` and `ruff` as development dependencies.
+similar. Ingestion and the explorer use `duckdb`, `pyarrow`, `pandas` and `streamlit`; the tariff
+schedule is read with `openpyxl`. `pytest` and `ruff` are development dependencies.
 
 ## Documentation
 
@@ -239,6 +346,8 @@ planned work but this code does not use, plus `pytest` and `ruff` as development
 |---|---|
 | [`docs/roadmap.md`](docs/roadmap.md) | Seven delivery milestones and their completion conditions |
 | [`docs/profiling.md`](docs/profiling.md) | Running the profiler; what the report contains |
+| [`docs/anl-001-tariff-workbook-findings.md`](docs/anl-001-tariff-workbook-findings.md) | What the tariff workbook actually contains |
+| [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md) | The tariff scenario: model, measurements and limits |
 | [`docs/source-data-profile.md`](docs/source-data-profile.md) | The full source investigation |
 | [`docs/rep-001-verified-facts.md`](docs/rep-001-verified-facts.md) | What is established, with evidence |
 | [`docs/rep-001-assumptions-and-open-questions.md`](docs/rep-001-assumptions-and-open-questions.md) | What is not established |

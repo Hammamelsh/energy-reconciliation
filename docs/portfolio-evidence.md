@@ -90,6 +90,19 @@ Each item names what was measured and how, so it can be defended under questioni
 | 2.32 | Explorer computes every tab for one household and one date range; three kinds of repetition kept apart (exact duplicate, equivalent representation, conflict); conflict days publish no total and the rendered chart spec draws no bar for them | ING-001, `tests/test_explorer_policy.py` | **VERIFIED** (spec asserted, layout not visually inspected) |
 | 2.33 | Off-grid observations excluded from half-hour totals, counted and plotted with provenance; `Null` beside a number withholds the total as an analytical policy | ING-001 closing policies | **VERIFIED**, policy labelled as ours |
 | 2.34 | Tariff workbook read-only: one sheet, 17,520 unique on-grid half-hour labels for 2013, three band labels, no prices, no formulas, no DST representation; schedule-side join uniqueness measured (factor 1.0000) | `docs/anl-001-tariff-workbook-findings.md` | **VERIFIED**; time alignment remains an **assumption** |
+| 2.35 | Tariff band schedule and publisher-documented prices modelled **separately** in DuckDB; flat-rate effective dates stored as UNKNOWN, never defaulted to the data span | ANL-002 §1, `dim_tariff_price` | **VERIFIED** |
+| 2.36 | Interval charge scenario over 456,096 real `ToU` readings; `charged + excluded = distinct readings` holds exactly on 2,997,962 readings; every excluded reading carries one explicit reason and never a zero charge | ANL-002 §6, `tests/test_tariff.py` (31 tests) | **VERIFIED** |
+| 2.37 | Independent recomputation in pure Python `Decimal`, outside the model, agrees with the SQL fact to every digit (`11675.433921653250`), per band as well as in total | ANL-002 §7.3 | **VERIFIED** |
+| 2.38 | DuckDB evaluates `DECIMAL / 100` as `DOUBLE` (`1.125 × 67.2000 / 100` → `0.7559999999999999`); the division is done once in Python `Decimal` instead, so no binary float reaches a money-adjacent figure | ANL-002 §2 | **VERIFIED** |
+| 2.39 | Duplicate, conflict, missing-value and off-grid rules have **one** definition (`src/energy_reconciliation/policy.py`) imported by both the explorer and the tariff models | ANL-002 §4 | **VERIFIED** |
+| 2.40 | Member 135 measured: 1,000,000 rows, `ToU` only, 27 households, 456,408 rows in 2013, 27 `Null` tokens all also off-grid; **0** loaded households recorded under more than one tariff group | ANL-002 §5 | **VERIFIED**; AQ-22/23 still open (3 of 168 members) |
+| 2.41 | `High` band = 4.90% of charged kWh and 24.09% of the scenario charge; `Low` = 10.48% and 3.06%, against stated denominators | ANL-002 §7.2, §8 | **VERIFIED**; **no causal claim** |
+| 2.42 | Calculation identity names 17 first-party files explicitly, including the shared `policy.py`, checked against the models' **real import closure taken in a fresh interpreter** | `tests/test_tariff_identity.py` | **VERIFIED** |
+| 2.43 | Reporting and replay code deliberately excluded from the digest, so an edit that cannot change a stored figure does not invalidate one | ANL-002 §9.1 | **VERIFIED**, decided and justified |
+| 2.44 | Runtime identity (Python, DuckDB, PyArrow, pandas, openpyxl) recorded with every run and folded into the fingerprint | `scenario_run.runtime_detail` | **VERIFIED** |
+| 2.45 | A captured baseline **replayed into a fresh database** and reproduced all 16 compared fields, including the exact total, every per-band charge, all 27 per-household charges and the fingerprint | ANL-002 §9.2, executed 2026-09-08 | **VERIFIED by execution** |
+| 2.46 | Explorer scenario views separated into selected household / loaded sample / published schedule, each with its own period bounded by schedule coverage | `tests/test_tariff_views.py` | **VERIFIED** (spec and frames asserted; browser interaction not performed) |
+| 2.47 | Both shares of every scenario view come from the same filtered rows; an empty selection returns no rows and the chart encodes no quantity | `tests/test_tariff_views.py` | **VERIFIED** |
 
 ---
 
@@ -319,16 +332,74 @@ the contract, not a detail after it.
 
 ---
 
+### 4.13 "A total that was right because two implementations agreed"
+
+The scenario charge came out of one SQL model. Passing tests would only have shown the model
+agreed with itself, so before publishing the figure I recomputed the whole 2013 charge a second
+way: pure Python `Decimal`, reading the workbook and the readings directly, applying
+`kwh × pence ÷ 100` literally, row by row, outside the model. It matched to every digit —
+`11675.433921653250` — and matched per band as well.
+
+Writing that check is also what found the real defect. In SQL, `DECIMAL * DECIMAL / 100` is not a
+decimal at all: DuckDB returns a `DOUBLE`, and `1.125 × 67.2000 / 100` comes back as
+`0.7559999999999999`. Had I written the formula the way the specification states it, a binary
+float would have been sitting under a money-adjacent figure in a project whose whole argument is
+that floats do not belong there. The division now happens once, in Python, when the price
+catalogue is built.
+
+The second implementation was used once, as a check, and deliberately **not** kept — two
+permanent implementations of one rule is the problem, not the solution.
+
+### 4.14 "£16.64 that meant nothing about electricity"
+
+One household in the loaded `ToU` sample had a scenario charge of £16.64 against a sample where
+the others ran from £185 to £1,301. It would have been easy to present as the frugal household.
+
+It was charged for 864 half hours out of 17,520 — exactly 48 × 18, the complete days from
+1 to 18 January 2013. What is measured: its rows occupy records 1–7,441 of member 135, the next
+household starts at 7,442, and no reading for it appears after 18 January in the loaded members.
+Whether more of its history sits in member 134 is not established, because 134 is not loaded.
+Why readings are absent is not established either, and I did not put a reason on it.
+
+The lesson I keep from it: a per-household total without its contributing-reading count beside it
+is not a measurement, it is a trap. The explorer now shows both, and the finding is written up as
+a coverage artefact rather than as a fact about consumption.
+
+### 4.15 "The replay that failed twice, and was right to"
+
+The scenario had a fingerprint covering code, prices, schedule and data, and every test passed.
+Then I captured a baseline and actually replayed it into a fresh database. Every figure matched
+— the exact total, all three bands, all 27 households — and the fingerprint did not.
+
+The first cause was over-sensitivity: the digest globbed `tariff/*.py`, so the replay tooling I
+had just written changed the fingerprint of a result whose every number was identical. I fixed
+the covered set to files that can change a *stored* figure, and added a test that takes the real
+import closure of the models in a fresh interpreter so under-inclusion still fails loudly.
+
+It failed again. The second cause was worse: the fingerprint included the published `load_id`s,
+and a load id embeds the moment of loading. Byte-identical data in a fresh database could never
+have fingerprinted the same. The reproducibility guarantee had never been reproducible, and
+nothing in the test suite could have told me, because every test built exactly one warehouse.
+
+It now keys on member content digests, and the replay matches all 16 fields. What I keep from
+it: a reproducibility claim that has not been executed is a hypothesis.
+
 ## 5. Explicitly NOT claimable yet
 
 | Claim that must NOT be made | Why not |
 |---|---|
 | "Built an end-to-end data pipeline" | Only a profiler exists. No ingestion, no models, no orchestration. |
 | "Processed 167 million rows" | 1,000,000 rows have been read in full, plus roughly 350,000 in samples. The archive total is INFERRED. |
-| "Used dbt / Airflow / Spark / AWS" | None have been touched. |
+| "Used dbt / Airflow / Spark / AWS" | None have been touched. The tariff SQL is written and tested, which is where a dbt port would start — not a copy-and-paste: model boundaries, `ref`/`source` wiring, the non-SQL steps, the rerun policy and the run identity all have to be decided. ANL-003 is not done. |
+| "Calculated electricity bills" / "reproduced historical costs" | The tariff figures are a **scenario** under assumption A1, which is not established. No standing charge or levy is modelled, and **no separate tax adjustment is applied** — the tax treatment of the published rates is itself unresolved. The flat rate's effective period is UNKNOWN, so no `Std` household is costed at all. |
+| "Showed households responding to price signals" | Nothing measured supports a causal claim. There is no comparison group and no before-and-after in this measurement. |
+| "Analysed London energy use by area" | No geographic breakdown exists. One would require metadata legitimately linked to these households; none has been linked. |
+| "Analysed the dToU cohort" | 27 households from one member of 168: a **bounded, non-representative subset**, not a sample drawn from the trial by any procedure. No figure over them should be scaled up. |
+| "Verified the UI works" | The rendered chart specifications and the frames behind them are tested, and the app was driven headless through every view, period, household and dataset switch. **No browser interaction was performed** — no browser is available in this environment. |
+| "Explained why a household's readings stop" | Short coverage is observed. The cause is not established and is not guessed at. |
 | "Handled timezone and DST correctly" | Both conventions are UNKNOWN. Phase G did not find them in the sources it searched, and they are not recoverable from the data. |
 | "Validated the full dataset" | One of two archives is CRC-unverified (deflate64); one of 168 members has been examined in depth. |
-| "Built data-quality tests" | 48 tests cover the profiler's own logic. No tests assert data-quality rules over the source itself. |
+| "Built data-quality tests" | 187 tests cover this project's own logic, including the tariff policies. No test asserts a data-quality rule over the source archive itself. |
 | "Built a schema-validating reader" | The profiler validates and reports; it does not yet emit validated records for downstream use. |
 | "Profiled the whole archive" | One member of 168. |
 

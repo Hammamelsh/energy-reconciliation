@@ -115,7 +115,7 @@ three values; workbook SHA-256 recorded with the load.
 
 **`dim_tariff_price`** (from the dataset page, PUBLISHER-DOCUMENTED)
 
-| `tariff_group` | `band_label` | `pence_per_kwh` DECIMAL(6,3) | `effective_from` | `effective_to` |
+| `tariff_group` | `band_label` | `pence_per_kwh` DECIMAL(6,3) | `effective_from` | `effective_to` *(as built: `effective_until`, exclusive — see ANL-002 §2)* |
 |---|---|---|---|---|
 | `ToU` | `High` | 67.200 | 2013-01-01 | 2013-12-31 |
 | `ToU` | `Normal` | 11.760 | 2013-01-01 | 2013-12-31 |
@@ -149,3 +149,12 @@ rows excluded and counted; Decimal arithmetic throughout with a stated rounding 
 | Presentation | Labelled "scenario under A1"; never a bill | Only after A1 is replaced by evidence |
 
 Nothing in this document is a bill, a cost, or a saving.
+
+---
+
+**Built in ANL-002 (2026-09-08).** The three-table model proposed in §6 now exists in the
+warehouse, a real `ToU` member has been loaded, and the scenario has been computed and
+measured. Two things this document predicted were confirmed by measurement: the join
+multiplies nothing (456,096 charged rows from 456,096 distinct on-grid `ToU` 2013
+readings), and **0** on-grid 2013 `ToU` readings were unmatched. The measurements and
+their limits: [`anl-002-tariff-scenario.md`](anl-002-tariff-scenario.md).

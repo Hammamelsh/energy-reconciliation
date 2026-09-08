@@ -7,11 +7,21 @@ with what it delivers and the condition under which it is complete.
 Completing a milestone means an artefact exists and its completion condition is satisfied — nothing
 more. No milestone carries a date; completion conditions are the only measure used here.
 
-**Status:** M1 is in progress. Ingestion into DuckDB and a household explorer now exist; billing, orchestration and cloud deployment remain planned. A first slice of **M2** is built — see
+**Status:** M1 is in progress. A first slice of **M2** is built — see
 [`tickets/ING-001-standardised-ingestion-and-explorer.md`](tickets/ING-001-standardised-ingestion-and-explorer.md):
 standardised ingestion into DuckDB with a decided rerun policy, plus a household data-quality
 explorer. M2's remaining items (Parquet output, rejected-record reasons across the whole archive,
-cross-file processing beyond two members) are not done. See [`../README.md`](../README.md) for what runs today, and
+cross-file processing beyond three members) are not done.
+
+A first slice of **M3** is also built — see
+[`tickets/ANL-002-tariff-scenario.md`](tickets/ANL-002-tariff-scenario.md): the tariff band
+schedule, the publisher-documented price catalogue and an assumption-labelled interval charge
+scenario, materialised in DuckDB and measured over one real `ToU` member. **M3's dbt deliverable
+is not met** — the models are written as standalone SELECTs, which gives the port working, tested
+SQL to start from but does not make it mechanical. Tracked as ANL-003 below. Orchestration and
+cloud deployment remain planned.
+
+See [`../README.md`](../README.md) for what runs today, and
 [`source-data-profile.md`](source-data-profile.md) section 16 for the REP-001 assessment.
 
 ---
@@ -68,6 +78,44 @@ cross-file processing beyond two members) are not done. See [`../README.md`](../
 - Historical bills are not claimed as authoritative while required source semantics remain
   unresolved.
 - Synthetic examples exercise DST where historical evidence is insufficient.
+
+**Progress (ANL-001, ANL-002)**
+
+| Item | Status |
+|---|---|
+| Inspection and modelling of the actual tariff workbook | done |
+| Tariff dimension, price dimension, interval charge fact | done, in DuckDB |
+| Decimal precision, currency units, explicit rounding rules | done |
+| Coverage indicators and consumption charges | done — charged/excluded reconcile exactly |
+| Effective-date joins with missing/overlapping-rate checks | partial — the dToU period is modelled; the flat rate's period is UNKNOWN and is not invented |
+| Staging models and household dimension | not started |
+| **Expressed as dbt models** | **not done — ANL-003** |
+
+### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
+
+**Not a copy-and-paste job.** The SQL is written and tested, which is the starting point,
+not the whole task. The port has to decide model boundaries and materialisations, wire
+`ref`/`source`, handle the parts that are not SQL at all (reading the workbook, the price
+catalogue, the schedule validation that refuses a duplicated key), re-express the
+rerun-and-supersede policy in dbt's terms, and carry the run identity that makes a result
+reproducible. Estimating it as "move the SELECTs" would be wrong.
+
+**Deliver**
+
+- The tariff models as dbt-duckdb models over the existing warehouse.
+- A decided answer for the shared policy: **one** definition serving both dbt and Python,
+  not the same rule written twice in two languages.
+- A decided answer for the Python-side steps that have no SQL equivalent.
+- dbt tests for the schedule primary key, band domain, price uniqueness and the
+  charged-plus-excluded reconciliation identity.
+- Run identity and the baseline/replay path preserved, not dropped in the move.
+
+**Complete when**
+
+- `dbt build` reproduces the figures in `anl-002-tariff-scenario.md` exactly.
+- The policy rules still have **one** definition, not one per tool.
+- The pytest suite keeps its hand-computable cases; dbt does not replace them.
+- A captured baseline still replays into a fresh database and matches.
 
 ## M4 — Reconciliation, corrections and historical reproduction
 

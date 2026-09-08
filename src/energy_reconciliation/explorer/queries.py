@@ -39,25 +39,15 @@ from pathlib import Path
 import pandas as pd
 
 from ..ingest.warehouse import connect
+from ..policy import DUPLICATE_POLICY, EXPECTED_STEP_SECONDS
+from ..policy import GRID as _GRID
+from ..policy import SIGNATURE as _SIGNATURE
+from ..policy import TEXT_KEY as _TEXT_KEY
 
-#: Consecutive grid readings are half an hour apart. A longer step between two
-#: consecutive distinct grid labels is a gap -- including across midnight. It is an
-#: observed step, not a confirmed missing interval or a meter failure: neither can be
-#: established while the timezone and interval convention are unresolved.
-EXPECTED_STEP_SECONDS = 1800
-
-DUPLICATE_POLICY = (
-    "identical source rows collapsed; equivalent numeric representations counted once"
-)
-
-#: Exact-source identity of a recorded row. Matches v_exact_duplicates in the warehouse.
-_TEXT_KEY = "household_id, tariff_group, source_timestamp_text, consumption_raw_text"
-
-#: What a reading *means*. The DECIMAL cast normalises scale, so ' 0.5 ' and ' 0.50 '
-#: share a signature; non-numeric categories are kept distinct from every number.
-_SIGNATURE = "COALESCE(CAST(consumption_kwh AS VARCHAR), '~' || value_category)"
-
-_GRID = "on_half_hour_grid"
+# The duplicate, conflict, missing-value and off-grid rules are defined once, in
+# ``energy_reconciliation.policy``, and imported here. The tariff models import the
+# same definitions, so the two never drift apart.
+__all__ = ["DUPLICATE_POLICY", "EXPECTED_STEP_SECONDS"]
 
 
 def _scope(household: str, start: date | None, end: date | None) -> tuple[str, list]:

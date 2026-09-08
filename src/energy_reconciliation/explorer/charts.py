@@ -11,6 +11,16 @@ import pandas as pd
 
 TEAL, AMBER, RED, GREY = "#2bb3a3", "#d98c1f", "#d64545", "#6b7a90"
 
+#: The theme's text colour (see .streamlit/config.toml). Text marks default to black,
+#: which is invisible on the dark background; every text mark sets this explicitly.
+TEXT = "#e6edf3"
+
+#: Axis number formats, spelled with an explicit type so the renderer never falls back
+#: to its own choice (which can be scientific notation for round thousands).
+#: ``,.0f`` -> 5,000   ``,~f`` -> 4,380.2 (grouped, trailing zeros trimmed)
+COUNT_FORMAT = ",.0f"
+QUANTITY_FORMAT = ",~f"
+
 #: Legend order and colour. Colour never carries state alone: every status is text
 #: in the legend, the tooltip and the day marker.
 STATUS_COLOURS = {
@@ -202,4 +212,216 @@ def status_strip(frame: pd.DataFrame) -> alt.Chart:
             ],
         )
         .properties(height=80)
+    )
+
+
+# ------------------------------------------------------------ tariff scenario
+BLUE = "#4a7fb5"
+
+#: One colour per price band, used in every tariff view. Band names are always shown
+#: as text as well, so colour never carries the meaning on its own. Cheapest first.
+BAND_COLOURS = {"Low": BLUE, "Normal": TEAL, "High": RED}
+BAND_ORDER = tuple(BAND_COLOURS)
+_BAND_SCALE = alt.Scale(domain=list(BAND_COLOURS), range=list(BAND_COLOURS.values()))
+
+#: Short series names. The long form lives in the caption and the table header, not on
+#: an axis where it overlaps its neighbour.
+CONSUMPTION_SERIES = "Consumption"
+CHARGE_SERIES = "Charge"
+SERIES_ORDER = (CONSUMPTION_SERIES, CHARGE_SERIES)
+_SERIES_SCALE = alt.Scale(domain=list(SERIES_ORDER), range=[TEAL, AMBER])
+
+LABEL_SIZE = 12
+AXIS_TITLE_SIZE = 12
+
+
+def share_frame(bands: pd.DataFrame) -> pd.DataFrame:
+    """Long form of the two shares: one row per band per series.
+
+    Both series come from the same ``band_summary`` frame, so both are shares of the
+    same rows over the same period. Nothing here can pair a share of one scope with a
+    share of another.
+    """
+    rows = []
+    for series, column in (
+        (CONSUMPTION_SERIES, "consumption_share"),
+        (CHARGE_SERIES, "charge_share"),
+    ):
+        for _, band in bands.iterrows():
+            rows.append(
+                {
+                    "band_label": band["band_label"],
+                    "series": series,
+                    "share": float(band[column]),
+                    "share_label": f"{float(band[column]):.1%}",
+                    "readings": int(band["readings"]),
+                    "kwh_display": float(band["kwh_display"]),
+                    "charge_gbp_display": float(band["charge_gbp_display"]),
+                    "price_pence_per_kwh": float(band["price_pence_per_kwh"]),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def band_share_chart(bands: pd.DataFrame) -> alt.Chart | alt.LayerChart:
+    """Horizontal grouped bars: one row per band, two series, one shared 0-100% axis.
+
+    Horizontal because the two series names are words, and words fit beside a bar but
+    collide under one. The axis is pinned to 0-100% so the two panels of a comparison
+    can never be read against different scales, and each bar carries its own percentage
+    label so the value does not have to be estimated from the axis.
+
+    An empty selection returns a plain statement with **no axis at all**. It never
+    draws a zero-length bar, because "no charged readings here" and "a share of zero"
+    are different facts.
+    """
+    if bands.empty:
+        return empty_note(
+            "No charged readings in this selection — no shares to show, and no zero."
+        )
+    frame = share_frame(bands)
+    order = [b for b in BAND_ORDER if b in set(frame["band_label"])]
+    y = alt.Y(
+        "band_label:N",
+        title=None,
+        sort=order,
+        axis=alt.Axis(labelFontSize=LABEL_SIZE + 1, labelFontWeight="bold"),
+    )
+    offset = alt.YOffset("series:N", sort=list(SERIES_ORDER))
+    x = alt.X(
+        "share:Q",
+        title="Share of this selection",
+        scale=alt.Scale(domain=[0, 1], nice=False),
+        axis=alt.Axis(
+            format="%", labelFontSize=LABEL_SIZE, titleFontSize=AXIS_TITLE_SIZE
+        ),
+    )
+    tooltip = [
+        alt.Tooltip("band_label:N", title="Band"),
+        alt.Tooltip("series:N", title="Series"),
+        alt.Tooltip("share:Q", title="Share", format=".2%"),
+        alt.Tooltip("readings:Q", title="Charged readings", format=","),
+        alt.Tooltip("kwh_display:Q", title="kWh", format=",.3f"),
+        alt.Tooltip("charge_gbp_display:Q", title="Scenario charge £", format=",.2f"),
+        alt.Tooltip("price_pence_per_kwh:Q", title="Price p/kWh"),
+    ]
+    base = alt.Chart(frame)
+    bars = base.mark_bar(cornerRadiusTopRight=2, cornerRadiusBottomRight=2).encode(
+        y=y,
+        yOffset=offset,
+        x=x,
+        color=alt.Color(
+            "series:N",
+            scale=_SERIES_SCALE,
+            legend=alt.Legend(title=None, orient="top", labelFontSize=LABEL_SIZE),
+        ),
+        tooltip=tooltip,
+    )
+    labels = base.mark_text(
+        align="left", baseline="middle", dx=4, fontSize=LABEL_SIZE, color=TEXT
+    ).encode(y=y, yOffset=offset, x=x, text=alt.Text("share_label:N"), tooltip=tooltip)
+    return alt.layer(bars, labels).properties(height=alt.Step(26))
+
+
+def empty_note(message: str) -> alt.Chart:
+    """A statement where a chart would go, carrying **no quantitative encoding**.
+
+    Used wherever a selection has nothing to show. A chart with an axis and no bars
+    invites the reader to supply a zero; a sentence does not.
+    """
+    return (
+        alt.Chart(pd.DataFrame({"message": [message]}))
+        .mark_text(align="center", baseline="middle", fontSize=13, color=GREY)
+        .encode(text=alt.Text("message:N"))
+        .properties(height=64)
+    )
+
+
+def schedule_hour_chart(distribution: pd.DataFrame) -> alt.Chart:
+    """SCHEDULE-WIDE. Half-hour slots per band by source hour of the schedule label.
+
+    This describes the published schedule, not anyone's consumption.
+    """
+    if distribution.empty:
+        return empty_note("No schedule loaded for this database.")
+    return (
+        alt.Chart(distribution)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "source_hour:O",
+                title="Hour of the schedule label",
+                axis=alt.Axis(
+                    labelAngle=0,
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            y=alt.Y(
+                "sum(slots):Q",
+                title="Half-hour slots",
+                axis=alt.Axis(
+                    format=COUNT_FORMAT,
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            color=alt.Color(
+                "band_label:N",
+                scale=_BAND_SCALE,
+                sort=list(BAND_ORDER),
+                legend=alt.Legend(title=None, orient="top", labelFontSize=LABEL_SIZE),
+            ),
+            order=alt.Order("color_band_label_sort_index:Q"),
+            tooltip=[
+                alt.Tooltip("band_label:N", title="Band"),
+                alt.Tooltip("source_hour:O", title="Hour"),
+                alt.Tooltip("sum(slots):Q", title="Slots", format=","),
+            ],
+        )
+        .properties(height=300)
+    )
+
+
+def band_kwh_by_hour_chart(distribution: pd.DataFrame) -> alt.Chart:
+    """LOADED SAMPLE. Charged kWh per band by source hour."""
+    if distribution.empty:
+        return empty_note("No charged readings in this selection.")
+    return (
+        alt.Chart(distribution)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "source_hour:O",
+                title="Hour of the source timestamp",
+                axis=alt.Axis(
+                    labelAngle=0,
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            y=alt.Y(
+                "sum(kwh_display):Q",
+                title="Charged kWh",
+                axis=alt.Axis(
+                    format=QUANTITY_FORMAT,
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            color=alt.Color(
+                "band_label:N",
+                scale=_BAND_SCALE,
+                sort=list(BAND_ORDER),
+                legend=alt.Legend(title=None, orient="top", labelFontSize=LABEL_SIZE),
+            ),
+            order=alt.Order("color_band_label_sort_index:Q"),
+            tooltip=[
+                alt.Tooltip("band_label:N", title="Band"),
+                alt.Tooltip("source_hour:O", title="Hour"),
+                alt.Tooltip("sum(kwh_display):Q", title="Charged kWh", format=",.3f"),
+                alt.Tooltip("sum(readings):Q", title="Charged readings", format=","),
+            ],
+        )
+        .properties(height=300)
     )

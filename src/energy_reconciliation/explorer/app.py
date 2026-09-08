@@ -13,6 +13,7 @@ Run with:
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pandas as pd
@@ -21,10 +22,19 @@ import streamlit as st
 from energy_reconciliation.explorer import charts
 from energy_reconciliation.explorer import queries as q
 from energy_reconciliation.ingest.warehouse import DEFAULT_DATABASE
+from energy_reconciliation.tariff import analytics as ta
 
 WAREHOUSE_DIR = Path("data/warehouse")
 PAGE_SIZE = 100
 PRESETS = {"7 days": 7, "14 days": 14, "30 days": 30, "Custom": None}
+
+#: The tariff tab's three scopes. Each view answers one of them and mixes none.
+SCENARIO_VIEWS = ("Selected household", "Loaded ToU sample", "Published schedule")
+SCENARIO_PERIODS = ("Full coverage", "Custom")
+
+#: The household selector's widget key. Named so that an explicit, user-pressed button
+#: can move the selection -- and only a button ever does.
+HOUSEHOLD_KEY = "household-select"
 
 st.set_page_config(page_title="Household energy explorer", layout="wide")
 st.markdown(
@@ -37,6 +47,7 @@ st.markdown(
       .status-clear   { color: #2bb3a3; font-weight: 600; }
       .status-review  { color: #d98c1f; font-weight: 600; }
       .status-blocking{ color: #d64545; font-weight: 600; }
+      .ctl-note { font-size: .8rem; opacity: .8; padding-top: 1.9rem; line-height: 1.2; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -52,6 +63,163 @@ def fmt_period(s: date, e: date) -> str:
         return f"{s:%A %-d %B %Y} (one day)"
     days = (e - s).days + 1
     return f"{fmt_day(s)} – {fmt_day(e)} · {days} days"
+
+
+# ------------------------------------------------------------ display formatting
+# Exact figures are never destroyed: every formatter here has its unrounded source
+# shown beside it, in a tooltip or under "Calculation details".
+def fmt_count(value) -> str:
+    return f"{int(value):,}"
+
+
+def fmt_kwh(value) -> str:
+    return f"{float(value):,.3f}"
+
+
+def fmt_gbp(value) -> str:
+    return f"£{float(value):,.2f}"
+
+
+def fmt_pct(value) -> str:
+    return f"{float(value):.1%}"
+
+
+def select_household(target: str) -> None:
+    """Move the household selection. Only ever called from a pressed button.
+
+    Nothing on the tariff tab changes the household on its own: the user picks a
+    household and presses, which is why this is a callback and not a side effect of
+    rendering.
+    """
+    st.session_state[HOUSEHOLD_KEY] = target
+
+
+def fmt_reason_table(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return frame
+    out = frame.copy()
+    out["readings"] = [fmt_count(v) for v in out["readings"]]
+    return out.rename(
+        columns={
+            "exclusion_reason": "Exclusion reason",
+            "readings": "Readings",
+            "first_date": "First source date",
+            "last_date": "Last source date",
+        }
+    )
+
+
+def fmt_band_table(bands: pd.DataFrame) -> pd.DataFrame:
+    """The accessible table beneath the share chart: same numbers, as text."""
+    return pd.DataFrame(
+        {
+            "Band": bands["band_label"],
+            "Price p/kWh": [f"{v:,.3f}" for v in bands["price_pence_per_kwh"]],
+            "Charged readings": [fmt_count(v) for v in bands["readings"]],
+            "Charged kWh": [fmt_kwh(v) for v in bands["kwh_display"]],
+            "Scenario charge": [fmt_gbp(v) for v in bands["charge_gbp_display"]],
+            "Consumption share": [fmt_pct(v) for v in bands["consumption_share"]],
+            "Charge share": [fmt_pct(v) for v in bands["charge_share"]],
+        }
+    )
+
+
+def fmt_household_table(totals: pd.DataFrame) -> pd.DataFrame:
+    if totals.empty:
+        return totals
+    return pd.DataFrame(
+        {
+            "Household": totals["household_id"],
+            "Charged readings": [fmt_count(v) for v in totals["charged_readings"]],
+            "First charged date": totals["first_charged_date"],
+            "Last charged date": totals["last_charged_date"],
+            "Charged kWh": [fmt_kwh(v) for v in totals["kwh_display"]],
+            "Scenario charge": [fmt_gbp(v) for v in totals["charge_gbp_display"]],
+        }
+    )
+
+
+def fmt_schedule_table(totals: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Band": totals["band_label"],
+            "Half-hour slots": [fmt_count(v) for v in totals["slots"]],
+            "Hours": [f"{float(v):,.1f}" for v in totals["hours"]],
+            "Share of schedule": [fmt_pct(v) for v in totals["slot_share"]],
+        }
+    )
+
+
+def fmt_price_table(prices: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Tariff group": prices["tariff_group"],
+            "Band": prices["band_label"],
+            "Price p/kWh": [f"{float(v):,.3f}" for v in prices["price_pence_per_kwh"]],
+            "Price £/kWh": [f"{float(v):,.6f}" for v in prices["price_gbp_per_kwh"]],
+            "Valid from (inclusive)": [
+                "UNKNOWN" if v is None or pd.isna(v) else str(v)
+                for v in prices["effective_from"]
+            ],
+            "Valid until (exclusive)": [
+                "UNKNOWN" if v is None or pd.isna(v) else str(v)
+                for v in prices["effective_until"]
+            ],
+            "Evidence": prices["evidence_label"],
+        }
+    )
+
+
+def render_band_view(
+    bands: pd.DataFrame, scope_note: str, insights: list[ta.Insight] | None = None
+) -> tuple[int, str, str]:
+    """Metrics, the share chart and its accessible table, for one explicit scope.
+
+    Returns the exact (readings, kWh, charge) of the selection so the caller can show
+    the unrounded figures. An empty selection renders a statement and **no zeros**:
+    "nothing was charged here" and "a charge of zero" are different facts.
+    """
+    if bands.empty:
+        st.info(
+            f"No charged readings for this selection ({scope_note}). "
+            "No total is shown, and none is zero — there is nothing to total."
+        )
+        return 0, "0", "0"
+    readings = int(bands.attrs["denominator_readings"])
+    kwh = Decimal(bands.attrs["denominator_kwh_exact"])
+    charge = Decimal(bands.attrs["denominator_charge_gbp_exact"])
+    m = st.columns(3)
+    m[0].metric("Charged readings", fmt_count(readings), help=f"Scope: {scope_note}.")
+    m[1].metric(
+        "Charged kWh",
+        fmt_kwh(ta.round_energy(kwh)),
+        help=f"Exact, unrounded: {kwh} kWh. Displayed to three decimal places.",
+    )
+    m[2].metric(
+        "Scenario energy charge",
+        fmt_gbp(ta.round_money(charge)),
+        help=(
+            f"Exact, unrounded: £{charge}. Rounded once here, to 2 decimal places, "
+            f"half up. {ta.CHARGE_SCOPE}"
+        ),
+    )
+    st.altair_chart(charts.band_share_chart(bands), width="stretch")
+    st.caption(
+        f"Both series describe the same rows — {scope_note}: **{fmt_kwh(kwh)} kWh** "
+        f"and **{fmt_gbp(charge)}** over **{fmt_count(readings)} charged readings**. "
+        "Shares are rounded independently, so a column need not total exactly 100%."
+    )
+    st.dataframe(fmt_band_table(bands), width="stretch", hide_index=True)
+    if insights:
+        st.markdown("**In this selection**")
+        for insight in insights:
+            st.markdown(f"- {insight.headline}")
+        with st.expander("Figures behind these sentences"):
+            for insight in insights:
+                st.markdown(
+                    "  \n".join(f"`{k}`: {v}" for k, v in insight.supporting.items())
+                )
+    return readings, str(kwh), str(charge)
 
 
 # --------------------------------------------------------------- data source
@@ -87,8 +255,16 @@ st.caption(
     "details under *About this data* below."
 )
 
+# A stored selection can outlive the dataset it came from -- switching from the real
+# sample to the demo leaves a household id that no longer exists. Clear it before the
+# widget is built, or Streamlit raises on a value that is not in the options.
+if st.session_state.get(HOUSEHOLD_KEY) not in people:
+    st.session_state.pop(HOUSEHOLD_KEY, None)
+
 row = st.columns([2, 2, 1.3, 1.3])
-household = row[0].selectbox(f"Household ({len(people)} available)", people)
+household = row[0].selectbox(
+    f"Household ({len(people)} available)", people, key=HOUSEHOLD_KEY
+)
 bounds = q.date_bounds(database, household)
 first, last = bounds
 
@@ -132,8 +308,8 @@ st.markdown(
     f"{fmt_day(first)} – {fmt_day(last)}"
 )
 
-overview_tab, quality_tab, records_tab = st.tabs(
-    ["Overview", "Data quality", "Source records"]
+overview_tab, quality_tab, tariff_tab, records_tab = st.tabs(
+    ["Overview", "Data quality", "Tariff scenario", "Source records"]
 )
 
 # ================================================================== OVERVIEW
@@ -217,12 +393,10 @@ with overview_tab:
         )
 
         # ------------------------------------------------------ half-hour day
-        days_with_data = list(
-            daily.loc[
-                daily["contributing_readings"] + daily["missing_values"] > 0,
-                "source_date",
-            ].dt.date
-        )
+        # Any day with rows is worth looking at, including one whose only rows are
+        # off-grid or in conflict. Keying this on contributing readings hid both,
+        # because a conflict day contributes none by policy.
+        days_with_data = list(daily.loc[daily["has_rows"], "source_date"].dt.date)
         if days_with_data:
             pick = st.selectbox(
                 "Half-hour detail for",
@@ -556,3 +730,443 @@ with records_tab:
         f"{sum(1 for s in sources if s.status == 'published')} file(s) published of 168 "
         "in the archive. Superseded rows are earlier loads that were replaced."
     )
+
+# The tariff section is written LAST on purpose. Streamlit executes a script top to
+# bottom, so an unhandled failure here would stop everything below it from rendering.
+# Placing it after the other three tabs means their content is already on the page.
+# Tab order in the UI comes from st.tabs above, not from this order.
+# ============================================================ TARIFF SCENARIO
+with tariff_tab:
+    # Schema compatibility is checked before anything is read, so a database this
+    # process cannot read produces a recovery instruction here rather than a raw
+    # database error that takes the rest of the page with it. Only this recognised
+    # condition is contained: any other failure is still allowed to surface.
+    availability = ta.scenario_availability(database)
+    run = ta.latest_run(database) if availability.ready else None
+    if run is None:
+        if availability.state == ta.INCOMPATIBLE:
+            st.error(
+                "**The tariff scenario in this database cannot be read by the code "
+                f"this app is running.** {availability.diagnosis}"
+            )
+            st.markdown(
+                f"""
+**Recovery.** {availability.recovery}
+
+```bash
+# 1. restart the app (loads the current code; rebuilds nothing)
+PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
+
+# 2. only if the message survives a restart, rebuild the derived tariff tables
+uv run build-tariff-scenario --database {database}
+```
+
+Your readings, load history and captured baselines are untouched either way — the
+tariff tables are derived, and rebuilding them reads nothing but the source archive
+and the workbook. The other three tabs are unaffected and work normally.
+"""
+            )
+        else:
+            st.info(
+                "No tariff scenario has been built for this database.\n\n"
+                f"`uv run build-tariff-scenario --database {database}`  — add `--demo` "
+                "to use the synthetic one-day schedule instead of the real workbook."
+            )
+    else:
+        coverage = ta.schedule_bounds(database)
+        cov_first, cov_last = coverage if coverage else (None, None)
+
+        # --- one short, always-visible statement; the detail is in the expanders ---
+        st.markdown(
+            f'<span class="status-review">Scenario under assumption '
+            f"{run.assumption_ids} — not a bill.</span> A consumption timestamp label "
+            "and a schedule label are treated as the same half hour. That is "
+            "**not established**. Charge = consumption × band price only; "
+            "**no separate tax adjustment is applied**.",
+            unsafe_allow_html=True,
+        )
+        if run.is_synthetic:
+            st.warning(
+                f"**Synthetic evidence.** This scenario uses the "
+                f"`{run.schedule_source}` schedule — invented band timings for "
+                "demonstration. The prices are the real published ones. Do not read "
+                "any figure on this tab as a measurement of the real trial."
+            )
+        else:
+            st.caption(
+                f"Real evidence: schedule read from `{run.schedule_source}`, "
+                f"SHA-256 `{run.schedule_sha256[:12]}…`, {run.schedule_rows:,} labels."
+            )
+
+        # ------------------------------------------------- controls for THIS tab
+        ctl = st.columns([2.4, 1.5, 1.1, 1.1])
+        view = ctl[0].segmented_control(
+            "View",
+            list(SCENARIO_VIEWS),
+            default=SCENARIO_VIEWS[0],
+            key="scenario-view",
+            help="Each view has one scope. Nothing is mixed between them.",
+        )
+        if view is None:
+            view = SCENARIO_VIEWS[0]
+        span = ctl[1].segmented_control(
+            "Scenario period",
+            list(SCENARIO_PERIODS),
+            default=SCENARIO_PERIODS[0],
+            key="scenario-span",
+            help="Bounded by the schedule's own coverage. Separate from the period "
+            "at the top of the page.",
+        )
+        if span is None:
+            span = SCENARIO_PERIODS[0]
+
+        s_start, s_end = cov_first, cov_last
+        if coverage and span == "Custom":
+            s_start = ctl[2].date_input(
+                "Scenario start",
+                cov_first,
+                min_value=cov_first,
+                max_value=cov_last,
+                key="scenario-start",
+            )
+            s_end = ctl[3].date_input(
+                "Scenario end",
+                cov_last,
+                min_value=cov_first,
+                max_value=cov_last,
+                key="scenario-end",
+            )
+            if s_start > s_end:
+                st.error(
+                    f"Scenario start ({fmt_day(s_start)}) is after scenario end "
+                    f"({fmt_day(s_end)})."
+                )
+                st.stop()
+        else:
+            ctl[2].markdown(
+                f"<div class='ctl-note'>From<br><b>{fmt_day(cov_first)}</b></div>"
+                if cov_first
+                else "",
+                unsafe_allow_html=True,
+            )
+            ctl[3].markdown(
+                f"<div class='ctl-note'>To<br><b>{fmt_day(cov_last)}</b></div>"
+                if cov_last
+                else "",
+                unsafe_allow_html=True,
+            )
+
+        st.caption(
+            f"**These two controls affect this tab only.** The scenario period is "
+            f"{fmt_period(s_start, s_end) if s_start else 'unavailable'}, bounded by "
+            f"the schedule's coverage ({fmt_day(cov_first)} – {fmt_day(cov_last)}). "
+            "The **household** selector at the top of the page chooses which household "
+            "the first view describes; the **period** selector at the top does **not** "
+            "apply here — it drives Overview, Data quality and Source records."
+        )
+        st.divider()
+
+        # Set by whichever view rendered, so "Calculation details" reports the exact
+        # figures for the selection actually on screen and never for a different one.
+        selection_totals: tuple[int, str, str] | None = None
+
+        # ============================================ VIEW 1 — one household
+        if view == SCENARIO_VIEWS[0]:
+            st.markdown(f"#### Selected household — {household}")
+            mine = ta.band_summary(
+                database, run.run_id, household=household, start=s_start, end=s_end
+            )
+            if mine.empty:
+                groups = ta.household_tariff_groups(database, household)
+                # Scoped to the scenario period on purpose: a period count must never
+                # silently become a whole-history count. Whole history is shown only
+                # when the period holds nothing, and is labelled as whole history.
+                reasons = ta.exclusion_breakdown(
+                    database, run.run_id, household=household, start=s_start, end=s_end
+                )
+                scope_label = f"in {fmt_period(s_start, s_end)}"
+                if reasons.empty:
+                    reasons = ta.exclusion_breakdown(
+                        database, run.run_id, household=household
+                    )
+                    scope_label = (
+                        "in its **whole loaded history** — it has no readings at all "
+                        f"in {fmt_period(s_start, s_end)}"
+                    )
+                if reasons.empty:
+                    st.info(
+                        f"{household} has no charged readings and no excluded readings "
+                        "in this scenario: it has no rows in the loaded members."
+                    )
+                else:
+                    top = reasons.iloc[0]
+                    st.info(
+                        f"**{household} has no charged readings in this selection.** "
+                        f"Measured for this household {scope_label}: "
+                        f"{int(top['readings']):,} of its "
+                        f"{int(reasons['readings'].sum()):,} distinct readings are "
+                        f"excluded as **`{top['exclusion_reason']}`**, spanning "
+                        f"{top['first_date']} to {top['last_date']}. It is recorded "
+                        f"under tariff group **{', '.join(groups) or 'none'}**, and the "
+                        f"band prices apply to `{run.scope_tariff_group}`."
+                    )
+                    st.dataframe(
+                        fmt_reason_table(reasons),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                pickable = ta.charged_households(
+                    database, run.run_id, start=s_start, end=s_end
+                )
+                if pickable:
+                    st.markdown(
+                        f"**Look at a charged household instead** — "
+                        f"{len(pickable):,} household(s) are charged in this run. "
+                        "Nothing changes until you press the button."
+                    )
+                    pick_cols = st.columns([2, 1, 3])
+                    target = pick_cols[0].selectbox(
+                        "Charged household",
+                        pickable,
+                        key=f"tou-pick-{database.name}",
+                        label_visibility="collapsed",
+                    )
+                    pick_cols[1].button(
+                        "Switch to it",
+                        on_click=select_household,
+                        args=(target,),
+                        width="stretch",
+                    )
+            else:
+                selection_totals = render_band_view(
+                    mine,
+                    scope_note=(
+                        f"{household}, {fmt_period(s_start, s_end)}, "
+                        f"schedule `{run.schedule_source}`"
+                    ),
+                    insights=ta.selection_insights(
+                        database, run.run_id, household, s_start, s_end
+                    ),
+                )
+                st.altair_chart(
+                    charts.band_kwh_by_hour_chart(
+                        ta.household_band_distribution(
+                            database,
+                            run.run_id,
+                            household=household,
+                            start=s_start,
+                            end=s_end,
+                        )
+                    ),
+                    width="stretch",
+                )
+                st.caption(
+                    f"Charged kWh for **{household}** by the hour in the source "
+                    "timestamp. The hour is read from the label as recorded; no "
+                    "timezone is applied, because none is established."
+                )
+
+        # ======================================= VIEW 2 — the loaded ToU sample
+        elif view == SCENARIO_VIEWS[1]:
+            everyone = ta.band_summary(database, run.run_id, start=s_start, end=s_end)
+            people_charged = ta.charged_households(
+                database, run.run_id, start=s_start, end=s_end
+            )
+            st.markdown(
+                f"#### Loaded {run.scope_tariff_group} sample — "
+                f"{len(people_charged):,} charged household(s)"
+            )
+            st.caption(
+                "A **bounded, non-representative subset**: the households that happen "
+                "to occupy the loaded members, not a sample drawn from the trial. "
+                "Nothing here describes the trial, London, or anyone else."
+            )
+            selection_totals = render_band_view(
+                everyone,
+                scope_note=(
+                    f"all charged households, {fmt_period(s_start, s_end)}, "
+                    f"schedule `{run.schedule_source}`"
+                ),
+                insights=ta.selection_insights(
+                    database, run.run_id, None, s_start, s_end
+                ),
+            )
+            if not everyone.empty:
+                st.altair_chart(
+                    charts.band_kwh_by_hour_chart(
+                        ta.household_band_distribution(
+                            database, run.run_id, start=s_start, end=s_end
+                        )
+                    ),
+                    width="stretch",
+                )
+                st.caption(
+                    "Charged kWh by the hour in the source timestamp, across every "
+                    "charged household. Consumption and an expensive band falling in "
+                    "the same hours is a coincidence of timing, not evidence of a "
+                    "response."
+                )
+                totals = ta.household_totals(
+                    database, run.run_id, start=s_start, end=s_end
+                )
+                with st.expander(
+                    f"Per household ({len(totals):,} rows) — read the charge beside "
+                    "its charged-reading count"
+                ):
+                    st.dataframe(
+                        fmt_household_table(totals),
+                        width="stretch",
+                        hide_index=True,
+                    )
+                    st.caption(
+                        "A household charged for far fewer readings than its "
+                        "neighbours has **limited observed coverage** in the loaded "
+                        "members. Its smaller charge follows from that, and says "
+                        "nothing about how much electricity it used. Why readings are "
+                        "absent is not established."
+                    )
+
+        # ========================================= VIEW 3 — the schedule itself
+        else:
+            st.markdown(f"#### Published schedule — {run.schedule_source}")
+            st.caption(
+                "Describes the price schedule itself. **Independent of which "
+                "households are loaded and of the scenario period above**, which is "
+                "why no household or period is applied to this view."
+            )
+            totals = ta.schedule_totals(database)
+            st.altair_chart(
+                charts.schedule_hour_chart(ta.schedule_band_distribution(database)),
+                width="stretch",
+            )
+            slots = totals.attrs["denominator_slots"]
+            st.caption(
+                f"Half-hour slots per band by hour, out of **{slots:,} slots** in the "
+                f"schedule, covering {fmt_day(cov_first)} – {fmt_day(cov_last)}."
+            )
+            st.dataframe(fmt_schedule_table(totals), width="stretch", hide_index=True)
+            st.dataframe(
+                fmt_price_table(ta.price_catalogue(database)),
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                "Prices are **publisher-documented**, quoted from the dataset page. "
+                "The workbook contains no price at all. Validity is a half-open "
+                "interval: *from* is the first instant a price applies, *until* is the "
+                "first instant it no longer does, so a whole year reads "
+                "2013-01-01 → 2014-01-01. **UNKNOWN** means the publisher gives the "
+                "price without saying when it applied; it is never defaulted to the "
+                "span of the data, and a price with unknown validity charges nothing."
+            )
+
+        # ----------------------------------------------- detail, on demand only
+        st.divider()
+        with st.expander("Assumption A1 in full"):
+            st.markdown(run.assumption_text)
+            st.markdown(
+                """
+**Two things that are not evidence for A1.**
+
+- *Regularity is not a timezone.* A schedule of exact half-hour steps with both
+  clock-change hours present once shows the **schedule** is a fixed nominal grid. It
+  says nothing about the convention used by the consumption timestamps.
+- *A unique key is not semantic alignment.* The schedule label is a primary key and a
+  duplicate is refused before loading, so a join **cannot multiply** consumption rows.
+  That is arithmetic. It is not evidence that the two label sets mean the same half hour.
+
+*Repeated identical labels* stay semantically unresolved. Collapsing them is our
+analytical resolution, not proof that two rows carrying one label are one physical
+interval.
+"""
+            )
+
+        with st.expander("What was counted, and what was not charged"):
+            led = ta.accounting(database, run.run_id)
+            st.markdown(
+                f"""
+Whole run, every loaded member, unscoped by the period above.
+
+| | |
+|---|---:|
+| Rows recorded in this database | {led.raw_rows:,} |
+| Collapsed by policy (identical rows, equivalent representations) | {led.rows_collapsed_by_policy:,} |
+| **Distinct readings** | **{led.distinct_readings:,}** |
+| Charged | {led.included_readings:,} |
+| Excluded, each with a reason | {led.excluded_readings:,} |
+| Reconciles | **{led.reconciles}** |
+
+**No excluded reading becomes a zero charge.** It has no charge at all.
+"""
+            )
+            st.dataframe(
+                fmt_reason_table(
+                    ta.exclusion_breakdown(database, run.run_id).rename(
+                        columns={"readings": "readings"}
+                    )
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                "A reading can meet several conditions at once. `exclusion_reason` is "
+                "the first that applies in a fixed order — ineligible group, outside "
+                "the schedule period, conflicting label, off-grid, missing value, "
+                "unmatched label, unpriced band — and every condition is *also* stored "
+                "as its own flag, so the ordering hides nothing."
+            )
+
+        if selection_totals is None:
+            exact_block = (
+                "**Exact totals for the current selection.** The "
+                f"*{SCENARIO_VIEWS[2]}* view describes the schedule, which carries no "
+                "charge, so there is no selection total to report here. The "
+                "whole-run figure is in the run identity below."
+            )
+        else:
+            exact_block = (
+                "**Exact, unrounded totals for the current selection**\n\n"
+                "| | |\n|---|---|\n"
+                f"| Scope | {view}, {fmt_period(s_start, s_end)} |\n"
+                f"| Charged readings | {selection_totals[0]:,} |\n"
+                f"| Charged kWh (exact) | `{selection_totals[1]}` |\n"
+                f"| Scenario charge (exact) | `£{selection_totals[2]}` |\n"
+            )
+
+        with st.expander("Calculation details and full precision"):
+            st.markdown(
+                f"""
+`energy_charge_gbp = consumption_kwh × price_pence_per_kwh ÷ 100`, in `Decimal`.
+
+- **No row is ever rounded.** Rounding happens once, here, for display: money to 2
+  decimal places, energy to 3, shares to 4, all half up. Shares are each rounded
+  independently, so a column of them need not total exactly 100%.
+- The `÷ 100` is done once in Python when the price catalogue is built, **not in SQL**:
+  DuckDB evaluates a `DECIMAL` divided by 100 as a binary float.
+- **What this charge is.** {ta.CHARGE_SCOPE}
+- **Geography.** No geographic breakdown is produced. One would be legitimate only from
+  metadata properly linked to these households; none has been linked.
+
+{exact_block}
+**Run identity — what would have to match to reproduce this**
+
+| | |
+|---|---|
+| Run | `{run.run_id}` |
+| Built (UTC) | {run.run_at_utc} |
+| Schedule | {run.schedule_source}, {run.schedule_rows:,} labels, `{run.schedule_sha256[:16]}…` |
+| Schedule coverage | {run.schedule_first_label} to {run.schedule_last_label} |
+| Price catalogue | {run.price_catalogue_version} (PUBLISHER-DOCUMENTED) |
+| Calculation code (all first-party files) | `{run.calculation_code_sha256[:16]}…` |
+| Shared policy (`policy.py`) | `{run.policy_sha256[:16]}…` |
+| Tariff models | `{run.model_code_sha256[:16]}…` |
+| Ingestion pipeline | `{run.ingestion_pipeline_fingerprint[:16]}…` |
+| Runtime | {", ".join(f"{k} {v}" for k, v in sorted(run.runtime.items()))} |
+| Loaded files | {len(run.source_load_ids.split("|"))} |
+| Whole-run exact charge | `£{run.total_energy_charge_gbp_exact}` |
+
+A fingerprint over a **mutable** warehouse is not historical replay. To rebuild this
+result from its recorded inputs alone, capture and replay a baseline:
+`uv run capture-baseline --database {database}` then `uv run replay-baseline`.
+"""
+            )
