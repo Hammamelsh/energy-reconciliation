@@ -94,6 +94,11 @@ Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.m
 
 ### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
 
+**Status: design complete 2026-09-08, implementation pending.** The decisions are in
+[`anl-003-dbt-design.md`](anl-003-dbt-design.md) and the sequenced ticket in
+[`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). **No dbt code exists yet**
+and no dbt package is installed; the "Expressed as dbt models" row above stays *not done*.
+
 **Not a copy-and-paste job.** The SQL is written and tested, which is the starting point,
 not the whole task. The port has to decide model boundaries and materialisations, wire
 `ref`/`source`, handle the parts that are not SQL at all (reading the workbook, the price

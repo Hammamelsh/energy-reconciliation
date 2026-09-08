@@ -337,7 +337,8 @@ applied — and changed — without reprocessing.
 - No billing or settlement calculation, no forecasting, no AI features. The tariff figures are a
   scenario under a stated, unresolved assumption, not a cost anyone paid. No dbt models, Airflow
   DAGs, Spark jobs or cloud deployment. Porting the tariff models to dbt is a design task, not a
-  move of the SQL. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
+  move of the SQL; the design is written ([`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md))
+  and **not implemented**. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
 - One member of 168 has been profiled in full, and three loaded into the database. Findings are not
   archive-wide, and three members are not any household's complete history. The 27 `ToU` households
   in member 135 are a **bounded, non-representative subset** — the households that happen to occupy

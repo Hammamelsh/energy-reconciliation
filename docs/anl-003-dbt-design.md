@@ -1,0 +1,340 @@
+# ANL-003 — Design: porting the tariff models to dbt
+
+**Date:** 2026-09-08. **Status: DESIGN, not built.** Nothing in this document has been
+executed; no dbt package is installed; no figure here is new. The ticket that would build
+it is [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). The roadmap entry it
+answers is `roadmap.md` § M3 → ANL-003.
+
+The working SQL it starts from is `src/energy_reconciliation/tariff/models.py`; the rules
+it must not duplicate are `src/energy_reconciliation/policy.py`. Read those first — this
+document decides *where each piece goes*, not what the arithmetic is.
+
+## 0. What the port has to keep true
+
+These are the properties the current implementation has and the roadmap's completion
+conditions require. Every decision below is checked against them.
+
+| # | Property today | Where it is enforced today |
+|---|---|---|
+| P1 | The four analytical policies have **one** definition, used by the explorer and the tariff models | `policy.py` constants, imported by both |
+| P2 | A duplicated schedule label is **refused before any row reaches the warehouse** | `schedule._validate` |
+| P3 | `price_gbp_per_kwh` is the pence price ÷ 100 done **once, exactly, in Python `Decimal`**; the division is never written in SQL | `prices.Price.gbp_per_kwh`; `models.py` docstring |
+| P4 | Every fact row carries `assumption_id = 'A1'` and `run_id` | `FACT_SELECT` |
+| P5 | `distinct readings = charged + excluded`, every exclusion with **one** reason and every condition as its own flag | `EXCLUSION_ORDER`, `ScenarioResult.reconciles` |
+| P6 | Rerunning identical inputs is a **provable no-op**; a changed input **supersedes** rather than accumulates | `scenario_fingerprint`, `build_scenario` skip path, `status` column |
+| P7 | The whole build is **atomic**: a failure leaves the previous published scenario as it was | one DuckDB transaction in `build_scenario` |
+| P8 | The run record names every input and every piece of code that can change a figure | `identity.calculation_files`, `scenario_run` columns |
+| P9 | A captured baseline **replays** into a fresh database and matches field by field | `baseline.replay` → `build_scenario` |
+| P10 | pytest keeps its hand-computable cases (44 test builds today) | `tests/test_tariff*.py`, `test_rec001_comparison.py` |
+
+## 1. Decisions
+
+Each decision names the alternatives that were on the table and why they lost.
+
+### D1 — Layout: one dbt project in `dbt/`, `dbt-duckdb` over the existing warehouse
+
+```
+dbt/
+  dbt_project.yml          name: energy_reconciliation; profile: energy_reconciliation
+  profiles.yml             duckdb; path from env ENERGY_RECONCILIATION_DB
+                           (default data/warehouse/energy.duckdb); target schema scenario_build
+  models/
+    sources.yml            source warehouse: readings, load_registry (schema main)
+    staging/
+      stg_readings.sql               view   — the source, column-contracted, nothing else
+    policy/
+      int_distinct_readings.sql      ephemeral — {{ distinct_readings(ref('stg_readings')) }}
+      int_conflicting_labels.sql     ephemeral — {{ conflicting_labels(ref('stg_readings')) }}
+    tariff/
+      dim_tariff_band_schedule.py    table  — Python model (D3)
+      dim_tariff_price.py            table  — Python model (D3)
+      int_classified_readings.sql    ephemeral — today's CLASSIFIED_READINGS, with ref()
+      fact_interval_charge_scenario.sql   table
+      fact_interval_charge_exclusion.sql  table
+      schema.yml                     column tests (D7)
+  macros/
+    generated_policy.sql   GENERATED from policy.py + models.EXCLUSION_ORDER (D2). Do not edit.
+  tests/                   singular tests (D7)
+```
+
+`dbt/target/`, `dbt/logs/` and `dbt/dbt_packages/` are git-ignored. `profiles.yml` is
+committed inside the project directory (`--profiles-dir dbt`), so a clone runs without
+touching the user's home directory.
+
+**Versions.** Resolved by `uv pip install --dry-run dbt-duckdb` on 2026-09-08, **not
+installed**: `dbt-core 1.12.4`, `dbt-duckdb 1.11.0`. Pin both exactly in `pyproject.toml`
+main dependencies — they are needed by `build-tariff-scenario` at runtime, not only in
+development — and record them in `identity.RUNTIME_PACKAGES` (D6).
+
+*Rejected:* a separate repository or a `dbt/` package that vendors its own copy of the
+warehouse path. The models must read the warehouse that ingestion writes; one path, one
+environment variable.
+
+### D2 — One policy definition: Python is the source, a **generated macro file** is the dbt copy, a test refuses drift
+
+The four policy rules stay where they are, in `policy.py`. Two changes make them usable
+from dbt without a second definition:
+
+1. **Parameterise the relation name.** Today `DISTINCT_READINGS` and `CONFLICTING_LABELS`
+   hard-code `FROM readings`. They become functions of the relation they read:
+
+   ```python
+   def distinct_readings_sql(readings: str = "readings") -> str: ...
+   def conflicting_labels_sql(readings: str = "readings") -> str: ...
+   DISTINCT_READINGS = distinct_readings_sql()        # existing callers unchanged
+   CONFLICTING_LABELS = conflicting_labels_sql()
+   ```
+
+   The Python callers (`compare.py`, `explorer/queries.py`, `models.py` until D5 removes
+   it) keep importing the constants and produce byte-identical SQL. The existing 333 tests
+   are the check that nothing moved.
+
+2. **Render the macros from Python.** A small command, `uv run render-dbt-macros`, writes
+   `dbt/macros/generated_policy.sql`:
+
+   ```jinja
+   {# GENERATED from src/energy_reconciliation/policy.py and tariff/models.py.
+      Edit those and run `uv run render-dbt-macros`. A test fails if this file drifts. #}
+   {% macro distinct_readings(readings) %}
+   <distinct_readings_sql("{{ readings }}")>
+   {% endmacro %}
+   {% macro conflicting_labels(readings) %} ... {% endmacro %}
+   {% macro finite_category() %}'finite_numeric'{% endmacro %}
+   {% macro flat_band() %}'flat'{% endmacro %}
+   {% macro exclusion_reason_case() %}
+   CASE WHEN is_ineligible_group THEN 'ineligible_tariff_group' ... END
+   {% endmacro %}
+   {% macro exclusion_flags_any() %}is_ineligible_group OR ... {% endmacro %}
+   {% macro exclusion_reasons() %}('ineligible_tariff_group', ...){% endmacro %}
+   ```
+
+   The generated file **is committed** — dbt needs it present — and
+   `tests/test_dbt_generated.py` asserts that a fresh render equals the committed bytes.
+   Editing the macro by hand, or editing `policy.py` without re-rendering, fails the suite.
+   The exclusion order and reason names come from `models.EXCLUSION_ORDER` through the
+   same generator, so the CASE ordering (P5) has one definition too.
+
+The warehouse's inspection views (`v_distinct_readings`, `v_conflicting_keys`, written by
+ingestion) are **not** read by any dbt model; they remain diagnostics, and the ticket's
+step 2 uses them only as an independent count to check the macro against.
+
+*Rejected — write the rules in Jinja and have Python read the macro file:* Python would
+need a Jinja renderer just to obtain a SELECT, the module docstring that explains each
+rule would move into a template comment, and the explorer would take a dbt dependency it
+does not otherwise need.
+*Rejected — dbt Python models for the policy layer:* they would import `policy.py`
+directly, but the lineage from `readings` to the facts would then be invisible to
+`ref`/`source`, which is most of what the port is for.
+*Rejected — two hand-maintained copies with a comparison test:* that is the "same rule
+written twice in two languages" the roadmap forbids, with a test as an apology.
+
+### D3 — The non-SQL steps become **dbt Python models** that call the existing Python
+
+Two things in today's build are not SQL: reading and validating the workbook
+(`schedule.read_workbook`) and the price catalogue with its exact ÷100 (`prices.CATALOGUE`).
+They become Python models, which `dbt-duckdb` runs **in-process** with the same interpreter
+and the same installed package:
+
+```python
+# dbt/models/tariff/dim_tariff_band_schedule.py
+def model(dbt, session):
+    dbt.config(materialized="table")
+    from energy_reconciliation.tariff.schedule import demo_schedule, read_workbook, loaded_at
+    which = dbt.config.get("schedule", "workbook")       # var: schedule=workbook|demo
+    schedule = demo_schedule() if which == "demo" else read_workbook()
+    return schedule_arrow_table(schedule, loaded_at())   # pyarrow, typed (below)
+```
+
+- **P2 holds unchanged** because `_validate` runs inside `read_workbook`; a duplicated
+  label raises `ScheduleError`, the model fails, dbt stops, nothing is written.
+- **P3 holds unchanged** because `Price.gbp_per_kwh` is the only place the division exists.
+- **Types are declared, not inferred.** The models return **pyarrow tables** with explicit
+  `decimal128(9,4)` / `decimal128(9,6)` columns, not pandas frames. A pandas column of
+  Python `Decimal` objects is dtype `object`, and letting DuckDB infer it risks `DOUBLE` —
+  the exact artefact P3 exists to prevent. A pytest checks `information_schema.columns`
+  after a build: both price columns must be `DECIMAL`, with the scales above.
+- The synthetic schedule is selected with `--vars '{schedule: demo}'`, which is how the
+  committed demo archive keeps working without the workbook.
+
+*Rejected — keep `_load_dimensions` in Python and declare the dims as dbt sources:* it
+works, and is the fallback if the Python-model path proves awkward, but then
+`dbt build` alone does not reproduce ANL-002 from warehouse + workbook, which is the
+roadmap's completion condition. *Rejected — re-express the workbook read as SQL over
+`read_xlsx`:* the duplicate-label refusal and the ÷100 would then need SQL re-expressions,
+which is two definitions again.
+
+### D4 — Model boundaries and materialisations
+
+| Model | Materialisation | Why |
+|---|---|---|
+| `stg_readings` | view | A column contract on the source and nothing else; free to query, never stores a copy of 3 million rows. |
+| `int_distinct_readings`, `int_conflicting_labels` | ephemeral | Exactly today's CTEs; inlined into the consumer, so no intermediate table can go stale. |
+| `dim_tariff_band_schedule`, `dim_tariff_price` | table (Python) | Small, must be materialised for the PK/uniqueness tests to run against real rows. |
+| `int_classified_readings` | ephemeral | Today's `CLASSIFIED_READINGS`; both facts read it, and inlining keeps the two facts from ever seeing different classifications. |
+| `fact_interval_charge_scenario`, `fact_interval_charge_exclusion` | table | The published result; stamped with `var('run_id')` and `'A1'`. |
+| `scenario_run` | **not a dbt model** | Written by Python after a successful build (D5). |
+
+**Grains and keys, stated once** (the same words `compare.py` uses):
+
+| Model | One row per | Key | Enforced by |
+|---|---|---|---|
+| `stg_readings` | raw source row as loaded | (`load_id`, `source_record_no`) | none — duplicates are evidence, not errors |
+| `int_distinct_readings` | **distinct reading**: (household, source label, value signature) | those three | `SELECT DISTINCT` in the policy macro |
+| `int_conflicting_labels` | label where the source disagrees with itself | (household, source label) | `GROUP BY ... HAVING` |
+| `dim_tariff_band_schedule` | schedule half-hour label | `schedule_label_naive` | `_validate` (P2) **and** a dbt `unique` test |
+| `dim_tariff_price` | price for a group and band | (`tariff_group`, `band_label`) | dbt `unique_combination_of_columns` |
+| `fact_interval_charge_scenario` | **charged output**: one per (household, source label) | (`run_id`, `household_id`, `source_timestamp_text`) | dbt `unique_combination_of_columns` — a conflicted label has two signatures and is excluded entirely, so the charged output is unique by construction and the test proves it |
+| `fact_interval_charge_exclusion` | excluded **distinct reading** | (`run_id`, household, label, `value_signature`) | not unique on (household, label) by design: a conflicted label yields one exclusion row per signature |
+
+The exclusion table today does not carry `value_signature`; the port adds it, so the
+grain is visible in the row rather than only in the docstring. It is a new column, not a
+changed figure.
+
+The classification SQL moves out of `models.py` into `int_classified_readings.sql` with
+three substitutions: `FROM readings` → `{{ ref('stg_readings') }}` via the macro
+argument, `dim_*` → `{{ ref(...) }}`, and the two `?` placeholders →
+`'{{ var("tariff_group") }}'` and `'{{ var("run_id") }}'` (quoted as string literals; both
+vars are required, with no default, so a build without them fails at parse time rather
+than charging the wrong group). The product stays
+`CAST(consumption_kwh * price_gbp_per_kwh AS DECIMAL(38,16))` — DECIMAL × DECIMAL in
+DuckDB is exact, and the singular test in D7 recomputes it row by row. After D5 the SQL constants in `models.py` are **deleted**, so the
+dbt models are the definition and Python holds no copy.
+
+### D5 — Rerun, supersede and atomicity in dbt terms: **Python orchestrates, dbt builds into a staging schema, Python publishes in one transaction**
+
+dbt's `table` materialisation replaces each table independently; there is no
+transaction across models. Left as is, a failure on the second fact would leave the
+first replaced and the previous run's rows gone — P7 broken. The design keeps P6 and P7 as
+follows:
+
+1. `build_scenario` keeps its signature and its skip rule. It computes the fingerprint
+   exactly as today (with the dbt files added to the digest, D6). If the published run
+   carries the same fingerprint and `force` is off, it returns `skipped=True` **without
+   invoking dbt at all** — the no-op stays provable and cheap.
+2. Otherwise it invokes dbt **in-process** through `dbt.cli.main.dbtRunner` with
+   `build --vars {run_id, tariff_group, schedule}` and target schema **`scenario_build`**.
+   dbt tests run as part of `build`; a failing test aborts before anything is published.
+3. On success Python opens **one transaction** on the warehouse:
+   `CREATE OR REPLACE TABLE main.<fact> AS SELECT * FROM scenario_build.<fact>` for the
+   two facts and the two dims, `UPDATE scenario_run SET status='superseded'` for the
+   previous run, `INSERT` the new run record, commit. DuckDB's DDL is transactional, so a
+   reader sees the old scenario or the new one, never a mixture.
+4. On any failure nothing in `main` has changed; `scenario_build` holds the partial build
+   for diagnosis and is dropped at the start of the next attempt.
+
+Readers already scope every query by the published `run_id`
+(`analytics._fact_scope`), so this changes nothing for them.
+
+**Rollback.** There is no in-place undo today and the port does not add one: when a run
+supersedes another, the previous rows are gone (as they are now). The recovery path is
+the one REC-001 already uses — replay the previous baseline into a **fresh** database
+from the recorded input identity — plus `force=True` to rebuild in place from a checked-out
+earlier commit. The ticket exercises the replay once as acceptance criterion 8.
+
+**Baseline equivalence.** `baseline.compare` checks six figure fields, the fingerprint,
+and the SHA-256 over every charged row. After the port the figure fields and the row
+digest must be equal; the fingerprint differs because `calculation_digest` now covers the
+dbt files. The replay report therefore names the fingerprint as the single expected
+difference, and a format-2 baseline captured afterwards is the new reference.
+
+*Rejected — dbt `on-run-end` hook writing `scenario_run`:* a hook cannot decide to skip
+the whole build, and the fingerprint needs the Python identity functions.
+*Rejected — build directly into `main`:* loses P7. *Rejected — dbt's own `--state`
+comparison as the skip rule:* it compares model source, not schedule contents, price
+version, runtime or input identity, all of which the fingerprint must cover.
+
+### D6 — Run identity extends to the dbt files; nothing is dropped
+
+- `identity.calculation_files()` gains every file under `dbt/models/`, `dbt/macros/` and
+  `dbt/dbt_project.yml`. A new test globs those directories and fails if a file is present
+  but not covered — the SQL equivalent of the import-closure guard, which cannot see
+  `.sql` files.
+- `identity.RUNTIME_PACKAGES` gains `dbt-core` and `dbt-duckdb`. A different dbt is a
+  different renderer of the same SQL and is recorded as such.
+- `scenario_run` gains two columns: `dbt_manifest_sha256` (digest of `target/manifest.json`
+  after the build — the exact rendered graph) and `dbt_versions`. The schema-migration
+  rule in `ensure_schema` already drops and rebuilds derived tables when `scenario_run`'s
+  shape changes, so this is a known, handled path (the 2026-09-08 incident notes apply:
+  restart any Streamlit server started before the change).
+- Baselines bump `FORMAT_VERSION` to `"2"` carrying the two new fields. Replay of a
+  format-1 baseline is still accepted: figure fields are compared, and identity fields
+  the old format lacks are reported as *absent*, not as mismatches.
+
+### D7 — Tests: dbt tests for structure and identities, pytest for arithmetic
+
+**dbt schema tests (`schema.yml`):** `dim_tariff_band_schedule.schedule_label_naive`
+unique + not_null; `band_label` accepted_values High/Normal/Low; `dim_tariff_price`
+unique combination (`tariff_group`, `band_label`), not_null on both prices;
+`fact_interval_charge_scenario.assumption_id` accepted_values `['A1']`; `run_id` not_null
+on both facts; `fact_interval_charge_scenario` unique on (`run_id`, `household_id`,
+`source_timestamp_text`) — the charged-output grain from D4.
+
+**dbt singular tests (`dbt/tests/`):**
+
+| Test | Asserts |
+|---|---|
+| `assert_charged_plus_excluded_equals_distinct` | `count(int_distinct_readings) = count(fact) + count(exclusion)` for `var('run_id')` |
+| `assert_charged_and_excluded_are_disjoint` | no (household, label) in both facts |
+| `assert_exact_charge_arithmetic` | `energy_charge_gbp = CAST(consumption_kwh * price_gbp_per_kwh AS DECIMAL(38,16))` on every row — the DECIMAL product, never a double |
+| `assert_one_reason_per_exclusion` | `exclusion_reason IN {{ exclusion_reasons() }}` and the reason's own flag is true |
+| `assert_price_validity_both_or_neither` | `effective_from` and `effective_until` are both null or both set |
+
+**pytest keeps (P10):** every hand-computable case in `tests/test_tariff.py`, the
+identity closure guard, the schema-repair tests, REC-001. They call `build_scenario`
+as today, which now runs dbt. Two new pytest guards: no `/ 100` (or any division) in
+`dbt/models/**/*.sql`, and the DECIMAL column-type check from D3.
+
+**Cost, stated:** 44 test builds today take seconds each in DuckDB. A dbt invocation
+adds parse time per call. The ticket measures the suite before and after; if it exceeds
+five minutes, the mitigation is dbt partial parsing with a shared `target/` per session,
+**not** a Python-only fast path (which would be a second implementation).
+
+### D8 — What Python keeps, and what it loses
+
+| Stays in Python | Leaves Python |
+|---|---|
+| `policy.py` (the rules, now parameterised) | the SQL constants in `models.py` |
+| `schedule.py`, `prices.py`, `identity.py` | `_load_dimensions` |
+| `build_scenario` (skip rule, dbt invocation, publish transaction, run record) | the two `INSERT ... SELECT` statements |
+| `analytics.py`, `baseline.py`, `compare.py`, `cli.py` unchanged in interface | — |
+| `EXCLUSION_ORDER` (rendered into the macro; `analytics` still imports the reasons) | — |
+
+## 2. Acceptance — the figures `dbt build` must reproduce
+
+From `anl-002-tariff-scenario.md`, over `data/warehouse/energy.duckdb` (members 4, 5,
+135), scope `ToU`, assumption A1. **None of these may change by any digit.**
+
+| Figure | Value |
+|---|---:|
+| Distinct readings | 2,997,962 |
+| Charged | 456,096 |
+| Excluded | 2,541,866 (`ineligible_tariff_group` 1,998,647 · `outside_schedule_period` 543,219) |
+| Charged kWh | 85,467.1329968 |
+| Exact scenario charge | `11675.4339216532500000` |
+| Charged rows at exactly zero | 133 |
+| Rows collapsed by policy | 2,038 |
+| `High` share of charged kWh / charge | 4.90% / 24.09% |
+| `Low` share of charged kWh / charge | 10.48% / 3.06% |
+
+**Baseline `4b3ee235d7ac`:** its six **figure** fields and the per-band, per-household
+and per-reason detail must match on replay. Its `scenario_fingerprint` **will not**
+match — the calculation digest changes by design when code moves — and the replay report
+must show that as the *only* differing field, named. Then a new baseline is captured under
+the ported identity and replayed 17/17 into a fresh database. A replay that has not been
+executed is not evidence (the project learned this once already).
+
+## 3. Risks, each with the check that retires it
+
+| Risk | Check |
+|---|---|
+| dbt-duckdb Python models cannot return typed DECIMAL columns | Step 3 of the ticket builds the dims alone and reads `information_schema`; if the types are wrong, fall back to D3's rejected alternative (dims as sources) and record why |
+| In-process `dbtRunner` and the warehouse connection contend for the DuckDB file | Python closes its connection before invoking dbt and reopens for the publish step; a test builds twice in one process |
+| The generated macro renders SQL that dbt's Jinja alters (e.g. `{{` inside a string) | The policy SQL contains no braces today; the drift test also compiles the project (`dbt parse`) |
+| Suite time | Measured before/after in the ticket, threshold five minutes |
+| Streamlit server holding an old `models.py` | Same as the 2026-09-08 incident; the tab already diagnoses a schema mismatch |
+
+## 4. Out of scope, on purpose
+
+Staging models for households or a household dimension (roadmap M3, separate item);
+Airflow (M5); any change to what is charged, excluded, rounded or assumed; snapshots or
+incremental models (the facts are rebuilt whole by design, so a rerun is provable).
