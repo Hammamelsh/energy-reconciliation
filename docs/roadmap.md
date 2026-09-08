@@ -119,6 +119,14 @@ reproducible. Estimating it as "move the SELECTs" would be wrong.
 
 ## M4 — Reconciliation, corrections and historical reproduction
 
+**Progress (REC-001).** A first slice is built — see
+[`tickets/REC-001-source-expansion.md`](tickets/REC-001-source-expansion.md): an accepted
+baseline reproduced into a fresh database (17/17 fields), and the effect of adding one
+member explained to a residual of exactly zero, with every charged-output difference
+categorised and traceable to its source rows. Versioned inputs, code, configuration and
+published results are in place. Late/revised readings, retrospective tariff changes and
+synthetic register scenarios are **not** started.
+
 **Deliver**
 
 - Explicitly synthetic register scenarios based on real consumption shapes.

@@ -9,6 +9,8 @@ data/sample/
 data/warehouse/
 # Baselines name real household ids and load identities: kept local.
 data/baselines/
+# Comparison reports name real household ids: kept local.
+data/comparisons/
 # The demo fixture itself is tracked; profiler output over it is not.
 data/demo/*-profile.json
 *.duckdb
