@@ -12,7 +12,8 @@ Run with:
 
 from __future__ import annotations
 
-from datetime import date
+from collections import Counter
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -20,6 +21,7 @@ import pandas as pd
 import streamlit as st
 
 from energy_reconciliation.explorer import charts
+from energy_reconciliation.explorer import forecast_view as fc
 from energy_reconciliation.explorer import queries as q
 from energy_reconciliation.ingest.warehouse import DEFAULT_DATABASE
 from energy_reconciliation.tariff import analytics as ta
@@ -231,7 +233,16 @@ if not available:
     )
     st.stop()
 
-labels = {p: q.dataset_label(p) for p in available}
+# Two databases can hold the same members and therefore earn the same content-derived
+# label -- a replayed baseline beside the warehouse it was replayed from, for instance.
+# Identical entries in a picker are not a cosmetic problem: they are indistinguishable
+# to a reader and ambiguous to select. Where a label repeats, the file name settles it.
+_content_labels = {p: q.dataset_label(p) for p in available}
+_seen = Counter(_content_labels.values())
+labels = {
+    p: (f"{name} — {p.name}" if _seen[name] > 1 else name)
+    for p, name in _content_labels.items()
+}
 st.sidebar.header("Data source")
 database = st.sidebar.radio(
     "Dataset",
@@ -308,8 +319,14 @@ st.markdown(
     f"{fmt_day(first)} – {fmt_day(last)}"
 )
 
-overview_tab, quality_tab, tariff_tab, records_tab = st.tabs(
-    ["Overview", "Data quality", "Tariff scenario", "Source records"]
+overview_tab, quality_tab, tariff_tab, forecast_tab, records_tab = st.tabs(
+    [
+        "Overview",
+        "Data quality",
+        "Tariff scenario",
+        "Forecast (backtest)",
+        "Source records",
+    ]
 )
 
 # ================================================================== OVERVIEW
@@ -1170,3 +1187,299 @@ result from its recorded inputs alone, capture and replay a baseline:
 `uv run capture-baseline --database {database}` then `uv run replay-baseline`.
 """
             )
+
+# ============================================================ FORECAST (BACKTEST)
+with forecast_tab:
+    st.markdown(
+        '<span class="status-review">Historical backtest — not a live forecast.</span> '
+        "Every prediction was made from data dated on or before its **forecast origin** "
+        "and scored against what was recorded afterwards.",
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        "**Prediction target:** one household's recorded consumption, in kWh, grouped by "
+        "**source-date label**. Correspondence to local calendar days is not established."
+    )
+
+    report = fc.load_latest_report()
+    if report is None:
+        st.info(
+            "No forecast experiment has been run for this database yet.\n\n"
+            f"`uv run run-forecast-experiment --database {database}`"
+        )
+    elif Path(report["database"]).name != database.name:
+        st.warning(
+            f"The recorded experiment was run against `{Path(report['database']).name}`, "
+            f"not the dataset selected in the sidebar (`{database.name}`). Rerun it for "
+            "this dataset before reading these figures."
+        )
+    else:
+        selectable = [h["household_id"] for h in report["households"]]
+        cfg = report["config"]
+        f = report["feasibility"]
+        sel = report.get("selection", {})
+        if selectable and all(h.startswith("DEMO") for h in selectable):
+            st.warning(
+                "**Synthetic evidence.** This experiment was run over invented demo "
+                "households. Nothing on this tab is a measurement of the real trial."
+            )
+
+        st.markdown(
+            f"**Dataset** `{Path(report['database']).name}` · **cohort** "
+            f"{fc.describe_cohort(sel)} · **retrospective clean-run benchmark**: each "
+            "household's longest clean run was chosen over its whole history, holdout "
+            "included, so this is not operational accuracy across all households."
+        )
+        scope = st.columns(4)
+        scope[0].metric(
+            "Households evaluated",
+            fmt_count(len(selectable)),
+            help=(
+                f"{f['eligible_households']:,} of {f['households']:,} loaded households "
+                f"have a contiguous usable run of at least {f['min_run_days']} days; "
+                f"the experiment is bounded to the first {cfg['household_limit']} by "
+                "household id — a documented rule, not a choice based on results."
+            ),
+        )
+        scope[1].metric(
+            "Horizon",
+            f"{cfg['horizon']} days",
+            help="Each origin predicts the next 7 source dates, scored separately.",
+        )
+        scope[2].metric(
+            "Holdout",
+            f"{cfg['holdout_days']} days",
+            help="The final days of each household's run, scored once at the end.",
+        )
+        hold = report["evaluation"]["holdout"]
+        dev = report["evaluation"]["development"]
+        scope[3].metric(
+            "Holdout household–source-date pairs",
+            fmt_count(
+                hold.get("unique_household_targets", hold["scored_predictions"] // 3)
+            ),
+            help=(
+                "Each (household, target source date) pair is predicted once by every "
+                f"model, so {hold['scored_predictions']:,} scored predictions across the "
+                f"three. Development: "
+                f"{dev.get('unique_household_targets', dev['scored_predictions'] // 3):,} "
+                f"pairs. Distinct from the {f['usable_household_days']:,} usable "
+                f"household-days across all {f['households']} loaded households, which "
+                "is a warehouse-level figure, not this cohort."
+            ),
+        )
+        with st.expander("What these terms mean"):
+            st.markdown(
+                f"""
+- **Source-date label.** The date part of a timestamp exactly as the source wrote it.
+  Grouping by it is a grouping, not a claim: it is not a settlement day, its
+  correspondence to a local calendar day is not established, and {f["expected_intervals"]}
+  observed labels are not proof the meter covered the whole day.
+- **Usable day.** All {f["expected_intervals"]} nominal labels carry a finite value, no
+  missing-value token is recorded, and no label disagrees with itself. Nothing is filled
+  in, bridged or treated as whole when it is partial.
+- **Cohort.** Households with one contiguous usable run of at least {f["min_run_days"]}
+  days, taken in household-id order and bounded to {cfg["household_limit"]}. Ids track
+  source members, so the mix by tariff group and member above is a property of that
+  rule, not a balanced sample.
+- **Retrospective.** Runs were found with hindsight over each household's whole history.
+  {sel.get("runs_ending_at_warehouse_end", "?")} of {len(selectable)} runs reach the
+  warehouse's last date; the rest end at a later data-quality event.
+- **Not a bill, a saving, an appliance claim or a statement about tariff response.**
+  Nothing here bears on tariff assumption A1.
+"""
+            )
+
+        st.divider()
+        st.markdown("#### One forecast origin")
+        st.caption(
+            "**Example scope.** The three controls below choose one household, one split "
+            "and one origin, and show that origin's seven predictions. They do not change "
+            "the aggregate comparison further down, which has its own control."
+        )
+        pick = st.columns([2, 2, 2])
+        household_pick = pick[0].selectbox(
+            "Household",
+            selectable,
+            index=selectable.index(household) if household in selectable else 0,
+            key="forecast-household",
+            help="Households eligible for the experiment. The sidebar household is "
+            "pre-selected when it qualifies.",
+        )
+        series = fc.series_for(database, household_pick)
+        if series is None:
+            st.info(f"{household_pick} no longer has a long enough usable run.")
+        else:
+            development, holdout = fc.origins_for(series, fc.config_from(cfg))
+            split_pick = pick[1].segmented_control(
+                "Split",
+                ["development", "holdout"],
+                default="holdout",
+                key="forecast-split",
+                help="The holdout is the final window, scored once. Nothing was tuned "
+                "on it.",
+            )
+            split_pick = split_pick or "holdout"
+            origins = holdout if split_pick == "holdout" else development
+            if not origins:
+                st.info(f"No {split_pick} origins for this household.")
+            else:
+                origin = pick[2].selectbox(
+                    "Forecast origin",
+                    origins,
+                    index=len(origins) - 1,
+                    format_func=lambda d: f"{d:%a %-d %b %Y}",
+                    key=f"forecast-origin-{household_pick}-{split_pick}",
+                    help="Predictions use only data dated on or before this date.",
+                )
+                st.caption(
+                    f"**{household_pick}** · origin **{origin:%A %-d %B %Y}** · "
+                    f"predicting the next **{cfg['horizon']}** source dates "
+                    f"(**{origin + timedelta(days=1):%-d %b}** to "
+                    f"**{origin + timedelta(days=cfg['horizon']):%-d %b %Y}**) · "
+                    f"split **{split_pick}** · usable run "
+                    f"{series.run_start:%-d %b %Y} – {series.run_end:%-d %b %Y}."
+                )
+                rows = fc.observed_vs_predicted(
+                    series, origin, fc.default_models(), fc.config_from(cfg)
+                )
+                st.altair_chart(
+                    charts.observed_vs_predicted_chart(fc.long_frame(rows)),
+                    width="stretch",
+                )
+                st.caption(
+                    "**Observed** is the recorded total for that source date; the other "
+                    "three are predictions made at the origin, distinguished by colour, "
+                    "line pattern and point shape. Every prediction used only dates on or "
+                    "before the origin; a point that is absent was declined, not forecast "
+                    "as zero. Identifiers for export are listed under *Method*."
+                )
+                st.dataframe(fc.origin_table(rows), width="stretch", hide_index=True)
+
+        st.divider()
+        st.markdown("#### Baseline comparison")
+        st.caption(
+            "**Aggregate scope.** Every household and origin in the chosen split, pooled. "
+            "Independent of the example household and origin above."
+        )
+        which = (
+            st.segmented_control(
+                "Results for",
+                ["holdout", "development"],
+                default="holdout",
+                key="forecast-results-split",
+            )
+            or "holdout"
+        )
+        section = report["evaluation"][which]
+        st.caption(
+            f"**{which}** · {section['scored_predictions']:,} scored predictions over "
+            f"{section.get('households', '?')} households and "
+            f"{section.get('unique_household_targets', '?'):,} distinct target days · "
+            f"{section['excluded_predictions']:,} excluded. MAE pools predictions with "
+            "equal weight, in kWh per source date. All models are scored on identical "
+            "cases."
+            + (
+                f" The holdout is rolling: "
+                f"{section.get('predictions_with_an_input_inside_the_holdout_window', 0):,} "
+                "of its predictions use earlier holdout days as inputs, never later ones."
+                if which == "holdout"
+                else ""
+            )
+        )
+        left, right = st.columns(2)
+        with left:
+            st.altair_chart(
+                charts.model_error_chart(
+                    fc.model_frame(section), f"MAE (kWh) — {which}"
+                ),
+                width="stretch",
+            )
+        with right:
+            st.altair_chart(
+                charts.horizon_error_chart(fc.horizon_frame(section)), width="stretch"
+            )
+        st.dataframe(fc.model_table(section), width="stretch", hide_index=True)
+
+        sweep = report.get("weeks_sweep")
+        if sweep:
+            with st.expander("Does averaging more weeks help? (development only)"):
+                st.dataframe(fc.sweep_table(sweep), width="stretch", hide_index=True)
+                st.caption(
+                    f"Compared on the {sweep['compared_on_common_triples']:,} cases every "
+                    f"candidate predicted; {sweep['declined_by_some_candidate']:,} early "
+                    "cases were declined by the longest-history candidate, so the 4-week "
+                    "figure here is over a later, smaller frame than the headline one. "
+                    f"{sweep['note']}"
+                )
+
+        with st.expander("Where the predictions fail"):
+            if series is not None:
+                worst = fc.worst_days(series, fc.default_models(), fc.config_from(cfg))
+                st.markdown(
+                    f"The ten largest absolute errors for **{household_pick}**, across "
+                    "every origin in its run. Large errors concentrate on days unlike "
+                    "the same weekday before them — a household's routine changing, or "
+                    "an unusually high or low day. A weekday average cannot anticipate "
+                    "a one-off, and neither baseline is given anything but the "
+                    "household's own past totals."
+                )
+                st.dataframe(worst, width="stretch", hide_index=True)
+            st.markdown(
+                "**What these models are not given:** weather, occupancy, holidays, "
+                "tariff band, price, or any other household's data. They see one "
+                "household's earlier daily totals and nothing else."
+            )
+
+        with st.expander("Method, eligibility and run identity"):
+            st.markdown(
+                f"""
+**Eligibility, fixed before any result was read.** A day is usable only when all
+{f["expected_intervals"]} nominal half-hour labels carry a finite value, no missing-value
+token is recorded, and no label disagrees with itself. A household is eligible when it has
+one **contiguous** run of usable days of at least {f["min_run_days"]} days. Contiguity is
+required because the models are lag-based: a hole would change what "seven days earlier"
+means. Households are chosen by that rule and by id, never by how well they forecast.
+
+**Nothing is repaired.** Missing observations are not filled with zero, absent dates are
+not bridged, and a partially observed date is never treated as whole. A prediction that
+would depend on an unusable day is declined with a reason and excluded from scoring.
+
+**Rolling origins.** Origins step weekly. At each one the models may use only usable
+totals dated on or before it. The final {cfg["holdout_days"]} days of each run are a
+holdout, scored once; its later origins may use earlier holdout days as inputs, never
+later ones, and no model or parameter choice used holdout scores.
+
+**Selection uses hindsight.** Each household's clean run was found over its whole history,
+holdout included. That is a retrospective benchmark of the models, not operational
+accuracy: {sel.get("runs_ending_at_warehouse_end", "?")} of {len(selectable)} runs reach
+the warehouse's last date; the rest end at a later data-quality event.
+
+**MAE, not MAPE.** The loaded data contains daily totals of exactly zero, where a
+percentage error is undefined or explodes; MAPE would rank models by their behaviour on
+the smallest days.
+
+| Identity | |
+|---|---|
+| Dataset | `{report["identity"]["dataset_sha256"][:16]}…` |
+| Forecast code | `{report["identity"]["forecast_code_sha256"][:16]}…` |
+| Configuration | `{report["identity"]["config_sha256"][:16]}…` |
+| Runtime | {", ".join(f"{k} {v}" for k, v in sorted(report["identity"]["runtime"].items()))} |
+| Generated | {report["generated_at_utc"]} |
+
+**Timestamp convention.** {f["timestamp_convention"]}
+
+**Model identifiers (as recorded in the report and tests)**
+
+| Name on this page | Identifier |
+|---|---|
+| Same weekday, previous week | `seasonal_naive_7` |
+| 4-week weekday mean | `weekday_mean_4` |
+| Origin day repeated (reference) | `persistence_1` |
+"""
+            )
+            if section["exclusions"]:
+                st.markdown("**Excluded predictions, by reason**")
+                st.dataframe(
+                    fc.exclusion_frame(section), width="stretch", hide_index=True
+                )

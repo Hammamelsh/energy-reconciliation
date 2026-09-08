@@ -23,6 +23,7 @@ cloud deployment remain planned.
 
 See [`../README.md`](../README.md) for what runs today, and
 [`source-data-profile.md`](source-data-profile.md) section 16 for the REP-001 assessment.
+Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.md).
 
 ---
 
@@ -186,6 +187,30 @@ synthetic register scenarios are **not** started.
 - Performance claims match measurements; no invented distributed-scale story.
 - The maintainer can explain design choices and demonstrate a failure/recovery case.
 - A small usable GitHub demonstration is delivered before all optional work ends.
+
+---
+
+## FORE — Forecasting
+
+A strand alongside the milestones above, not a replacement for any of them. **dbt
+(ANL-003), reconciliation (M4), Airflow (M5), cloud (M6) and Spark (M7) all stand
+unchanged.**
+
+**FORE-001 — evaluated consumption forecasting.** Built; see
+[`tickets/FORE-001-forecasting-experiment.md`](tickets/FORE-001-forecasting-experiment.md).
+Seven-day daily-total backtest over 40 eligible households with rolling origins and an
+holdout: a four-week same-weekday mean reaches **1.901 kWh MAE** on holdout target days
+averaging 10.1 kWh, beating a one-week seasonal naive (2.121) and a persistence reference
+(2.322). A retrospective clean-run benchmark, not operational accuracy.
+
+Candidate follow-ups are recorded, with evidence and prerequisites, in
+[`ideas.md`](ideas.md). Recording an idea does not authorise it.
+
+**Complete when** (for the strand, not FORE-001)
+
+- A forecast is evaluated against a baseline it does not trivially beat.
+- Eligibility and exclusions are decided before results and never adjusted to flatter one.
+- No forecast is presented as a bill, a saving, or a claim about cause.
 
 ---
 

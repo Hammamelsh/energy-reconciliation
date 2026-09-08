@@ -30,6 +30,7 @@ build-tariff-scenario = "energy_reconciliation.tariff.cli:main"
 capture-baseline = "energy_reconciliation.tariff.baseline_cli:capture_main"
 replay-baseline = "energy_reconciliation.tariff.baseline_cli:replay_main"
 compare-scenarios = "energy_reconciliation.tariff.compare_cli:main"
+run-forecast-experiment = "energy_reconciliation.forecast.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

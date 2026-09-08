@@ -425,3 +425,182 @@ def band_kwh_by_hour_chart(distribution: pd.DataFrame) -> alt.Chart:
         )
         .properties(height=300)
     )
+
+
+# ---------------------------------------------------------------- forecasting
+#: User-facing names. Identifiers stay in method and export detail; a legend or a table
+#: header uses these. Order is the order series appear in legends.
+MODEL_LABELS = {
+    "observed": "Observed",
+    "seasonal_naive_7": "Same weekday, previous week",
+    "weekday_mean_4": "4-week weekday mean",
+    "persistence_1": "Origin day repeated (reference)",
+}
+#: One colour per series. "Observed" is the teal used for recorded quantities everywhere
+#: else in the app, so a prediction is never mistaken for a reading. Colour is not the
+#: only distinction: lines carry a dash pattern and points a shape per series.
+FORECAST_COLOURS = {
+    MODEL_LABELS["observed"]: TEAL,
+    MODEL_LABELS["seasonal_naive_7"]: AMBER,
+    MODEL_LABELS["weekday_mean_4"]: BLUE,
+    MODEL_LABELS["persistence_1"]: GREY,
+}
+MODEL_ONLY = [v for k, v in MODEL_LABELS.items() if k != "observed"]
+_SERIES_DASH = {
+    MODEL_LABELS["observed"]: [1, 0],
+    MODEL_LABELS["seasonal_naive_7"]: [6, 3],
+    MODEL_LABELS["weekday_mean_4"]: [2, 2],
+    MODEL_LABELS["persistence_1"]: [8, 2, 2, 2],
+}
+_SERIES_SHAPE = {
+    MODEL_LABELS["observed"]: "circle",
+    MODEL_LABELS["seasonal_naive_7"]: "triangle-up",
+    MODEL_LABELS["weekday_mean_4"]: "square",
+    MODEL_LABELS["persistence_1"]: "diamond",
+}
+
+
+def _series_scale(names: list[str]) -> alt.Scale:
+    """A colour scale whose domain is exactly the series being drawn -- never more."""
+    return alt.Scale(domain=names, range=[FORECAST_COLOURS[n] for n in names])
+
+
+def _legend() -> alt.Legend:
+    return alt.Legend(title=None, orient="top", labelFontSize=LABEL_SIZE, symbolSize=90)
+
+
+def observed_vs_predicted_chart(frame: pd.DataFrame) -> alt.Chart | alt.LayerChart:
+    """One forecast origin's horizon: the recorded total beside each model's prediction.
+
+    One tick per target source date: the axis is temporal, so ticks are pinned to whole
+    days rather than left to the renderer, which otherwise halves the interval and
+    repeats every label. A missing point is missing -- nothing is interpolated across it
+    and no zero is drawn, so a day a model declined is visibly absent.
+    """
+    if frame.empty or frame["value"].isna().all():
+        return empty_note("Nothing to plot for this origin.")
+    points = frame.dropna(subset=["value"])
+    present = [n for n in FORECAST_COLOURS if n in set(points["series"])]
+    base = alt.Chart(points)
+    x = alt.X(
+        "target_date:T",
+        title="Target source date",
+        axis=alt.Axis(
+            format="%a %-d %b",
+            tickCount={"interval": "day", "step": 1},
+            labelAngle=0,
+            labelFontSize=LABEL_SIZE,
+        ),
+    )
+    y = alt.Y(
+        "value:Q",
+        title="Daily total (kWh)",
+        axis=alt.Axis(format=QUANTITY_FORMAT, labelFontSize=LABEL_SIZE),
+    )
+    color = alt.Color(
+        "series:N", scale=_series_scale(present), sort=present, legend=_legend()
+    )
+    tooltip = [
+        alt.Tooltip("series:N", title="Series"),
+        alt.Tooltip("target_date:T", title="Target source date", format="%A %-d %b %Y"),
+        alt.Tooltip("horizon:Q", title="Days ahead"),
+        alt.Tooltip("value:Q", title="kWh", format=",.3f"),
+    ]
+    lines = base.mark_line(strokeWidth=2).encode(
+        x=x,
+        y=y,
+        color=color,
+        strokeDash=alt.StrokeDash(
+            "series:N",
+            scale=alt.Scale(domain=present, range=[_SERIES_DASH[n] for n in present]),
+            legend=None,
+        ),
+        tooltip=tooltip,
+    )
+    marks = base.mark_point(size=70, filled=True).encode(
+        x=x,
+        y=y,
+        color=color,
+        shape=alt.Shape(
+            "series:N",
+            scale=alt.Scale(domain=present, range=[_SERIES_SHAPE[n] for n in present]),
+            legend=None,
+        ),
+        tooltip=tooltip,
+    )
+    return alt.layer(lines, marks).properties(height=320)
+
+
+def model_error_chart(frame: pd.DataFrame, title: str) -> alt.Chart:
+    """MAE per model, horizontal so the names sit beside their bars."""
+    if frame.empty:
+        return empty_note("No scored predictions in this scope.")
+    order = list(frame.sort_values("mae_kwh")["model"])
+    base = alt.Chart(frame)
+    encoding = {
+        "y": alt.Y(
+            "model:N",
+            title=None,
+            sort=order,
+            axis=alt.Axis(labelFontSize=LABEL_SIZE + 1),
+        ),
+        "x": alt.X(
+            "mae_kwh:Q",
+            title=title,
+            axis=alt.Axis(format=QUANTITY_FORMAT, labelFontSize=LABEL_SIZE),
+        ),
+        "color": alt.Color("model:N", scale=_series_scale(order), legend=None),
+        "tooltip": [
+            alt.Tooltip("model:N", title="Model"),
+            alt.Tooltip("mae_kwh:Q", title="MAE kWh", format=",.3f"),
+            alt.Tooltip("count:Q", title="Scored predictions", format=","),
+        ],
+    }
+    bars = base.mark_bar(cornerRadiusTopRight=2, cornerRadiusBottomRight=2).encode(
+        **encoding
+    )
+    labels = base.mark_text(
+        align="left", baseline="middle", dx=4, fontSize=LABEL_SIZE, color=TEXT
+    ).encode(**{**encoding, "text": alt.Text("mae_label:N")})
+    return alt.layer(bars, labels).properties(height=alt.Step(30))
+
+
+def horizon_error_chart(frame: pd.DataFrame) -> alt.Chart:
+    """MAE against days ahead. The legend lists exactly the models drawn."""
+    if frame.empty:
+        return empty_note("No scored predictions in this scope.")
+    present = [n for n in MODEL_ONLY if n in set(frame["model"])]
+    return (
+        alt.Chart(frame)
+        .mark_line(point=alt.OverlayMarkDef(size=55), strokeWidth=2)
+        .encode(
+            x=alt.X(
+                "horizon:O",
+                title="Days ahead of the forecast origin",
+                axis=alt.Axis(labelAngle=0, labelFontSize=LABEL_SIZE),
+            ),
+            y=alt.Y(
+                "mae_kwh:Q",
+                title="MAE (kWh)",
+                scale=alt.Scale(zero=False),
+                axis=alt.Axis(format=QUANTITY_FORMAT, labelFontSize=LABEL_SIZE),
+            ),
+            color=alt.Color(
+                "model:N", scale=_series_scale(present), sort=present, legend=_legend()
+            ),
+            strokeDash=alt.StrokeDash(
+                "model:N",
+                scale=alt.Scale(
+                    domain=present, range=[_SERIES_DASH[n] for n in present]
+                ),
+                legend=None,
+            ),
+            tooltip=[
+                alt.Tooltip("model:N", title="Model"),
+                alt.Tooltip("horizon:O", title="Days ahead"),
+                alt.Tooltip("mae_kwh:Q", title="MAE kWh", format=",.3f"),
+                alt.Tooltip("count:Q", title="Scored predictions", format=","),
+            ],
+        )
+        .properties(height=300)
+    )

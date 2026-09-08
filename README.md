@@ -92,6 +92,9 @@ Everything on the page is computed for the same household and the same source-da
 - **Tariff scenario** — the band schedule, the prices, and the scenario charge under
   assumption `A1`, for this household and for every charged household, with the schedule's
   own shape kept separate from what the loaded households did. See below.
+- **Forecast (backtest)** — observed against predicted for one forecast origin, and the
+  baseline comparison by model and horizon, with the prediction target, origin, horizon and
+  evaluation scope all stated on the page.
 - **Source records** — rows exactly as loaded, paginated, each with its member and record
   number, followed by the loaded-file inventory.
 
@@ -200,13 +203,41 @@ a digest over every charged row. It exits non-zero if anything differs. Baseline
 Measurements over members 4, 5 and 135 (27 real `ToU` households, 2013), what they show and what
 they do not: [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md).
 
+## Forecasting (backtest)
+
+How much of a household's next week is predictable from its own past daily totals?
+
+```bash
+uv run run-forecast-experiment --database data/warehouse/energy.duckdb
+```
+
+Then open the **Forecast (backtest)** tab. The target is one household's recorded
+consumption, in kWh, grouped by **source-date label** — a grouping of labels as written,
+whose correspondence to a local calendar day is not established, and not proof the meter
+covered the whole day.
+
+Two baselines are compared, plus a persistence reference: the same source weekday from the
+previous week, and a four-week same-weekday mean. Origins roll weekly, each model sees only
+data dated on or before its origin, and the final 28 days of each household's run are an
+holdout scored once. **Holdout MAE: 1.901 kWh for the four-week mean**, against 2.121 for
+the one-week naive, over holdout target days averaging 10.1 kWh. The forty households are
+a retrospective, clean-run cohort chosen by data criteria, not an operational sample.
+
+A model that needs an unusable day **declines** and says why. Nothing is filled with zero,
+no absent date is bridged, and a partial date is never treated as whole. MAE is used rather
+than MAPE because 975 daily totals in the loaded data are exactly zero.
+
+This is a **historical backtest, not a live forecast**, and it is not a bill, a saving, an
+appliance claim or a statement about tariff response. Details and limits:
+[`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
+
 ## Tests
 
 ```bash
 uv run pytest -q
 ```
 
-231 tests, all synthetic. **No dataset needed** — every fixture builds a small zip archive in a
+305 tests, all synthetic. **No dataset needed** — every fixture builds a small zip archive in a
 temporary directory. The tariff tests check hand-computed figures written in each test's
 docstring: price-unit conversion, band boundaries, a duplicated schedule key, an unmatched
 reading, readings outside the schedule period, conflicts, and repeated autumn timestamp labels.
@@ -348,6 +379,8 @@ schedule is read with `openpyxl`. `pytest` and `ruff` are development dependenci
 | [`docs/profiling.md`](docs/profiling.md) | Running the profiler; what the report contains |
 | [`docs/anl-001-tariff-workbook-findings.md`](docs/anl-001-tariff-workbook-findings.md) | What the tariff workbook actually contains |
 | [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md) | The tariff scenario: model, measurements and limits |
+| [`docs/rec-001-source-expansion.md`](docs/rec-001-source-expansion.md) | Reproducing a result, and explaining what more source changed |
+| [`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md) | The forecasting backtest: design, results and limits |
 | [`docs/source-data-profile.md`](docs/source-data-profile.md) | The full source investigation |
 | [`docs/rep-001-verified-facts.md`](docs/rep-001-verified-facts.md) | What is established, with evidence |
 | [`docs/rep-001-assumptions-and-open-questions.md`](docs/rep-001-assumptions-and-open-questions.md) | What is not established |
