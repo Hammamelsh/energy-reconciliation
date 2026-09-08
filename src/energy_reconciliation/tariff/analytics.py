@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
+from typing import Final
 
 import pandas as pd
 
@@ -57,6 +58,97 @@ CHARGE_SCOPE = (
 #: Band order used in every table and chart: cheapest to dearest, so a reader compares
 #: like with like instead of whatever order the database returned.
 BAND_ORDER = ("Low", "Normal", "High")
+
+
+#: Schemas a relation may live in. ``main`` is what ingestion and the Python scenario
+#: builder write; ``scenario_build`` is what dbt builds. Nothing else is addressable, and
+#: a name is never taken from a caller: :class:`Relations` is built from these two fixed
+#: vocabularies, so no query here can be pointed at an arbitrary identifier.
+WAREHOUSE_SCHEMA: Final[str] = "main"
+BUILD_SCHEMA: Final[str] = "scenario_build"
+_SCHEMAS: Final[frozenset[str]] = frozenset({WAREHOUSE_SCHEMA, BUILD_SCHEMA})
+
+_TABLES: Final[frozenset[str]] = frozenset(
+    {
+        "readings",
+        "load_registry",
+        "fact_interval_charge_scenario",
+        "fact_interval_charge_exclusion",
+        "dim_tariff_band_schedule",
+        "dim_tariff_price",
+        "scenario_run",
+    }
+)
+
+
+class RelationError(ValueError):
+    """A relation was not one of the fixed schema/table pairs this module may read."""
+
+
+def _relation(schema: str, table: str) -> str:
+    """A fully qualified relation name, checked against the two fixed vocabularies."""
+    if schema not in _SCHEMAS or table not in _TABLES:
+        raise RelationError(
+            f"{schema}.{table} is not a readable relation. Schemas: "
+            f"{sorted(_SCHEMAS)}; tables: {sorted(_TABLES)}."
+        )
+    return f"{schema}.{table}"
+
+
+@dataclass(frozen=True, slots=True)
+class Relations:
+    """Which relations a read goes to, fully qualified and fixed at construction.
+
+    Routing is explicit and per query. It is deliberately **not** a session search path:
+    a search path is process-wide state that would silently decide, at some later
+    statement, which of two schemas a bare ``fact_interval_charge_scenario`` meant -- and
+    the two hold different runs of different builders. Every query below names its schema.
+
+    ``scenario_run`` exists only on the Python route. On the dbt route it is ``None``, and
+    the functions that need it refuse rather than fall back to ``main``.
+    """
+
+    readings: str
+    load_registry: str
+    fact_scenario: str
+    fact_exclusion: str
+    dim_schedule: str
+    dim_price: str
+    scenario_run: str | None
+    label: str
+
+    @property
+    def has_run_table(self) -> bool:
+        return self.scenario_run is not None
+
+
+#: The Python scenario builder's outputs, all in ``main``. Every existing caller keeps
+#: this route by default, so nothing that works today changes.
+WAREHOUSE_RELATIONS: Final[Relations] = Relations(
+    readings=_relation(WAREHOUSE_SCHEMA, "readings"),
+    load_registry=_relation(WAREHOUSE_SCHEMA, "load_registry"),
+    fact_scenario=_relation(WAREHOUSE_SCHEMA, "fact_interval_charge_scenario"),
+    fact_exclusion=_relation(WAREHOUSE_SCHEMA, "fact_interval_charge_exclusion"),
+    dim_schedule=_relation(WAREHOUSE_SCHEMA, "dim_tariff_band_schedule"),
+    dim_price=_relation(WAREHOUSE_SCHEMA, "dim_tariff_price"),
+    scenario_run=_relation(WAREHOUSE_SCHEMA, "scenario_run"),
+    label="python warehouse (main)",
+)
+
+#: A validated dbt build. The **inputs** still come from ``main`` -- a build never writes
+#: them, and a version file holds one coherent copy -- while every tariff relation comes
+#: from ``scenario_build``. There is no ``scenario_run``: the run identity comes from the
+#: build record and the seal, never from the copied Python run that shares the file.
+DBT_RELATIONS: Final[Relations] = Relations(
+    readings=_relation(WAREHOUSE_SCHEMA, "readings"),
+    load_registry=_relation(WAREHOUSE_SCHEMA, "load_registry"),
+    fact_scenario=_relation(BUILD_SCHEMA, "fact_interval_charge_scenario"),
+    fact_exclusion=_relation(BUILD_SCHEMA, "fact_interval_charge_exclusion"),
+    dim_schedule=_relation(BUILD_SCHEMA, "dim_tariff_band_schedule"),
+    dim_price=_relation(BUILD_SCHEMA, "dim_tariff_price"),
+    scenario_run=None,
+    label="dbt build (scenario_build)",
+)
 
 
 def _con(database: Path):
@@ -249,15 +341,48 @@ class ScenarioAvailability:
 
 
 def scenario_columns(database: Path) -> tuple[str, ...] | None:
-    """The persisted ``scenario_run`` columns, or None if the table is absent."""
+    """The persisted ``main.scenario_run`` columns, or None if the table is absent.
+
+    The Python route only: ``scenario_run`` is written by ``build-tariff-scenario`` and
+    a dbt build creates nothing like it. See :func:`require_run_table`.
+    """
     con = _con(database)
     try:
-        names = {r[0] for r in con.execute("SHOW TABLES").fetchall()}
-        if "scenario_run" not in names:
+        found = con.execute(
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = ? "
+            "AND table_name = 'scenario_run'",
+            [WAREHOUSE_SCHEMA],
+        ).fetchone()[0]
+        if not found:
             return None
-        return tuple(r[0] for r in con.execute("DESCRIBE scenario_run").fetchall())
+        return tuple(
+            r[0]
+            for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE "
+                "table_schema = ? AND table_name = 'scenario_run' "
+                "ORDER BY ordinal_position",
+                [WAREHOUSE_SCHEMA],
+            ).fetchall()
+        )
     finally:
         con.close()
+
+
+def require_run_table(relations: Relations, what: str) -> str:
+    """The ``scenario_run`` relation, or an explicit refusal.
+
+    A dbt build records its identity in ``scenario_build.dbt_build_run`` and in its seal,
+    which is a **different record with different fields**. Falling back to
+    ``main.scenario_run`` would answer with the copied Python run that happens to share
+    the file, so this raises instead.
+    """
+    if relations.scenario_run is None:
+        raise ScenarioSchemaError(
+            f"{what} needs a scenario_run table, which the {relations.label} route does "
+            "not have. A dbt build's identity is its build record and seal; read it from "
+            "the read context instead of this function. Nothing was read from main."
+        )
+    return relations.scenario_run
 
 
 def scenario_availability(database: Path) -> ScenarioAvailability:
@@ -300,7 +425,8 @@ def latest_run(database: Path) -> RunRecord | None:
     con = _con(database)
     try:
         row = con.execute(
-            f"SELECT {_RUN_COLUMNS} FROM scenario_run WHERE status = 'published' "
+            f"SELECT {_RUN_COLUMNS} FROM {WAREHOUSE_SCHEMA}.scenario_run "
+            "WHERE status = 'published' "
             "ORDER BY run_at_utc DESC LIMIT 1"
         ).fetchone()
     finally:
@@ -336,13 +462,15 @@ def _fact_scope(
     return _period(where, params, start, end, "source_date")
 
 
-def schedule_bounds(database: Path) -> tuple[date, date] | None:
+def schedule_bounds(
+    database: Path, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> tuple[date, date] | None:
     """The schedule's own coverage. The scenario period control is bounded by this."""
     con = _con(database)
     try:
         row = con.execute(
             "SELECT MIN(CAST(schedule_label_naive AS DATE)), "
-            "MAX(CAST(schedule_label_naive AS DATE)) FROM dim_tariff_band_schedule"
+            f"MAX(CAST(schedule_label_naive AS DATE)) FROM {relations.dim_schedule}"
         ).fetchone()
     finally:
         con.close()
@@ -360,6 +488,10 @@ class Accounting:
     included_readings: int
     excluded_readings: int
     by_reason: dict[str, int]
+    #: True when the figures were counted from the relations rather than read from a
+    #: recorded ``scenario_run`` row. Kept visible so a caller never presents a derived
+    #: ladder as the one the builder wrote down.
+    derived: bool = False
 
     @property
     def reconciles(self) -> bool:
@@ -371,19 +503,27 @@ class Accounting:
         )
 
 
-def accounting(database: Path, run_id: str) -> Accounting:
-    """WHOLE RUN. The unscoped ladder recorded when the scenario was built."""
+def accounting(
+    database: Path, run_id: str, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> Accounting:
+    """WHOLE RUN. The unscoped ladder **recorded** when the Python scenario was built.
+
+    Python route only, because the figures are read from the ``scenario_run`` row. The
+    dbt route has :func:`counted_accounting`, which derives the same ladder by counting
+    and says so.
+    """
+    run_table = require_run_table(relations, "accounting()")
     con = _con(database)
     try:
         run = con.execute(
             "SELECT raw_rows, rows_collapsed_by_policy, distinct_readings, "
-            "included_readings, excluded_readings FROM scenario_run WHERE run_id = ?",
+            f"included_readings, excluded_readings FROM {run_table} WHERE run_id = ?",
             [run_id],
         ).fetchone()
         reasons = dict(
             con.execute(
-                "SELECT exclusion_reason, COUNT(*) FROM fact_interval_charge_exclusion "
-                "WHERE run_id = ? GROUP BY 1",
+                "SELECT exclusion_reason, COUNT(*) FROM "
+                f"{relations.fact_exclusion} WHERE run_id = ? GROUP BY 1",
                 [run_id],
             ).fetchall()
         )
@@ -401,12 +541,63 @@ def accounting(database: Path, run_id: str) -> Accounting:
     )
 
 
+def counted_accounting(
+    database: Path, run_id: str, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> Accounting:
+    """WHOLE RUN. The same ladder, **derived by counting** the relations themselves.
+
+    For a dbt build there is no recorded ladder to read, so each figure is counted the
+    way ``models._counts`` counts it: ``raw_rows`` from every loaded reading,
+    ``included``/``excluded`` from the two facts, and ``rows_collapsed_by_policy`` as
+    ``raw_rows - distinct_readings``. ``distinct_readings`` is ``included + excluded``,
+    which is exactly what dbt's ``assert_charged_plus_excluded_equals_distinct`` test
+    proves against the policy definition -- so this is a count, never an assumption, and
+    ``reconciles`` still has to hold. ``derived`` is True so a caller can say which it is.
+    """
+    con = _con(database)
+    try:
+        raw_rows = con.execute(f"SELECT COUNT(*) FROM {relations.readings}").fetchone()[
+            0
+        ]
+        included = con.execute(
+            f"SELECT COUNT(*) FROM {relations.fact_scenario} WHERE run_id = ?",
+            [run_id],
+        ).fetchone()[0]
+        excluded = con.execute(
+            f"SELECT COUNT(*) FROM {relations.fact_exclusion} WHERE run_id = ?",
+            [run_id],
+        ).fetchone()[0]
+        reasons = dict(
+            con.execute(
+                "SELECT exclusion_reason, COUNT(*) FROM "
+                f"{relations.fact_exclusion} WHERE run_id = ? GROUP BY 1",
+                [run_id],
+            ).fetchall()
+        )
+    finally:
+        con.close()
+    distinct = int(included) + int(excluded)
+    return Accounting(
+        raw_rows=int(raw_rows),
+        rows_collapsed_by_policy=int(raw_rows) - distinct,
+        distinct_readings=distinct,
+        included_readings=int(included),
+        excluded_readings=int(excluded),
+        by_reason={
+            r: int(reasons.get(r, 0)) for r in EXCLUSION_REASONS if r in reasons
+        },
+        derived=True,
+    )
+
+
 def exclusion_breakdown(
     database: Path,
     run_id: str,
     household: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """Why readings were not charged, **measured** for exactly this selection.
 
@@ -419,7 +610,7 @@ def exclusion_breakdown(
         frame = con.execute(
             "SELECT exclusion_reason, COUNT(*) AS readings, "
             "MIN(source_date) AS first_date, MAX(source_date) AS last_date "
-            f"FROM fact_interval_charge_exclusion WHERE {where} "
+            f"FROM {relations.fact_exclusion} WHERE {where} "
             "GROUP BY 1 ORDER BY 2 DESC",
             params,
         ).df()
@@ -433,6 +624,8 @@ def exclusion_examples(
     run_id: str,
     household: str | None = None,
     limit: int = 200,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """A sample of excluded readings with their reason and every condition flag."""
     where, params = _fact_scope(run_id, household, None, None)
@@ -442,7 +635,7 @@ def exclusion_examples(
             "SELECT exclusion_reason, household_id, tariff_group, "
             "source_timestamp_text, value_category, on_half_hour_grid, "
             "is_conflicted, is_off_grid, is_missing_value, is_outside_schedule_period, "
-            f"is_unmatched_label FROM fact_interval_charge_exclusion WHERE {where} "
+            f"is_unmatched_label FROM {relations.fact_exclusion} WHERE {where} "
             "ORDER BY exclusion_reason, household_id, observed_at_naive LIMIT ?",
             [*params, limit],
         ).df()
@@ -451,7 +644,9 @@ def exclusion_examples(
 
 
 # ----------------------------------------------------------- schedule-wide view
-def schedule_band_distribution(database: Path) -> pd.DataFrame:
+def schedule_band_distribution(
+    database: Path, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> pd.DataFrame:
     """SCHEDULE-WIDE. Half-hour slots per band by source hour and month.
 
     Describes the published schedule only. Independent of which households are loaded,
@@ -463,19 +658,21 @@ def schedule_band_distribution(database: Path) -> pd.DataFrame:
             "SELECT band_label, "
             "CAST(EXTRACT(hour FROM schedule_label_naive) AS SMALLINT)  AS source_hour, "
             "CAST(EXTRACT(month FROM schedule_label_naive) AS SMALLINT) AS source_month, "
-            "COUNT(*) AS slots FROM dim_tariff_band_schedule "
+            f"COUNT(*) AS slots FROM {relations.dim_schedule} "
             "GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
         ).df()
     finally:
         con.close()
 
 
-def schedule_totals(database: Path) -> pd.DataFrame:
+def schedule_totals(
+    database: Path, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> pd.DataFrame:
     """SCHEDULE-WIDE. Slots and hours per band, with the slot-count denominator."""
     con = _con(database)
     try:
         frame = con.execute(
-            "SELECT band_label, COUNT(*) AS slots FROM dim_tariff_band_schedule "
+            f"SELECT band_label, COUNT(*) AS slots FROM {relations.dim_schedule} "
             "GROUP BY 1"
         ).df()
     finally:
@@ -522,6 +719,8 @@ def band_summary(
     household: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """Recorded eligible kWh and scenario charge, by band, for one explicit scope.
 
@@ -543,7 +742,7 @@ def band_summary(
             "COUNT(DISTINCT household_id) AS households, "
             "SUM(consumption_kwh) AS kwh, SUM(energy_charge_gbp) AS charge, "
             "MIN(price_pence_per_kwh) AS price_pence "
-            f"FROM fact_interval_charge_scenario WHERE {where} GROUP BY 1",
+            f"FROM {relations.fact_scenario} WHERE {where} GROUP BY 1",
             params,
         ).fetchall()
     finally:
@@ -590,6 +789,8 @@ def household_band_distribution(
     household: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """LOADED SAMPLE. Charged readings and kWh per band, by source hour."""
     where, params = _fact_scope(run_id, household, start, end)
@@ -597,7 +798,7 @@ def household_band_distribution(
     try:
         frame = con.execute(
             "SELECT band_label, source_hour, COUNT(*) AS readings, "
-            "SUM(consumption_kwh) AS kwh FROM fact_interval_charge_scenario "
+            f"SUM(consumption_kwh) AS kwh FROM {relations.fact_scenario} "
             f"WHERE {where} GROUP BY 1, 2 ORDER BY 2, 1",
             params,
         ).df()
@@ -616,6 +817,8 @@ def monthly_charge(
     household: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """LOADED SAMPLE. Charged kWh and scenario charge by source month and band."""
     where, params = _fact_scope(run_id, household, start, end)
@@ -624,7 +827,7 @@ def monthly_charge(
         frame = con.execute(
             "SELECT source_month, band_label, COUNT(*) AS readings, "
             "SUM(consumption_kwh) AS kwh, SUM(energy_charge_gbp) AS charge "
-            f"FROM fact_interval_charge_scenario WHERE {where} "
+            f"FROM {relations.fact_scenario} WHERE {where} "
             "GROUP BY 1, 2 ORDER BY 1, 2",
             params,
         ).df()
@@ -646,6 +849,8 @@ def household_totals(
     run_id: str,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> pd.DataFrame:
     """LOADED SAMPLE. One row per household charged in this run and period."""
     where, params = _fact_scope(run_id, None, start, end)
@@ -654,7 +859,7 @@ def household_totals(
         rows = con.execute(
             "SELECT household_id, COUNT(*) AS readings, MIN(source_date) AS first_date, "
             "MAX(source_date) AS last_date, SUM(consumption_kwh) AS kwh, "
-            "SUM(energy_charge_gbp) AS charge FROM fact_interval_charge_scenario "
+            f"SUM(energy_charge_gbp) AS charge FROM {relations.fact_scenario} "
             f"WHERE {where} GROUP BY 1 ORDER BY 1",
             params,
         ).fetchall()
@@ -678,7 +883,12 @@ def household_totals(
 
 
 def charged_households(
-    database: Path, run_id: str, start: date | None = None, end: date | None = None
+    database: Path,
+    run_id: str,
+    start: date | None = None,
+    end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> list[str]:
     """Households with at least one charged reading in this scope, for an explicit pick."""
     where, params = _fact_scope(run_id, None, start, end)
@@ -687,7 +897,7 @@ def charged_households(
         return [
             r[0]
             for r in con.execute(
-                "SELECT DISTINCT household_id FROM fact_interval_charge_scenario "
+                f"SELECT DISTINCT household_id FROM {relations.fact_scenario} "
                 f"WHERE {where} ORDER BY 1",
                 params,
             ).fetchall()
@@ -696,7 +906,9 @@ def charged_households(
         con.close()
 
 
-def tariff_group_stability(database: Path) -> pd.DataFrame:
+def tariff_group_stability(
+    database: Path, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> pd.DataFrame:
     """Measured, not assumed: households recorded under more than one tariff group.
 
     AQ-22/AQ-23 ask whether ``stdorToU`` is fixed per household or varies over time.
@@ -706,22 +918,24 @@ def tariff_group_stability(database: Path) -> pd.DataFrame:
     try:
         return con.execute(
             "SELECT household_id, COUNT(DISTINCT tariff_group) AS groups, "
-            "STRING_AGG(DISTINCT tariff_group, '|') AS values FROM readings "
+            f"STRING_AGG(DISTINCT tariff_group, '|') AS values FROM {relations.readings} "
             "GROUP BY 1 HAVING COUNT(DISTINCT tariff_group) > 1 ORDER BY 1"
         ).df()
     finally:
         con.close()
 
 
-def household_tariff_groups(database: Path, household: str) -> list[str]:
+def household_tariff_groups(
+    database: Path, household: str, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> list[str]:
     """The tariff group(s) this household is actually recorded under."""
     con = _con(database)
     try:
         return [
             r[0]
             for r in con.execute(
-                "SELECT DISTINCT tariff_group FROM readings WHERE household_id = ? "
-                "ORDER BY 1",
+                f"SELECT DISTINCT tariff_group FROM {relations.readings} "
+                "WHERE household_id = ? ORDER BY 1",
                 [household],
             ).fetchall()
         ]
@@ -729,7 +943,9 @@ def household_tariff_groups(database: Path, household: str) -> list[str]:
         con.close()
 
 
-def price_catalogue(database: Path) -> pd.DataFrame:
+def price_catalogue(
+    database: Path, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> pd.DataFrame:
     con = _con(database)
     try:
         return con.execute(
@@ -737,7 +953,7 @@ def price_catalogue(database: Path) -> pd.DataFrame:
             "currency, CAST(effective_from AS VARCHAR) AS effective_from, "
             "CAST(effective_until AS VARCHAR) AS effective_until, "
             "evidence_label, catalogue_version "
-            "FROM dim_tariff_price ORDER BY tariff_group, band_label"
+            f"FROM {relations.dim_price} ORDER BY tariff_group, band_label"
         ).df()
     finally:
         con.close()
@@ -764,6 +980,8 @@ def selection_insights(
     household: str | None = None,
     start: date | None = None,
     end: date | None = None,
+    *,
+    relations: Relations = WAREHOUSE_RELATIONS,
 ) -> list[Insight]:
     """Up to three insights for exactly this selection. Empty selection -> no insights.
 
@@ -774,7 +992,7 @@ def selection_insights(
     interval was metered: a label present in the data says a row was recorded, not that
     the meter covered the whole half hour, and the timestamp convention is unresolved.
     """
-    bands = band_summary(database, run_id, household, start, end)
+    bands = band_summary(database, run_id, household, start, end, relations=relations)
     if bands.empty:
         return []
     readings = int(bands.attrs["denominator_readings"])
@@ -787,7 +1005,7 @@ def selection_insights(
     try:
         slots = int(
             con.execute(
-                f"SELECT COUNT(*) FROM dim_tariff_band_schedule WHERE {where}", params
+                f"SELECT COUNT(*) FROM {relations.dim_schedule} WHERE {where}", params
             ).fetchone()[0]
         )
     finally:
@@ -814,7 +1032,7 @@ def selection_insights(
             )
         )
     else:
-        totals = household_totals(database, run_id, start, end)
+        totals = household_totals(database, run_id, start, end, relations=relations)
         lo, hi = (
             totals.iloc[totals["charged_readings"].idxmin()],
             totals.iloc[totals["charged_readings"].idxmax()],
@@ -857,7 +1075,9 @@ def selection_insights(
     )
 
     # 3. the hour holding the most charged kWh
-    hours = household_band_distribution(database, run_id, household, start, end)
+    hours = household_band_distribution(
+        database, run_id, household, start, end, relations=relations
+    )
     if not hours.empty:
         by_hour = hours.groupby("source_hour")["kwh"].sum()
         peak = int(by_hour.idxmax())

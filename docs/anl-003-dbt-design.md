@@ -509,6 +509,58 @@ the whole build, and the fingerprint needs the Python identity functions.
 comparison as the skip rule:* it compares model source, not schedule contents, price
 version, runtime or input identity, all of which the fingerprint must cover.
 
+### D9 — The supported read contract: an explicit, validated context, never a bare relation name (DECIDED and IMPLEMENTED 2026-09-08)
+
+**The defect this closes was found by review, not by a failure.** A sealed candidate is a
+whole-warehouse snapshot, so it holds **two** tariff scenarios: the Python one copied from
+the source in `main`, and dbt's in `scenario_build`. Every query in `analytics.py` named
+its relations bare (`FROM fact_interval_charge_scenario`), and DuckDB resolves a bare name
+in `main`. Pointing a reader at a candidate would therefore have shown the **copied Python
+figures** under the candidate's name, with `main.scenario_run`'s identity beside them.
+Nothing would have raised.
+
+**Decision.** Relations are routed explicitly, per query, through an immutable context.
+
+| Option | Verdict |
+|---|---|
+| Session `SET search_path = scenario_build, main` | **rejected**: process-wide state deciding, at some later statement, which of two schemas a bare name meant — and the two hold different runs by different builders. A reader that forgets to set it reads `main` silently. |
+| Copy dbt's tables over `main.*` in the candidate | rejected: destroys the evidence of what each builder produced, and makes the seal's digest describe tables nobody can compare. |
+| **Fully qualified names from a validated `Relations` value, threaded through every call** | **chosen**: the schema is in the SQL text, the value is built from two fixed vocabularies (`main`/`scenario_build`, seven known tables) so no caller-supplied identifier is ever interpolated, and the dbt route has **no** `scenario_run` at all, so a function needing one raises instead of falling back. |
+
+**The surface** (`tariff/reads.py`): `published(root)` resolves the manifest **once** and
+returns a `ReadContext`; `candidate(path)` does the same for a sealed file being inspected;
+`warehouse(database)` is the unchanged legacy route. A context binds the database path, the
+relations, the run id, and a `BuildIdentity` from the build record and the seal. Validation
+happens once, at that boundary: manifest ↔ seal ↔ build record ↔ file bytes ↔ built-table
+digest must all agree, and any disagreement names the two pieces of evidence that differ.
+`tariff_report(context, …)` is one complete analytical operation over one context.
+
+**Identity is mapped, never renamed.** A dbt build has no `scenario_fingerprint` and no
+`ingestion_pipeline_fingerprint`, so `BuildIdentity` has neither, and `dbt_project_sha256`
+is never presented as either. What genuinely agrees keeps its name: tariff group, schedule
+source and digest, price catalogue version, policy digest, runtime versions. The
+reconciliation ladder is **read** from `scenario_run` on the Python route and **counted**
+on the dbt route (`Accounting.derived` is True), because dbt records no such row.
+
+**Active versus inspected.** `role` is `published` only for the file the manifest named when
+the context resolved; a sealed candidate is `candidate`, `is_active_publication` is False and
+the label says *NOT published*. A context already held stays bound to its version across a
+promotion — tested — which is what makes "resolve once per rerun" safe.
+
+**Producer eligibility, and why the reader could not be exposed without it.** Before this
+slice, `finalise` accepted any attempt whose recorded command began with `build`. Measured:
+`run-dbt … build --exclude test_type:singular` builds every model, **skips all eleven
+singular tests** (reconciliation, exact arithmetic, reason precedence), exits 0, was
+recorded as `succeeded` and **was sealed**. Exit code 0 and the word `build` are not
+evidence that the project was built. So every attempt now records its coverage from dbt's
+own artefacts for that invocation — the required node set from `manifest.json` (enabled,
+non-ephemeral models plus every test), each executed node's status from `run_results.json`,
+their digest, dbt's `invocation_id`, and any required node that did not pass — and
+`required_build` is `complete` only when none is missing. Stale artefacts cannot satisfy
+it: the two files must share an invocation id, and it must post-date the attempt's start.
+`finalise` and `reads` both refuse anything else. The required set is the project's own, so
+adding a model or a test raises the bar without touching this code.
+
 ### D6 — Run identity extends to the dbt files; nothing is dropped
 
 **Candidate identity complete (2026-09-08); published identity deliberately unchanged.**

@@ -31,9 +31,19 @@ completes it afterwards:
   variables) and the **path of the file it was recorded in**. The connection is closed
   before dbt starts: DuckDB locks the file, and dbt could not open it otherwise.
 - ``succeeded`` -- dbt exited 0. The row gains a digest of the built tables (see
-  :func:`build_output_digest`) and the schedule and catalogue identity read from the
-  dimension rows dbt wrote.
+  :func:`build_output_digest`), the schedule and catalogue identity read from the
+  dimension rows dbt wrote, and **which of the project's required nodes actually ran**
+  (see :func:`node_coverage`).
 - ``failed`` -- dbt exited non-zero. Recorded when this process survives to record it.
+
+**Exit code 0 is not evidence that the project was built.** Measured on 2026-09-08:
+``run-dbt … build --exclude test_type:singular`` builds every model, skips all eleven
+singular tests -- the reconciliation, exact-arithmetic and reason-precedence checks --
+exits 0, and was recorded as ``succeeded`` and **sealed**. So every attempt now records
+its node coverage, taken from dbt's own ``manifest.json`` and ``run_results.json`` for
+that invocation: which nodes the project requires, which ones ran, with what status, and
+which required ones are missing. ``required_build`` is ``complete`` only when every
+required node passed, and ``publication.finalise`` refuses anything else.
 
 An attempt left ``started`` -- this process was killed while dbt ran, or dbt is still
 running -- is neither a success nor a recorded failure, and ``publication.finalise``
@@ -60,6 +70,7 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
@@ -92,6 +103,22 @@ CANDIDATE_PREFIX: Final[str] = "dbtcand"
 
 #: Attempt states. ``started`` is the only state a row is created in.
 STARTED, SUCCEEDED, FAILED = "started", "succeeded", "failed"
+
+#: Whether the attempt ran every node the project requires. Only ``COMPLETE`` may be
+#: sealed; ``INCOMPLETE`` records a real, truthfully-reported partial invocation.
+COMPLETE, INCOMPLETE = "complete", "incomplete"
+
+#: Node statuses dbt reports for a node that did what it was asked. ``skipped`` is not
+#: among them: a skipped required node is a node that did not run.
+_PASSING: Final[frozenset[str]] = frozenset({"success", "pass"})
+
+#: Resource types a build is required to execute. ``operation`` (the on-run-start guard)
+#: is excluded because it is not a node the project defines as an output or a check.
+_REQUIRED_KINDS: Final[frozenset[str]] = frozenset({"model", "test"})
+
+#: An ephemeral model is never executed as a node -- dbt inlines it into its dependents --
+#: so requiring it to appear in the run results would fail every complete build.
+_EPHEMERAL: Final[str] = "ephemeral"
 
 #: Identifies the canonicalisation :func:`build_output_digest` implements. Recorded with
 #: every succeeded attempt and in the seal, and compared before a digest is compared, so
@@ -133,6 +160,12 @@ _BUILD_RUN_SCHEMA: Final[tuple[tuple[str, str], ...]] = (
     ("price_catalogue_version", "VARCHAR"),
     ("output_digest_version", "VARCHAR"),
     ("built_output_sha256", "VARCHAR"),
+    ("dbt_invocation_id", "VARCHAR"),
+    ("required_build", "VARCHAR"),
+    ("required_nodes_total", "INTEGER"),
+    ("missing_required_nodes", "VARCHAR"),
+    ("node_results_sha256", "VARCHAR"),
+    ("node_results", "VARCHAR"),
     ("note", "VARCHAR NOT NULL"),
 )
 _BUILD_RUN_COLUMNS: Final[tuple[str, ...]] = tuple(n for n, _ in _BUILD_RUN_SCHEMA)
@@ -238,6 +271,142 @@ def build_output_digest(con) -> str:
     return digest.hexdigest()
 
 
+@dataclass(frozen=True, slots=True)
+class NodeCoverage:
+    """Which of the project's required nodes this invocation actually ran.
+
+    Derived from **dbt's own artefacts for this invocation**, never from a count fixed in
+    this code: the required set is every enabled, non-ephemeral model and every enabled
+    test in ``manifest.json``, and the statuses are the ones in ``run_results.json``.
+    Adding a model or a test to the project therefore raises the bar automatically.
+    """
+
+    state: str
+    reason: str
+    invocation_id: str | None
+    required_total: int
+    statuses: dict[str, str]
+    missing: tuple[str, ...]
+
+    @property
+    def complete(self) -> bool:
+        return self.state == COMPLETE
+
+    @property
+    def digest(self) -> str:
+        """A digest over every node and the status it ended in, in a fixed order."""
+        material = "".join(f"{k}={self.statuses[k]}\n" for k in sorted(self.statuses))
+        return hashlib.sha256(material.encode()).hexdigest()
+
+
+def _artefact(target: Path, name: str) -> dict[str, Any] | None:
+    path = target / name
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):  # pragma: no cover - unreadable artefact
+        return None
+
+
+def required_nodes(manifest: dict[str, Any]) -> set[str]:
+    """Every node the project requires an invocation to execute.
+
+    Enabled models that are actually materialised, plus enabled tests, from this
+    project's own package. Ephemeral models are excluded because dbt inlines them: they
+    are exercised through their dependents, and can never appear in run results.
+    """
+    project = manifest.get("metadata", {}).get("project_name")
+    out: set[str] = set()
+    for unique_id, node in manifest.get("nodes", {}).items():
+        config = node.get("config", {})
+        if node.get("resource_type") not in _REQUIRED_KINDS:
+            continue
+        if node.get("package_name") != project or not config.get("enabled", True):
+            continue
+        if (
+            node.get("resource_type") == "model"
+            and config.get("materialized") == _EPHEMERAL
+        ):
+            continue
+        out.add(unique_id)
+    return out
+
+
+def node_coverage(target: Path, started_at: datetime) -> NodeCoverage:
+    """Read this invocation's artefacts and say whether it built the whole project.
+
+    **Stale artefacts are refused rather than believed.** A target directory can hold an
+    older run's files, so the manifest and the run results must name the **same
+    invocation id**, and that invocation must have been generated at or after this
+    attempt started. Anything else is reported as incomplete with the reason, never
+    silently accepted.
+    """
+    manifest = _artefact(target, "manifest.json")
+    results = _artefact(target, "run_results.json")
+    if manifest is None or results is None:
+        missing = "manifest.json" if manifest is None else "run_results.json"
+        return NodeCoverage(
+            INCOMPLETE, f"dbt wrote no {missing} in {target}", None, 0, {}, ()
+        )
+    run_meta = results.get("metadata", {})
+    invocation = run_meta.get("invocation_id")
+    if not invocation or invocation != manifest.get("metadata", {}).get(
+        "invocation_id"
+    ):
+        return NodeCoverage(
+            INCOMPLETE,
+            f"{target} holds artefacts from different invocations; not this build",
+            invocation,
+            0,
+            {},
+            (),
+        )
+    generated = str(run_meta.get("generated_at", ""))
+    try:
+        # dbt writes UTC with a trailing Z; the attempt's own timestamps are naive UTC.
+        written = datetime.fromisoformat(generated).astimezone(UTC).replace(tzinfo=None)
+    except ValueError:  # pragma: no cover - dbt always writes a timestamp
+        written = None
+    if written is None or written < started_at:
+        return NodeCoverage(
+            INCOMPLETE,
+            f"{target}/run_results.json was generated at {generated!r}, before this "
+            f"attempt started at {started_at.isoformat(sep=' ')}: it describes an "
+            "earlier invocation",
+            invocation,
+            0,
+            {},
+            (),
+        )
+    statuses = {
+        r["unique_id"]: r["status"]
+        for r in results.get("results", [])
+        if "unique_id" in r
+    }
+    required = required_nodes(manifest)
+    missing_nodes = tuple(
+        sorted(node for node in required if statuses.get(node) not in _PASSING)
+    )
+    if missing_nodes:
+        return NodeCoverage(
+            INCOMPLETE,
+            f"{len(missing_nodes)} of {len(required)} required nodes did not pass",
+            invocation,
+            len(required),
+            statuses,
+            missing_nodes,
+        )
+    return NodeCoverage(
+        COMPLETE,
+        f"every one of the {len(required)} required nodes passed",
+        invocation,
+        len(required),
+        statuses,
+        (),
+    )
+
+
 def candidate_run_id(project: Path, when: datetime) -> str:
     """An identifier for one candidate build, keyed by what produced it."""
     material = "::".join(
@@ -322,6 +491,30 @@ def validated_database(raw: str | None) -> Path:
         )
         raise DatabasePathError(msg)
     return path
+
+
+def _has_target_path(dbt_args: list[str]) -> bool:
+    return any(a == "--target-path" or a.startswith("--target-path=") for a in dbt_args)
+
+
+def _target_path(dbt_args: list[str], project: Path) -> Path:
+    """Where dbt will write its artefacts for this invocation, as an absolute path.
+
+    A relative ``--target-path`` is resolved against ``--project-dir``, which is dbt's
+    rule and not the shell's; getting that wrong once put a candidate's run results under
+    ``dbt/data/``. When the caller passes none, this names dbt's own default
+    (``<project>/target``) explicitly rather than guessing later.
+    """
+    for index, argument in enumerate(dbt_args):
+        given = None
+        if argument.startswith("--target-path="):
+            given = argument.split("=", 1)[1]
+        elif argument == "--target-path" and index + 1 < len(dbt_args):
+            given = dbt_args[index + 1]
+        if given:
+            path = Path(given)
+            return path if path.is_absolute() else (project / path).resolve()
+    return (project / "target").resolve()
 
 
 def _dbt_command() -> list[str]:
@@ -424,6 +617,12 @@ def begin_attempt(
         "price_catalogue_version": None,
         "output_digest_version": None,
         "built_output_sha256": None,
+        "dbt_invocation_id": None,
+        "required_build": None,
+        "required_nodes_total": None,
+        "missing_required_nodes": None,
+        "node_results_sha256": None,
+        "node_results": None,
         "note": _NOTE,
     }
     assert tuple(record) == _BUILD_RUN_COLUMNS
@@ -493,13 +692,19 @@ def _schedule_identity(con) -> dict[str, Any]:
 
 
 def finish_attempt(
-    database: Path, run_id: str, exit_code: int, when: datetime
+    database: Path,
+    run_id: str,
+    exit_code: int,
+    when: datetime,
+    coverage: NodeCoverage | None = None,
 ) -> dict[str, Any]:
     """Complete the attempt ``run_id`` as ``succeeded`` (exit 0) or ``failed``.
 
     Opened read-write only after dbt has exited and released the file lock. On success
     the output digest is computed **from the database being written**, so the record
-    describes this file's tables as they are at this moment.
+    describes this file's tables as they are at this moment, and ``coverage`` records
+    which required nodes ran -- ``succeeded`` says dbt exited 0, ``required_build`` says
+    whether that invocation built the whole project. They are different claims.
     """
     con = duckdb.connect(str(database))
     try:
@@ -508,6 +713,13 @@ def finish_attempt(
             "finished_at_utc": when,
             "dbt_exit_code": exit_code,
         }
+        if coverage is not None:
+            fields["dbt_invocation_id"] = coverage.invocation_id
+            fields["required_build"] = coverage.state
+            fields["required_nodes_total"] = coverage.required_total
+            fields["missing_required_nodes"] = json.dumps(list(coverage.missing))
+            fields["node_results_sha256"] = coverage.digest
+            fields["node_results"] = json.dumps(coverage.statuses, sort_keys=True)
         if exit_code == 0:
             fields.update(_schedule_identity(con))
             fields["output_digest_version"] = OUTPUT_DIGEST_VERSION
@@ -537,13 +749,18 @@ def record_build(
     tariff_group: str,
     exit_code: int = 0,
     workbook: str = "",
+    coverage: NodeCoverage | None = None,
 ) -> dict[str, Any]:
     """Begin and immediately finish one attempt. For callers that ran dbt themselves.
 
-    The supported entry point is :func:`main`, which records ``started`` *before* dbt runs.
-    This shortcut exists for tests that stand in for a build; it records exactly what
-    ``main`` would have recorded had dbt exited with ``exit_code`` at once.
+    The supported entry point is :func:`main`, which records ``started`` *before* dbt runs
+    and derives ``coverage`` from dbt's own artefacts. This shortcut exists for tests that
+    stand in for a build; passing no ``coverage`` records a stand-in complete build, which
+    is why a real eligibility test must go through :func:`main`.
     """
+    coverage = coverage or NodeCoverage(
+        COMPLETE, "recorded by record_build without a dbt invocation", None, 0, {}, ()
+    )
     begin_attempt(
         database,
         schedule=schedule,
@@ -554,7 +771,7 @@ def record_build(
         run_id=run_id,
         when=when,
     )
-    return finish_attempt(database, run_id, exit_code, when)
+    return finish_attempt(database, run_id, exit_code, when, coverage)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -603,6 +820,11 @@ def main(argv: list[str] | None = None) -> int:
     when = datetime.now(UTC).replace(tzinfo=None)
     run_id = candidate_run_id(args.project_dir, when)
     dbt_args = passthrough or ["build"]
+    target = _target_path(dbt_args, args.project_dir)
+    if not _has_target_path(dbt_args):
+        # dbt resolves a relative --target-path against --project-dir; this is the same
+        # directory dbt would have used, named explicitly so the artefacts can be found.
+        dbt_args = [*dbt_args, "--target-path", str(target)]
     command = [
         *_dbt_command(),
         *dbt_args,
@@ -642,7 +864,8 @@ def main(argv: list[str] | None = None) -> int:
         check=False,
     )
     finished = datetime.now(UTC).replace(tzinfo=None)
-    record = finish_attempt(database, run_id, completed.returncode, finished)
+    coverage = node_coverage(target, when)
+    record = finish_attempt(database, run_id, completed.returncode, finished, coverage)
     if completed.returncode != 0:
         print(
             f"run-dbt: dbt exited {completed.returncode}; attempt {run_id} is recorded "
@@ -655,8 +878,17 @@ def main(argv: list[str] | None = None) -> int:
         f"{record['dbt_core_version']}, dbt-duckdb {record['dbt_duckdb_version']}, "
         f"schedule {record['schedule_variant']}, group {record['tariff_group']}, "
         f"outputs {str(record['built_output_sha256'])[:12]}… "
-        f"({record['output_digest_version']})"
+        f"({record['output_digest_version']})\n"
+        f"  required build: {coverage.state} — {coverage.reason}"
     )
+    if not coverage.complete:
+        print(
+            "run-dbt: this invocation did not build the whole project, so it cannot be "
+            "sealed. Missing: "
+            + ", ".join(n.split(".")[-1] for n in coverage.missing[:6])
+            + (" …" if len(coverage.missing) > 6 else ""),
+            file=sys.stderr,
+        )
     return 0
 
 

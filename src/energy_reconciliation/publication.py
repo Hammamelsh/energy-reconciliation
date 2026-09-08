@@ -175,7 +175,8 @@ class Seal:
     ``sha256`` is the **whole file**: it says the bytes are the ones validated.
     ``built_output_sha256`` is the **built tables** (``dbt_run.build_output_digest``,
     algorithm named by ``output_digest_version``): it says the tables are the ones the
-    succeeded attempt left. The identity fields say which code and runtime produced them.
+    succeeded attempt left. ``required_build`` says that invocation ran every model and
+    test the project defines. The identity fields say which code and runtime produced them.
     """
 
     file: str
@@ -194,6 +195,9 @@ class Seal:
     built_output_sha256: str
     calculation_code_sha256: str
     runtime_fingerprint: str
+    required_build: str
+    required_nodes_total: int
+    dbt_invocation_id: str | None
     sealed_at_utc: str
 
 
@@ -216,6 +220,10 @@ _RECORD_KEYS: Final[tuple[str, ...]] = (
     "built_output_sha256",
     "calculation_code_sha256",
     "runtime_fingerprint",
+    "required_build",
+    "required_nodes_total",
+    "missing_required_nodes",
+    "dbt_invocation_id",
 )
 
 
@@ -232,6 +240,10 @@ def build_record(candidate: Path) -> dict[str, Any]:
        ``started`` (interrupted, or still running) attempt after a success makes the
        candidate ineligible **even when the tables are unchanged**: output equality and
        attempt success are different facts, and neither is inferred from the other;
+    3a. that attempt's ``required_build`` is ``complete`` -- every model and test the
+       project defines actually ran and passed, taken from dbt's own artefacts for that
+       invocation. Measured: ``build --exclude test_type:singular`` exits 0, skips all
+       eleven reconciliation and arithmetic tests, and was sealed before this check;
     4. that attempt was a ``build`` -- models *and* tests -- not a partial command;
     5. it was recorded **in this file**: a snapshot of a built warehouse inherits the
        record, and the inherited row names a different path;
@@ -265,7 +277,8 @@ def build_record(candidate: Path) -> dict[str, Any]:
             "dbt_core_version, dbt_duckdb_version, tariff_group, schedule_variant, "
             "schedule_source, schedule_sha256, price_catalogue_version, "
             "output_digest_version, built_output_sha256, calculation_code_sha256, "
-            f"runtime_fingerprint FROM {BUILD_RUN_TABLE} "
+            "runtime_fingerprint, required_build, required_nodes_total, "
+            f"missing_required_nodes, dbt_invocation_id FROM {BUILD_RUN_TABLE} "
             "ORDER BY started_at_utc DESC, run_id DESC"
         ).fetchall()
         attempts = [dict(zip(_RECORD_KEYS, r, strict=True)) for r in rows]
@@ -287,6 +300,19 @@ def build_record(candidate: Path) -> dict[str, Any]:
                 f"{latest['status']} (dbt exited non-zero at {latest['finished_at_utc']}). "
                 "A candidate is sealed on its latest attempt succeeding, not on an "
                 "earlier success whose tables happen to be unchanged; build a fresh one."
+            )
+        if latest["required_build"] != dbt_run.COMPLETE:
+            missing = json.loads(latest["missing_required_nodes"] or "[]")
+            shown = ", ".join(str(n).split(".")[-1] for n in missing[:5])
+            raise PromotionRefused(
+                f"{candidate.name}: the latest attempt {latest['run_id']} exited 0 but "
+                f"did not build the whole project (required_build="
+                f"{latest['required_build']!r}, {len(missing)} of "
+                f"{latest['required_nodes_total']} required nodes did not pass"
+                + (f": {shown}" + (" …" if len(missing) > 5 else "") if shown else "")
+                + "). A selective or test-excluding invocation succeeds as an invocation "
+                "and is not a validated build; build a fresh candidate with `uv run "
+                "build-candidate`."
             )
         if dbt_run.subcommand_of(latest["dbt_command"]) != "build":
             raise PromotionRefused(
@@ -338,6 +364,9 @@ def build_record(candidate: Path) -> dict[str, Any]:
         "built_output_sha256": latest["built_output_sha256"],
         "calculation_code_sha256": latest["calculation_code_sha256"],
         "runtime_fingerprint": latest["runtime_fingerprint"],
+        "required_build": latest["required_build"],
+        "required_nodes_total": latest["required_nodes_total"],
+        "dbt_invocation_id": latest["dbt_invocation_id"],
     }
 
 
