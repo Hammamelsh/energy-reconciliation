@@ -107,6 +107,7 @@ class BuildIdentity:
     schedule_variant: str
     schedule_source: str | None
     schedule_sha256: str | None
+    schedule_rows: int | None
     tariff_group: str
     price_catalogue_version: str | None
     policy_sha256: str
@@ -200,11 +201,16 @@ def _connect(path: Path):
 def _identity(
     record: dict[str, Any], seal: publication.Seal, path: Path
 ) -> BuildIdentity:
-    """Fields the seal does not carry, read back from the attempt that produced them."""
+    """Fields the seal does not carry, read back from the attempt that produced them.
+
+    The seal records what promotion must compare; these are display and reproduction
+    details that live only in the build record, so they are read from the row the seal
+    already names rather than widening the seal contract.
+    """
     con = _connect(path)
     try:
         row = con.execute(
-            "SELECT policy_sha256, runtime_detail, dbt_project_sha256 "
+            "SELECT policy_sha256, runtime_detail, dbt_project_sha256, schedule_rows "
             f"FROM {publication.BUILD_RUN_TABLE} WHERE run_id = ?",
             [record["run_id"]],
         ).fetchone()
@@ -222,6 +228,7 @@ def _identity(
         schedule_variant=record["schedule_variant"],
         schedule_source=record["schedule_source"],
         schedule_sha256=record["schedule_sha256"],
+        schedule_rows=row[3],
         tariff_group=record["tariff_group"],
         price_catalogue_version=record["price_catalogue_version"],
         policy_sha256=row[0],

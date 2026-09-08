@@ -23,8 +23,10 @@ import streamlit as st
 from energy_reconciliation.explorer import charts
 from energy_reconciliation.explorer import forecast_view as fc
 from energy_reconciliation.explorer import queries as q
+from energy_reconciliation.explorer import selection as sel
 from energy_reconciliation.ingest.warehouse import DEFAULT_DATABASE
 from energy_reconciliation.tariff import analytics as ta
+from energy_reconciliation.tariff.models import ASSUMPTION_TEXT
 
 WAREHOUSE_DIR = Path("data/warehouse")
 PAGE_SIZE = 100
@@ -244,15 +246,61 @@ labels = {
     for p, name in _content_labels.items()
 }
 st.sidebar.header("Data source")
-database = st.sidebar.radio(
+# Two explicitly different things to look at, never blended: a mutable warehouse file
+# you pick yourself, or whatever is published right now. The publication is resolved
+# ONCE here and the resolved context is threaded through every tab below, so a promotion
+# part-way through a render cannot make one tab disagree with another.
+mode = st.sidebar.radio(
+    "Source",
+    sel.MODES,
+    index=0,
+    key="source-mode",
+    help=(
+        "Warehouse file: a file under data/warehouse, built by build-tariff-scenario. "
+        "Published version: the sealed dbt build the publication manifest names."
+    ),
+)
+picked = st.sidebar.radio(
     "Dataset",
     available,
     index=next((i for i, p in enumerate(available) if p == DEFAULT_DATABASE), 0),
     format_func=labels.get,
+    disabled=mode == sel.PUBLISHED_MODE,
+    help="Which warehouse file to inspect. Not used when reading the published version.",
 )
-st.sidebar.caption(
-    f"File: `{database.name}`. Loaded files are listed under Source records."
-)
+selected = sel.resolve(mode, picked)
+
+if not selected.ready:
+    # Explicit absence, never a quiet fall back to the local warehouse: "published"
+    # must mean published.
+    st.sidebar.error("No published version")
+    st.error(
+        f"**No published version is available.**\n\n{selected.unavailable}\n\n"
+        "Nothing local is shown in its place: what a *warehouse file* holds is a "
+        "different question from what is published. Switch the **Source** control to "
+        "*Warehouse file* to inspect one directly, or build and promote a candidate:\n\n"
+        "```bash\n"
+        "uv run build-candidate --source data/warehouse/energy.duckdb\n"
+        "uv run publication promote <candidate> --expect-published none\n"
+        "```"
+    )
+    st.stop()
+
+database = selected.database
+relations = selected.relations
+if selected.is_published:
+    context = selected.context
+    st.sidebar.success(f"Published {context.version}")
+    st.sidebar.caption(
+        f"File: `{database.name}` · dbt run `{context.run_id[:20]}…`. Tariff figures "
+        "come from the sealed dbt build; readings and load history come from the same "
+        "file. Resolved once for this page."
+    )
+else:
+    st.sidebar.caption(
+        f"File: `{database.name}` — a warehouse file you selected, **not** a published "
+        "version. Loaded files are listed under Source records."
+    )
 
 people = q.households(database)
 if not people:
@@ -758,9 +806,32 @@ with tariff_tab:
     # process cannot read produces a recovery instruction here rather than a raw
     # database error that takes the rest of the page with it. Only this recognised
     # condition is contained: any other failure is still allowed to surface.
-    availability = ta.scenario_availability(database)
-    run = ta.latest_run(database) if availability.ready else None
-    if run is None:
+    if selected.uses_dbt_build:
+        # The published route: relations, run id and identity all come from the
+        # validated context. main.scenario_run is deliberately never consulted -- it
+        # holds the Python scenario copied into the same file, which is a different run.
+        availability = ta.ScenarioAvailability(ta.READY)
+        header = sel.header_from_context(
+            selected.context,
+            assumption_ids=ta.assumption_ids(
+                database, selected.context.run_id, relations=relations
+            ),
+            total_charge_exact=ta.total_charge_exact(
+                database, selected.context.run_id, relations=relations
+            ),
+            coverage=ta.schedule_bounds(database, relations=relations),
+        )
+        run_id = selected.context.run_id
+    else:
+        availability = ta.scenario_availability(database)
+        legacy_run = ta.latest_run(database) if availability.ready else None
+        header = (
+            sel.header_from_run(legacy_run, database)
+            if legacy_run is not None
+            else None
+        )
+        run_id = legacy_run.run_id if legacy_run is not None else None
+    if header is None:
         if availability.state == ta.INCOMPATIBLE:
             st.error(
                 "**The tariff scenario in this database cannot be read by the code "
@@ -790,29 +861,30 @@ and the workbook. The other three tabs are unaffected and work normally.
                 "to use the synthetic one-day schedule instead of the real workbook."
             )
     else:
-        coverage = ta.schedule_bounds(database)
+        coverage = ta.schedule_bounds(database, relations=relations)
         cov_first, cov_last = coverage if coverage else (None, None)
 
         # --- one short, always-visible statement; the detail is in the expanders ---
         st.markdown(
             f'<span class="status-review">Scenario under assumption '
-            f"{run.assumption_ids} — not a bill.</span> A consumption timestamp label "
+            f"{header.assumption_ids} — not a bill.</span> A consumption timestamp label "
             "and a schedule label are treated as the same half hour. That is "
             "**not established**. Charge = consumption × band price only; "
             "**no separate tax adjustment is applied**.",
             unsafe_allow_html=True,
         )
-        if run.is_synthetic:
-            st.warning(
-                f"**Synthetic evidence.** This scenario uses the "
-                f"`{run.schedule_source}` schedule — invented band timings for "
-                "demonstration. The prices are the real published ones. Do not read "
-                "any figure on this tab as a measurement of the real trial."
-            )
+        st.caption(f"Source of these figures: {header.route}.")
+        if header.is_synthetic:
+            st.warning(header.synthetic_note)
         else:
             st.caption(
-                f"Real evidence: schedule read from `{run.schedule_source}`, "
-                f"SHA-256 `{run.schedule_sha256[:12]}…`, {run.schedule_rows:,} labels."
+                f"Real evidence: schedule read from `{header.schedule_source}`, "
+                f"SHA-256 `{header.schedule_sha256[:12]}…`"
+                + (
+                    f", {header.schedule_rows:,} labels."
+                    if header.schedule_rows is not None
+                    else "."
+                )
             )
 
         # ------------------------------------------------- controls for THIS tab
@@ -891,20 +963,32 @@ and the workbook. The other three tabs are unaffected and work normally.
         if view == SCENARIO_VIEWS[0]:
             st.markdown(f"#### Selected household — {household}")
             mine = ta.band_summary(
-                database, run.run_id, household=household, start=s_start, end=s_end
+                database,
+                run_id,
+                household=household,
+                start=s_start,
+                end=s_end,
+                relations=relations,
             )
             if mine.empty:
-                groups = ta.household_tariff_groups(database, household)
+                groups = ta.household_tariff_groups(
+                    database, household, relations=relations
+                )
                 # Scoped to the scenario period on purpose: a period count must never
                 # silently become a whole-history count. Whole history is shown only
                 # when the period holds nothing, and is labelled as whole history.
                 reasons = ta.exclusion_breakdown(
-                    database, run.run_id, household=household, start=s_start, end=s_end
+                    database,
+                    run_id,
+                    household=household,
+                    start=s_start,
+                    end=s_end,
+                    relations=relations,
                 )
                 scope_label = f"in {fmt_period(s_start, s_end)}"
                 if reasons.empty:
                     reasons = ta.exclusion_breakdown(
-                        database, run.run_id, household=household
+                        database, run_id, household=household, relations=relations
                     )
                     scope_label = (
                         "in its **whole loaded history** — it has no readings at all "
@@ -925,7 +1009,7 @@ and the workbook. The other three tabs are unaffected and work normally.
                         f"excluded as **`{top['exclusion_reason']}`**, spanning "
                         f"{top['first_date']} to {top['last_date']}. It is recorded "
                         f"under tariff group **{', '.join(groups) or 'none'}**, and the "
-                        f"band prices apply to `{run.scope_tariff_group}`."
+                        f"band prices apply to `{header.tariff_group}`."
                     )
                     st.dataframe(
                         fmt_reason_table(reasons),
@@ -933,7 +1017,7 @@ and the workbook. The other three tabs are unaffected and work normally.
                         hide_index=True,
                     )
                 pickable = ta.charged_households(
-                    database, run.run_id, start=s_start, end=s_end
+                    database, run_id, start=s_start, end=s_end, relations=relations
                 )
                 if pickable:
                     st.markdown(
@@ -959,17 +1043,22 @@ and the workbook. The other three tabs are unaffected and work normally.
                     mine,
                     scope_note=(
                         f"{household}, {fmt_period(s_start, s_end)}, "
-                        f"schedule `{run.schedule_source}`"
+                        f"schedule `{header.schedule_source}`"
                     ),
                     insights=ta.selection_insights(
-                        database, run.run_id, household, s_start, s_end
+                        database,
+                        run_id,
+                        household,
+                        s_start,
+                        s_end,
+                        relations=relations,
                     ),
                 )
                 st.altair_chart(
                     charts.band_kwh_by_hour_chart(
                         ta.household_band_distribution(
                             database,
-                            run.run_id,
+                            run_id,
                             household=household,
                             start=s_start,
                             end=s_end,
@@ -985,12 +1074,14 @@ and the workbook. The other three tabs are unaffected and work normally.
 
         # ======================================= VIEW 2 — the loaded ToU sample
         elif view == SCENARIO_VIEWS[1]:
-            everyone = ta.band_summary(database, run.run_id, start=s_start, end=s_end)
+            everyone = ta.band_summary(
+                database, run_id, start=s_start, end=s_end, relations=relations
+            )
             people_charged = ta.charged_households(
-                database, run.run_id, start=s_start, end=s_end
+                database, run_id, start=s_start, end=s_end, relations=relations
             )
             st.markdown(
-                f"#### Loaded {run.scope_tariff_group} sample — "
+                f"#### Loaded {header.tariff_group} sample — "
                 f"{len(people_charged):,} charged household(s)"
             )
             st.caption(
@@ -1002,17 +1093,21 @@ and the workbook. The other three tabs are unaffected and work normally.
                 everyone,
                 scope_note=(
                     f"all charged households, {fmt_period(s_start, s_end)}, "
-                    f"schedule `{run.schedule_source}`"
+                    f"schedule `{header.schedule_source}`"
                 ),
                 insights=ta.selection_insights(
-                    database, run.run_id, None, s_start, s_end
+                    database, run_id, None, s_start, s_end, relations=relations
                 ),
             )
             if not everyone.empty:
                 st.altair_chart(
                     charts.band_kwh_by_hour_chart(
                         ta.household_band_distribution(
-                            database, run.run_id, start=s_start, end=s_end
+                            database,
+                            run_id,
+                            start=s_start,
+                            end=s_end,
+                            relations=relations,
                         )
                     ),
                     width="stretch",
@@ -1024,7 +1119,7 @@ and the workbook. The other three tabs are unaffected and work normally.
                     "response."
                 )
                 totals = ta.household_totals(
-                    database, run.run_id, start=s_start, end=s_end
+                    database, run_id, start=s_start, end=s_end, relations=relations
                 )
                 with st.expander(
                     f"Per household ({len(totals):,} rows) — read the charge beside "
@@ -1045,15 +1140,17 @@ and the workbook. The other three tabs are unaffected and work normally.
 
         # ========================================= VIEW 3 — the schedule itself
         else:
-            st.markdown(f"#### Published schedule — {run.schedule_source}")
+            st.markdown(f"#### Published schedule — {header.schedule_source}")
             st.caption(
                 "Describes the price schedule itself. **Independent of which "
                 "households are loaded and of the scenario period above**, which is "
                 "why no household or period is applied to this view."
             )
-            totals = ta.schedule_totals(database)
+            totals = ta.schedule_totals(database, relations=relations)
             st.altair_chart(
-                charts.schedule_hour_chart(ta.schedule_band_distribution(database)),
+                charts.schedule_hour_chart(
+                    ta.schedule_band_distribution(database, relations=relations)
+                ),
                 width="stretch",
             )
             slots = totals.attrs["denominator_slots"]
@@ -1063,7 +1160,7 @@ and the workbook. The other three tabs are unaffected and work normally.
             )
             st.dataframe(fmt_schedule_table(totals), width="stretch", hide_index=True)
             st.dataframe(
-                fmt_price_table(ta.price_catalogue(database)),
+                fmt_price_table(ta.price_catalogue(database, relations=relations)),
                 width="stretch",
                 hide_index=True,
             )
@@ -1080,7 +1177,19 @@ and the workbook. The other three tabs are unaffected and work normally.
         # ----------------------------------------------- detail, on demand only
         st.divider()
         with st.expander("Assumption A1 in full"):
-            st.markdown(run.assumption_text)
+            # The Python route records the wording with the run. A dbt build stamps only
+            # the identifier on every charged row, so the wording shown for it is this
+            # code's text for that identifier, said plainly rather than implied.
+            if header.assumption_text is not None:
+                st.markdown(header.assumption_text)
+            else:
+                st.caption(
+                    f"Every charged row in this build carries assumption "
+                    f"`{header.assumption_ids}`. The wording below is this code's text "
+                    "for that identifier; a dbt build records the identifier, not the "
+                    "prose."
+                )
+                st.markdown(ASSUMPTION_TEXT)
             st.markdown(
                 """
 **Two things that are not evidence for A1.**
@@ -1099,10 +1208,20 @@ interval.
             )
 
         with st.expander("What was counted, and what was not charged"):
-            led = ta.accounting(database, run.run_id)
+            led = (
+                selected.context.accounting()
+                if selected.uses_dbt_build
+                else ta.accounting(database, run_id)
+            )
+            ladder_note = (
+                " Counted from the built tables: a dbt build records no ladder row, so "
+                "each figure here is a count rather than something it wrote down."
+                if led.derived
+                else " Read from the run record written when the scenario was built."
+            )
             st.markdown(
                 f"""
-Whole run, every loaded member, unscoped by the period above.
+Whole run, every loaded member, unscoped by the period above.{ladder_note}
 
 | | |
 |---|---:|
@@ -1118,9 +1237,9 @@ Whole run, every loaded member, unscoped by the period above.
             )
             st.dataframe(
                 fmt_reason_table(
-                    ta.exclusion_breakdown(database, run.run_id).rename(
-                        columns={"readings": "readings"}
-                    )
+                    ta.exclusion_breakdown(
+                        database, run_id, relations=relations
+                    ).rename(columns={"readings": "readings"})
                 ),
                 width="stretch",
                 hide_index=True,
@@ -1150,6 +1269,9 @@ Whole run, every loaded member, unscoped by the period above.
                 f"| Scenario charge (exact) | `£{selection_totals[2]}` |\n"
             )
 
+        identity_table = "\n".join(
+            f"| {name} | {value} |" for name, value in header.identity_rows
+        )
         with st.expander("Calculation details and full precision"):
             st.markdown(
                 f"""
@@ -1169,22 +1291,9 @@ Whole run, every loaded member, unscoped by the period above.
 
 | | |
 |---|---|
-| Run | `{run.run_id}` |
-| Built (UTC) | {run.run_at_utc} |
-| Schedule | {run.schedule_source}, {run.schedule_rows:,} labels, `{run.schedule_sha256[:16]}…` |
-| Schedule coverage | {run.schedule_first_label} to {run.schedule_last_label} |
-| Price catalogue | {run.price_catalogue_version} (PUBLISHER-DOCUMENTED) |
-| Calculation code (all first-party files) | `{run.calculation_code_sha256[:16]}…` |
-| Shared policy (`policy.py`) | `{run.policy_sha256[:16]}…` |
-| Tariff models | `{run.model_code_sha256[:16]}…` |
-| Ingestion pipeline | `{run.ingestion_pipeline_fingerprint[:16]}…` |
-| Runtime | {", ".join(f"{k} {v}" for k, v in sorted(run.runtime.items()))} |
-| Loaded files | {len(run.source_load_ids.split("|"))} |
-| Whole-run exact charge | `£{run.total_energy_charge_gbp_exact}` |
+{identity_table}
 
-A fingerprint over a **mutable** warehouse is not historical replay. To rebuild this
-result from its recorded inputs alone, capture and replay a baseline:
-`uv run capture-baseline --database {database}` then `uv run replay-baseline`.
+{header.not_recorded}
 """
             )
 
@@ -1206,7 +1315,9 @@ with forecast_tab:
     # Content, not file names: each report's own dataset digest and every displayed
     # context figure are recomputed from the selected database, in one scan for both
     # reports. The file the report was run against is kept as provenance only.
-    fits = fc.assess_reports({"fore": report, "prior": prior}, database)
+    # The resolved selection is what is assessed: for a published version that is the
+    # context, used as passed, so the forecast check never re-resolves the manifest.
+    fits = sel.forecast_applicability(selected, {"fore": report, "prior": prior})
     fit, prior_fit = fits["fore"], fits["prior"]
     if report is None:
         st.info(

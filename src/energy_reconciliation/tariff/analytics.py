@@ -541,6 +541,48 @@ def accounting(
     )
 
 
+def assumption_ids(
+    database: Path, run_id: str, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> tuple[str, ...]:
+    """The assumption identifier(s) stamped on this run's charged rows.
+
+    Read from the fact rather than from a constant, so what is displayed is what the
+    stored rows actually claim. Both routes carry ``assumption_id`` on every charged row.
+    """
+    con = _con(database)
+    try:
+        return tuple(
+            r[0]
+            for r in con.execute(
+                f"SELECT DISTINCT assumption_id FROM {relations.fact_scenario} "
+                "WHERE run_id = ? ORDER BY 1",
+                [run_id],
+            ).fetchall()
+        )
+    finally:
+        con.close()
+
+
+def total_charge_exact(
+    database: Path, run_id: str, *, relations: Relations = WAREHOUSE_RELATIONS
+) -> str:
+    """The whole run's unrounded charge, summed in the database and carried as text.
+
+    The Python route records this figure when it builds; a dbt build does not, so this
+    counts it from the fact. Same rows, same arithmetic, no rounding.
+    """
+    con = _con(database)
+    try:
+        total = con.execute(
+            f"SELECT COALESCE(SUM(energy_charge_gbp), 0) FROM {relations.fact_scenario} "
+            "WHERE run_id = ?",
+            [run_id],
+        ).fetchone()[0]
+    finally:
+        con.close()
+    return str(total)
+
+
 def counted_accounting(
     database: Path, run_id: str, *, relations: Relations = WAREHOUSE_RELATIONS
 ) -> Accounting:

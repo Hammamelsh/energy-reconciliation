@@ -231,6 +231,24 @@ This is a **historical backtest, not a live forecast**, and it is not a bill, a 
 appliance claim or a statement about tariff response. Details and limits:
 [`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
 
+### Viewing a published version
+
+The sidebar's **Source** control chooses between a **warehouse file** you pick yourself and
+the **published version** the publication manifest names. In published mode the manifest is
+resolved once per page load and every tab reads that one sealed file: readings and load
+history from `main`, tariff figures and run identity from the dbt build the seal certifies.
+If nothing is published, or the seal and the build record disagree, the page says so and
+shows nothing — it never falls back to a local file under the word "published".
+
+Point the app at a disposable publication root rather than creating `data/published`:
+
+```bash
+uv run build-candidate --source data/warehouse/demo.duckdb --root /tmp/demo-pub --schedule demo
+uv run publication --root /tmp/demo-pub promote /tmp/demo-pub/versions/<file> --expect-published none
+ENERGY_RECONCILIATION_PUBLICATION_ROOT=/tmp/demo-pub \
+  PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
+```
+
 The tab shows a report only when it **describes the selected dataset**: the report's own
 dataset digest and every warehouse-level figure on the page are recomputed from the selected
 file's rows and must agree. File names settle nothing — a byte-identical copy under another

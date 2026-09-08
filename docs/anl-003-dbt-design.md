@@ -547,6 +547,30 @@ the context resolved; a sealed candidate is `candidate`, `is_active_publication`
 the label says *NOT published*. A context already held stays bound to its version across a
 promotion — tested — which is what makes "resolve once per rerun" safe.
 
+**Wired into the dashboard (2026-09-09).** The sidebar's **Source** control offers
+*Warehouse file* (the unchanged workflow) or *Published version*. In published mode
+`reads.published()` is called **once per rerun** and the context is threaded through every
+tab; the tariff tab takes its relations, run id and identity from it and never touches
+`main.scenario_run`. A publication that cannot be resolved and validated is an explicit
+*unavailable* state that renders **no tab**: showing the local warehouse instead would
+answer a different question under the word "published". `ENERGY_RECONCILIATION_PUBLICATION_ROOT`
+points the app at a disposable root, so a demonstration never creates `data/published`.
+
+*Caching, and its contract.* A published rerun measured **5.37 s** against a warehouse
+rerun's 2.09 s, of which 3.15 s was re-hashing the 210 MB file and re-digesting three
+million rows, and 1.20 s was the forecast applicability scan — on **every widget click**.
+Validated contexts are therefore kept per process, keyed by `(version file, the sha256 the
+manifest records for it)`. A promotion or rollback writes a new manifest and the next
+render misses; nothing else invalidates, because a published version is immutable by
+construction. On a hit the bytes are not re-hashed, so a sealed file forced writable and
+edited mid-session would not be caught until restart — stated rather than hidden. A
+**warehouse file is never cached**: it is mutable and has no content identity short of
+hashing it. Measured after: **1.01 s** per published rerun.
+
+*Known limitation, pinned by a test.* A publication directory copied or moved to another
+path is **refused**, because the build attempt records the absolute path it was written
+in. Restoring a publication elsewhere means rebuilding, not copying.
+
 **Producer eligibility, and why the reader could not be exposed without it.** Before this
 slice, `finalise` accepted any attempt whose recorded command began with `build`. Measured:
 `run-dbt … build --exclude test_type:singular` builds every model, **skips all eleven
