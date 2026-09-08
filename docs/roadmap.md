@@ -116,7 +116,7 @@ dbt facts match the Python path exactly — 0 differing charged rows of 456,096 
 column, the same exact total `£11675.4339216532500000`, 0 differing exclusion rows of
 2,541,866, and identical per-band and per-household aggregates.
 
-**What does not exist: the publisher.** The scenario is still built entirely by
+**Step 5 is designed and proved, not built** (design D5, `tests/test_publication_proof.py`): immutable versioned warehouse files and an atomically replaced manifest, so a build never locks the file a reader holds. **What does not exist: the publisher itself.** The scenario is still built entirely by
 `build-tariff-scenario` in Python, from its own dimensions; the dbt tables are *candidate*
 outputs that nothing reads, and the dashboard does not consume them. Concurrent-reader
 availability and recovery are undecided (I-14). **The "Expressed as dbt models" row above

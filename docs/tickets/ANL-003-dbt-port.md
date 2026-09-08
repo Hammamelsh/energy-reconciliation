@@ -3,7 +3,7 @@
 | Field | Value |
 |---|---|
 | Ticket | ANL-003 (roadmap M3; idea I-06) |
-| Status | **Steps 0–4 implemented 2026-09-08. Steps 5–7 not started.** Classification, both facts and 49 dbt tests build and pass, and reproduce ANL-002's figures exactly on the three-member warehouse. **No publisher exists**: the published scenario is still built entirely by `build-tariff-scenario`, from its own dimensions, and consumes nothing dbt produces. |
+| Status | **Steps 0–4 implemented 2026-09-08; step 5 DESIGNED and PROVED on disposable fixtures, not implemented; steps 6–7 not started.** Classification, both facts and 49 dbt tests build and pass, and reproduce ANL-002's figures exactly. **No publisher exists**: the published scenario is still built by `build-tariff-scenario`, and the dashboard still reads `data/warehouse/*.duckdb` directly. |
 | Design | [`../anl-003-dbt-design.md`](../anl-003-dbt-design.md) — read it first; this ticket only sequences it |
 | Depends on | ANL-002 (`d3a97ce`), REC-001 (`4bbad6a`), accepted baseline `4b3ee235d7ac` |
 | Out of scope | Any change to what is charged, excluded, rounded or assumed; household dimension; Airflow; incremental models |
@@ -45,7 +45,7 @@ code exists; it is complete when its evidence row is true.
 | 2 | **DONE.** `dbt/` project, committed credential-free `profiles.yml` whose path is `env_var('ENERGY_RECONCILIATION_DB')` **with no default**, an `on-run-start` guard that refuses a database with no `readings` table, `sources.yml`, `stg_readings` (view, columns listed not `SELECT *`), and the two ephemeral policy models whose bodies are **only** the generated macro. | `dbt build` succeeded (`PASS=2`). On an isolated copy of the three-member warehouse **dbt itself** returned distinct readings **2,997,962**, distinct labels 2,997,962, households 83, finite 2,997,881, on-grid 2,997,881, null 81, signatures 3,439, conflicting labels 0 — all equal to the Python path on the same database. `tests/test_dbt_equivalence.py` compares **every column of every row** on a fixture holding duplicates, equivalent representations, two conflicts, an off-grid row and a token. Both guards were exercised and fail loudly. | — |
 | 3 | **DONE.** Both dimensions are dbt Python models over `tariff/dimensions.py`, which returns typed `pyarrow` tables; `--schedule demo\|workbook` selects the source and an unknown variant raises rather than falling back to the invented one. New supported entry point `uv run run-dbt` validates the database path **before** anything can create it. | **Persisted** (`information_schema`, not the Arrow schema): `DECIMAL(9,4)` / `DECIMAL(9,6)`, `DATE` bounds NULL for the flat rate. All four prices equal hand-written publisher figures and `gbp * 100 = pence` exactly in the database. Workbook build: 17,520 rows, `schedule_source = 'Tariffs.xlsx'`; demo build: 48 rows, `'synthetic-demo'` on every row. Both dimensions **row-for-row identical to the Python path** (0 differing rows). Duplicate-label workbook: `ScheduleError` reaches the build; on a fresh target the schedule dimension is **absent**, and where one existed its rows and schema are byte-identical with no `__dbt_tmp` left. 18 tests in `tests/test_dbt_dimensions.py`. | Not triggered — the DECIMAL types were produced as designed, so the fallback was not used. |
 | 4 | **DONE.** `models.py` parameterised the same way `policy.py` was, so `classified_readings`, `scenario_fact`, `exclusion_fact`, `exclusion_reason_case` and `exclusion_reasons` are **generated** from it — no rule is written twice. `int_classified_readings` (ephemeral) plus both facts as tables; 49 dbt tests, 11 singular, including the dimension keys CTAS drops. | Every published SQL constant **byte-identical to HEAD** (`CLASSIFIED_READINGS`, `FACT_SELECT`, `EXCLUSION_SELECT`, `SCHEMA`), so no figure could move; the Python rebuild reproduced ANL-002 and the charged-row digest `5d8fa82b…` exactly. `dbt build` → `PASS=55` on the three-member copy and on the demo. Against the Python path: **0 differing charged rows** of 456,096 over every column, exact total `11675.4339216532500000`, **0 differing exclusion rows** of 2,541,866, identical per-band and per-household aggregates. Hand-derived fixture covers all seven reasons plus duplicates, equivalents, two conflict kinds and a charged zero. **Mutations:** inverting one exclusion flag failed reconciliation + disjointness; swapping two reasons failed **only** the precedence test while `4 + 10 = 14` still closed. | — |
-| 5 | `build_scenario` orchestrates: skip rule unchanged → `dbtRunner` into `scenario_build` → one publish transaction → run record with `dbt_manifest_sha256`, `dbt_versions`; delete the SQL constants and `_load_dimensions` from `models.py`; extend `identity.calculation_files` to the dbt files **and to `tariff/dimensions.py`** with the glob-coverage test; add `dbt-core`/`dbt-duckdb` to `RUNTIME_PACKAGES`; baseline format 2 | A build that is killed after the first fact leaves `main` untouched (test with a failing singular test injected via var); rerun with identical inputs is `skipped=True` without a dbt invocation (assert the runner was not called); suite time measured and recorded | If the suite exceeds five minutes, apply dbt partial parsing with a shared `target/` — never a Python-only fast path |
+| 5 | **DESIGNED + PROVED (design D5), NOT BUILT.** Publication = **immutable versioned whole-warehouse files** under `data/published/versions/` and a `published.json` manifest replaced by atomic rename under an `O_EXCL` lock with compare-and-swap. Build: snapshot `energy.duckdb` (`ATTACH … READ_ONLY` + `COPY FROM DATABASE`; fail fast if ingestion holds the lock) → `run-dbt` into the snapshot → closed, no `.wal`. Promote: gate (validated record, expected run_id, no `.wal`, digest recorded) → tmp → fsync → rename → fsync dir. The app resolves the manifest **once per rerun**. `dimensions.py` + dbt files join `calculation_files()`, dbt joins `RUNTIME_PACKAGES`, baseline **format 2** with format-1 accepted read-only. | `tests/test_publication_proof.py`: 12 scenarios with separate reader/builder processes on ext4 — reader during build, failure midway, gate, real `run-dbt` on a snapshot, reader spanning promotion, boundary interruption + recovery, competing promoters (exactly one wins), stale request refused, rollback < 5 s, retention with an open reader. **Not established:** power-loss durability, non-ext4 filesystems, the production publisher, the dashboard switch. | Implement in this order: (a) `publication.py` with `resolve/publish/recover/rollback/sweep` + tests ported from the proof; (b) `build-candidate` command; (c) dashboard reads the manifest, explicit *unavailable* state; (d) identity + baseline format 2; (e) step 6. Stop and record if a promotion ever needs more than the filesystem. |
 | 6 | Reproduce ANL-002 on `energy.duckdb`; replay baseline `4b3ee235d7ac`; capture and replay a new baseline | Every figure in design §2 matches to the digit; the old baseline's replay report shows `scenario_fingerprint` as the **only** differing field; the new baseline replays 17/17 including `fact_row_sha256` | Any changed digit is a defect in the port, not a new result — stop and diagnose |
 | 7 | Docs: `anl-002-tariff-scenario.md` gains a one-line "reproduced by dbt on <date>" note with the command; roadmap M3 row flips; `portfolio-evidence.md` "Used dbt" row moves from not-claimable to a narrowly worded claim; this ticket's status → done | The claims match the executed evidence, nothing broader | — |
 
@@ -100,11 +100,67 @@ uv run dbt show --project-dir dbt --profiles-dir dbt --output json \
 # uv run dbt build --project-dir dbt --profiles-dir dbt --vars '{run_id: dev, tariff_group: ToU, schedule: demo}'
 ```
 
+## Staging runbook — PROPOSED, not yet runnable
+
+Every command below is **proposed**: the names are fixed here so the design and the
+implementation agree, and none of them exists until step 5 is built. `run-dbt` is the one
+piece that exists today.
+
+| Stage | Proposed command | What it does | What you should see |
+|---|---|---|---|
+| build | `uv run build-candidate --source data/warehouse/energy.duckdb` | snapshots the warehouse into `data/published/versions/cand-<run_id>.duckdb` (read-only attach; fails fast if ingestion holds the file), then runs `run-dbt` into it | `PASS=55` and a `validated` record naming the candidate's run_id, or a non-zero exit and a file that can never be promoted |
+| validate | `uv run validate-candidate <file>` | re-reads the candidate: no `.wal`, build record present and `validated`, digest computed; compares the facts with the Python path on the same snapshot | `validated <run_id> <sha256>` or a named refusal |
+| inspect | `uv run streamlit run … -- --candidate <file>` (or the dashboard's *Candidate* picker, read-only) | renders the dashboard against the candidate **without** publishing it | every tab reads the one candidate file; the sidebar says *candidate, not published* |
+| promote | `uv run promote --candidate <file> --expect-published <version>` | lock, compare-and-swap against `--expect-published`, gate, tmp → fsync → rename → fsync dir; writes `published.json` | `published v000N <file> (previous v000N-1)`; a stale request prints the version it expected and the one it found, and changes nothing |
+| rollback | `uv run promote --candidate data/published/versions/<retained file> --expect-published <version>` | the same promotion path pointed at a retained version — seconds, no rebuild | `published v000N+1 <old file>`; the dashboard's next rerun shows the old figures with their own run record |
+| recover | `uv run recover-publication` | removes an orphan `published.json.tmp` and a lock left by a dead process; **never edits the manifest** | a list of what was removed, or *nothing to do* |
+
+Retention (`uv run sweep-versions --keep 3 --grace 1h`) never deletes the published or
+previous version and never deletes anything younger than the grace window.
+
+## A guided local exercise for Hammam — after step 5 is implemented
+
+Work on a copy, never on `data/warehouse/energy.duckdb`. Predict the outcome of each step
+before running it; write the prediction down.
+
+1. **Look at what is published.** `cat data/published/published.json`. *Expected:* one
+   version, its file name, its sha256, its run_id, and `previous`. Open the dashboard;
+   the sidebar should name the same version. Note the tariff tab's total.
+2. **Build a candidate.** `uv run build-candidate --source data/warehouse/energy.duckdb`.
+   *Expected:* `PASS=55` and a new file under `versions/`; `published.json` unchanged
+   (check its modification time); the dashboard, refreshed, still shows the same version
+   and total. Nothing you did has reached a reader.
+3. **Inspect it.** Open the candidate in the dashboard's candidate picker. *Expected:*
+   the same total as step 1 — the same inputs and the same rules produce the same
+   figures — and a banner saying it is a candidate. Compare the run_id: different from
+   the published one, because a candidate is a new build even when its figures match.
+4. **Deliberately fail one.** Copy `data/raw/Tariffs.xlsx` to a scratch path, duplicate
+   one schedule row with a different band, and build with `--workbook <that copy>`.
+   *Expected:* the build fails with `ScheduleError: duplicated schedule label …`; the
+   exit code is non-zero; no `validated` record is written; the failed file remains under
+   `versions/` for you to inspect and has a `.wal` beside it if the writer died
+   mid-transaction. **Refresh the dashboard: identical version, identical total.** Try
+   `promote` on the failed file. *Expected:* refused, naming the reason; `published.json`
+   unchanged.
+5. **Promote the good candidate.** `uv run promote --candidate <file from step 2>
+   --expect-published <version from step 1>`. *Expected:* `published v0002`; refresh the
+   dashboard; the sidebar shows v0002 and the total is unchanged, because the inputs were.
+   Now run the same promote command again. *Expected:* refused as **stale** — it expected
+   v0001 and found v0002. That refusal is the protection against two people promoting at
+   once.
+6. **Roll back.** `uv run promote --candidate data/published/versions/<step-1 file>
+   --expect-published v0002`. *Expected:* `published v0003` naming the old file; the
+   dashboard shows the step-1 run_id again within one refresh. Nothing was rebuilt.
+7. **Say, in your own words,** why step 4's failure could not have changed what step 1's
+   dashboard showed, and which single file the answer depends on.
+
 ## Learning checkpoints (Hammam's, never marked automatically)
 
 - Explain why a generated macro with a drift test is one definition and two hand-written
   copies with a comparison test are not.
 - Explain why a pandas column of `Decimal` objects is a risk here and what a typed pyarrow
   table changes.
-- Explain what a reader sees during a failed build under D5, and why `run_id` scoping in
-  `analytics` is what makes that safe.
+- Explain what a reader sees during a failed build under D5, and why a **separate file per
+  attempt** — not `run_id` scoping inside one file — is what makes that safe.
+- Explain the difference between the rename (atomic visibility) and the fsyncs (power-loss
+  durability), and why the proof establishes the first and only *calls* the second.

@@ -263,7 +263,107 @@ than charging the wrong group). The product stays
 DuckDB is exact, and the singular test in D7 recomputes it row by row. After D5 the SQL constants in `models.py` are **deleted**, so the
 dbt models are the definition and Python holds no copy.
 
-### D5 — Rerun, supersede and atomicity in dbt terms: **Python orchestrates, dbt builds into a staging schema, Python publishes in one transaction**
+### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED at the step-5 review, 2026-09-08; PROVED on disposable fixtures; NOT implemented)
+
+**Why the first draft below was wrong.** It built into a `scenario_build` schema inside
+the live warehouse and published with one transaction. Measured (table further down):
+DuckDB locks the *file*, so a build in that file makes the dashboard unable to open it at
+all, and a dashboard holding it read-only blocks the build. Atomicity was solved; reader
+availability was not. The draft is kept for the record; the decision replaces it.
+
+**Options weighed.**
+
+| Option | Availability during a build | Verdict |
+|---|---|---|
+| 1. Staging schema in the live file, coordinated reader downtime | none — readers cannot even open the file while it is written; every build is an outage, and a *failed* build leaves the file having been write-locked for nothing | rejected: fails "a failed candidate build leaves the last published result readable" |
+| **2. Separate immutable version files + a manifest replaced by atomic rename** | full — the builder writes a *new* file; readers hold the *published* file read-only; promotion touches neither, only the manifest | **chosen**: meets every requirement with the filesystem alone |
+| 3. A server (DuckDB server, Postgres, a hosted warehouse) | full | rejected: one user, one machine, a Streamlit dashboard; nothing in the requirements needs a process to stay up, and it would add an operational dependency the project has none of |
+
+**What a publication is: a coherent warehouse snapshot, not the tariff tables alone.** The
+Overview, Data quality and Source records tabs read `readings` and `load_registry`; the
+tariff tab reads the facts and `scenario_run`. If the facts lived in a separate file, the
+tabs could disagree about which members exist — after loading member 136 the Overview
+would show four members while the published scenario was computed on three. A version
+file is therefore the **whole database**: readings, registry, dimensions, facts and the
+run record together, copied once from the mutable ingestion warehouse and never written
+again. Alignment across tabs is then structural: they all read one file, and the run
+record's input identity matches that file's `load_registry` by construction.
+
+**Snapshot acquisition and the ingestion lock.** The builder copies
+`data/warehouse/energy.duckdb` into a new version file with `ATTACH … (READ_ONLY)` +
+`COPY FROM DATABASE`. A read-only attach coexists with other read-only holders and is
+refused while ingestion holds the file read-write; the builder then **fails fast with a
+named cause** ("ingestion in progress") and does not retry silently. Once the dashboard
+reads published versions, ingestion is the only writer that can compete.
+
+**States.** *candidate* — a new file exists and is being written; *validated* — `run-dbt`
+returned 0 and wrote its build record into that file, which has been closed (no `.wal`);
+*failed* — `run-dbt` returned non-zero, nothing was recorded, the file is kept for
+diagnosis and can never be promoted; *published* — the manifest names it. **Every attempt
+is a new file**, so "a previous success row must not certify tables changed by a later
+failed attempt" is solved structurally: a later attempt never touches an earlier file, and
+I-16's stale-certificate problem does not arise.
+
+**Version selection in a Streamlit rerun.** The app resolves the manifest **once** at the
+top of the script and threads the resolved *path* through every query, exactly as it
+threads `database` today. Every connection a render opens is to that one file; the
+manifest is never consulted mid-render, so a promotion during a render is invisible to it
+and the next rerun sees the new version whole, metadata included.
+
+**Promotion.** Under an `O_EXCL` lock file: compare-and-swap on the manifest's current
+version (a request formed against an older state is refused as *stale*), gate the
+candidate (no `.wal`, a `validated` record, the run_id the caller validated, digest
+recorded), write `published.json.tmp`, `fsync`, **`rename`** over `published.json`,
+`fsync` the directory. The rename is the **atomic visibility** boundary; the fsyncs are
+**power-loss durability** — different properties, both needed, neither implied by the other.
+
+**Reader behaviour.** *Before:* reads the published file. *During a build:* unaffected —
+a different file. *During promotion:* unaffected — a rename of a 300-byte JSON file. *After:*
+the next rerun resolves the new version. With no manifest, `resolve` raises an explicit
+*unavailable* error; it never returns an empty dataset.
+
+**Interruption and recovery.** Killed mid-build: a partial candidate, possibly with a
+`.wal`; the manifest is untouched and the gate refuses the file. Killed after the tmp is
+written but before the rename: the old version is still published, the tmp and the lock
+are left; `recover` removes both and **never edits the manifest** — either the rename
+happened or it did not, there is no third state.
+
+**Retention.** Keep the newest N versions; never delete the published or the immediately
+previous one; never delete anything younger than a grace window. The grace exists because
+a render opens a fresh connection per query to the path it resolved at its start: on
+POSIX an open connection survives `unlink`, but the *next* query's open would not.
+
+**Rollback.** Pointing the manifest at a retained version — seconds, no rebuild. For a
+version no longer retained, reconstruction by baseline replay.
+
+**Identity, at implementation.** `tariff/dimensions.py` and every file under `dbt/models`,
+`dbt/macros` and `dbt/dbt_project.yml` join `calculation_files()`; `dbt-core` and
+`dbt-duckdb` join `RUNTIME_PACKAGES`. Baselines move to **format 2**, adding the dbt
+versions, the manifest version and the version file's digest. **Format-1 baselines are
+never rewritten**: `replay` accepts them, compares every figure field, and reports the
+fields format 1 lacks as *absent*, not as mismatches.
+
+**Proof (`tests/test_publication_proof.py`, separate reader and builder processes, ext4).**
+
+| Scenario | Established |
+|---|---|
+| Reader while a candidate builds | reader read v1 while the builder held a write lock on the v2 file; both succeeded; the closed candidate had no `.wal` |
+| Failure midway | builder died mid-write; manifest byte-identical; v1 readable; candidate left with a `.wal`; promotion of it **refused** |
+| Promotion gate | a `failed` record refused; a validated file with a different run_id refused; the accepted file's digest recorded |
+| Real `run-dbt` on a snapshot | 48 charged rows from the demo schedule; the wrapper works against a version file; promoted |
+| Reader spanning a promotion | first and second read identical (file, rows, run_id, manifest version) though v2 was promoted between them; the next resolve saw v2 |
+| Interruption at the boundary | promoter died after fsync, before rename; manifest unchanged; tmp + lock left; a second promoter refused by the lock; `recover` removed both and did not touch the manifest; promotion then succeeded |
+| Competing promoters | two processes released together: exactly one won, the other refused as stale |
+| Stale request | formed against v1, submitted after v2: refused; v2 stayed |
+| Rollback | manifest change under five seconds; reader saw v1's data |
+| Retention | protected versions and the grace window respected; an open connection survived the unlink; a new open failed |
+
+**What the proof does not establish.** Power-loss durability (fsyncs were called, not
+tested by pulling power); behaviour on NTFS/drvfs or a network share (ext4 only); the
+production publisher itself (the primitives are proof code); the dashboard reading a
+manifest (not switched); retention against a real long-running render.
+
+**The earlier draft, for the record:**
 
 dbt's `table` materialisation replaces each table independently; there is no
 transaction across models. Left as is, a failure on the second fact would leave the
@@ -289,7 +389,7 @@ Readers already scope every query by the published `run_id`
 (`analytics._fact_scope`), so this changes nothing for them.
 
 **Atomic publication is not the same problem as reader availability, and a staging
-schema does not solve the second.** DuckDB locks the **file**, not the schema. Measured
+schema does not solve the second** (this measurement is what forced the decision above). DuckDB locks the **file**, not the schema. Measured
 on duckdb 1.5.5, two processes, this machine:
 
 | While one process holds the file | another process opening read-write | another opening read-only |

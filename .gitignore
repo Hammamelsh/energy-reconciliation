@@ -33,3 +33,7 @@ dbt/logs/
 dbt/dbt_packages/
 # A random per-machine identifier written by dbt. Never committed.
 dbt/.user.yml
+
+# Disposable fixtures for the publication proof (tests/test_publication_proof.py). Kept
+# under the repository so they sit on the real ext4 filesystem rather than tmpfs.
+data/proof-scratch/
