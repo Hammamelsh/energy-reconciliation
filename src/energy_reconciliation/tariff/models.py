@@ -55,9 +55,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Final
 
+from .. import policy
 from ..ingest.loader import pipeline_fingerprint
 from ..ingest.warehouse import DECIMAL_PRECISION, DECIMAL_SCALE, connect
-from ..policy import CONFLICTING_LABELS, DISTINCT_READINGS, FINITE
+from ..policy import DISTINCT_READINGS, FINITE
 from . import identity
 from . import prices as pr
 from .schedule import Schedule, loaded_at
@@ -196,20 +197,88 @@ CREATE TABLE IF NOT EXISTS scenario_run (
 """
 
 # --------------------------------------------------------------------- models
-#: Model: every distinct recorded reading classified against eligibility, schedule
-#: coverage and the four analytical policies. One row in, one row out -- the LEFT JOIN
-#: to the schedule cannot multiply, because the schedule label is a primary key and a
-#: duplicate is refused at load time (``schedule._validate``).
-CLASSIFIED_READINGS: Final[str] = f"""
-WITH distinct_readings AS ({DISTINCT_READINGS}),
-conflicting AS ({CONFLICTING_LABELS}),
+#: The scope tariff group as a **bind parameter**. The Python path passes the group as a
+#: parameter rather than pasting it into SQL, and keeps doing so.
+BIND: Final[str] = "?"
+
+#: How dbt names the same two values. A dbt macro cannot bind a parameter, so the value
+#: arrives as a compile-time substitution instead. These are the *only* two non-bind
+#: values :func:`_validated_value` accepts, named one by one rather than by relaxing the
+#: rule, so no other string can reach a SQL literal position.
+DBT_TARIFF_GROUP: Final[str] = "'{{ tariff_group }}'"
+DBT_RUN_ID: Final[str] = "'{{ run_id }}'"
+_ALLOWED_VALUES: Final[frozenset[str]] = frozenset({BIND, DBT_TARIFF_GROUP, DBT_RUN_ID})
+
+#: Default relation names for the Python path: the warehouse's own tables.
+SCHEDULE_RELATION: Final[str] = "dim_tariff_band_schedule"
+PRICE_RELATION: Final[str] = "dim_tariff_price"
+
+
+#: True when a reading is excluded for any reason at all.
+_EXCLUDED = " OR ".join(flag for flag, _ in EXCLUSION_ORDER)
+
+#: The one reason reported, by EXCLUSION_ORDER precedence. The only place that decides.
+_REASON_CASE = (
+    "CASE\n"
+    + "\n".join(f"    WHEN {flag} THEN '{reason}'" for flag, reason in EXCLUSION_ORDER)
+    + "\n    END"
+)
+
+
+class ValuePlaceholderError(ValueError):
+    """A value placeholder that is neither a bind parameter nor a known dbt token."""
+
+
+def _validated_value(value: str) -> str:
+    if value not in _ALLOWED_VALUES:
+        msg = (
+            f"{value!r} is not an allowed value placeholder. Expected {BIND!r} for the "
+            "Python path, or one of the dbt tokens. Literal values are never pasted "
+            "into these statements."
+        )
+        raise ValuePlaceholderError(msg)
+    return value
+
+
+def exclusion_any_sql() -> str:
+    """The predicate that is true when a reading is excluded for any reason."""
+    return _EXCLUDED
+
+
+def exclusion_reason_case_sql() -> str:
+    """The single reason, by :data:`EXCLUSION_ORDER` precedence.
+
+    A reading can satisfy several conditions at once. This is what decides which one is
+    *reported*, and it is the only place that decision is made.
+    """
+    return _REASON_CASE
+
+
+def classified_readings_sql(
+    readings: str = policy.DEFAULT_READINGS_RELATION,
+    schedule: str = SCHEDULE_RELATION,
+    price: str = PRICE_RELATION,
+    scope_group: str = BIND,
+) -> str:
+    """Every distinct recorded reading classified, read from the named relations.
+
+    The relations are parameters for the same reason the policy queries' are: **one**
+    definition has to serve the Python path (the warehouse's own tables) and dbt (models
+    reached through ``ref``). Every rule -- eligibility, schedule coverage, conflict,
+    off-grid, missing value, unmatched label, unpriced band -- is expressed here once.
+    Re-expressing any of them in a dbt model would be a second implementation of the
+    project's policy, which is the thing ANL-003 exists to prevent.
+    """
+    return f"""
+WITH distinct_readings AS ({policy.distinct_readings_sql(readings)}),
+conflicting AS ({policy.conflicting_labels_sql(readings)}),
 coverage AS (
     SELECT MIN(schedule_label_naive) AS first_label,
            MAX(schedule_label_naive) AS last_label
-    FROM dim_tariff_band_schedule
+    FROM {policy.validated_relation(schedule)}
 ),
 banded_group AS (
-    SELECT DISTINCT tariff_group FROM dim_tariff_price WHERE band_label <> '{pr.FLAT_BAND}'
+    SELECT DISTINCT tariff_group FROM {policy.validated_relation(price)} WHERE band_label <> '{pr.FLAT_BAND}'
 )
 SELECT r.household_id,
        r.tariff_group,
@@ -221,7 +290,7 @@ SELECT r.household_id,
        s.band_label,
        p.price_pence_per_kwh,
        p.price_gbp_per_kwh,
-       (g.tariff_group IS NULL OR r.tariff_group <> ?)          AS is_ineligible_group,
+       (g.tariff_group IS NULL OR r.tariff_group <> {_validated_value(scope_group)})          AS is_ineligible_group,
        (cov.first_label IS NULL
         OR r.observed_at_naive < cov.first_label
         OR r.observed_at_naive > cov.last_label)                AS is_outside_schedule_period,
@@ -236,13 +305,13 @@ LEFT JOIN banded_group g ON g.tariff_group = r.tariff_group
 LEFT JOIN conflicting c
        ON c.household_id = r.household_id
       AND c.source_timestamp_text = r.source_timestamp_text
-LEFT JOIN dim_tariff_band_schedule s
+LEFT JOIN {policy.validated_relation(schedule)} s
        ON s.schedule_label_naive = r.observed_at_naive
 -- A price applies only inside its half-open validity [effective_from, effective_until).
 -- A NULL bound is UNKNOWN, not open-ended, so it prices nothing. The schedule's
 -- coverage and the price's validity are checked independently: a label the schedule
 -- carries but no price covers is excluded as unpriced_band, never charged at zero.
-LEFT JOIN dim_tariff_price p
+LEFT JOIN {policy.validated_relation(price)} p
        ON p.tariff_group = r.tariff_group
       AND p.band_label = s.band_label
       AND p.effective_from IS NOT NULL
@@ -251,17 +320,25 @@ LEFT JOIN dim_tariff_price p
       AND r.observed_at_naive <  CAST(p.effective_until AS TIMESTAMP)
 """
 
-_EXCLUDED = " OR ".join(flag for flag, _ in EXCLUSION_ORDER)
-_REASON_CASE = (
-    "CASE\n"
-    + "\n".join(f"    WHEN {flag} THEN '{reason}'" for flag, reason in EXCLUSION_ORDER)
-    + "\n    END"
-)
 
-#: Model: the scenario fact. Charged rows only -- one row per included reading.
-FACT_SELECT: Final[str] = f"""
-INSERT INTO fact_interval_charge_scenario
-SELECT ? AS run_id,
+#: Model: every distinct recorded reading classified against eligibility, schedule
+#: coverage and the four analytical policies. One row in, one row out -- the LEFT JOIN
+#: to the schedule cannot multiply, because the schedule label is a primary key and a
+#: duplicate is refused at load time (``schedule._validate``).
+CLASSIFIED_READINGS: Final[str] = classified_readings_sql()
+
+
+def fact_projection_sql(classified: str | None = None, run_id: str = BIND) -> str:
+    """The charged rows: one per included reading, with the exact charge.
+
+    ``consumption_kwh * price_gbp_per_kwh`` is DECIMAL x DECIMAL, which DuckDB evaluates
+    exactly. The division that produced ``price_gbp_per_kwh`` happened once, in Python
+    ``Decimal``, and is never written here -- DuckDB would evaluate DECIMAL / integer as
+    DOUBLE.
+    """
+    source = classified or f"({CLASSIFIED_READINGS}) classified"
+    return f"""
+SELECT {_validated_value(run_id)} AS run_id,
        household_id,
        tariff_group,
        source_timestamp_text,
@@ -275,15 +352,23 @@ SELECT ? AS run_id,
        CAST(consumption_kwh * price_gbp_per_kwh
             AS DECIMAL({CHARGE_PRECISION},{CHARGE_SCALE}))     AS energy_charge_gbp,
        '{ASSUMPTION_ID}'                               AS assumption_id
-FROM ({CLASSIFIED_READINGS}) classified
+FROM {source}
 WHERE NOT ({_EXCLUDED})
 """
 
-#: Model: everything the scenario did **not** charge, each with one explicit reason and
-#: every condition kept as its own flag. Never a zero charge.
-EXCLUSION_SELECT: Final[str] = f"""
-INSERT INTO fact_interval_charge_exclusion
-SELECT ? AS run_id,
+
+def exclusion_projection_sql(classified: str | None = None, run_id: str = BIND) -> str:
+    """Everything the scenario did **not** charge.
+
+    One explicit reason -- the first that applies, by :data:`EXCLUSION_ORDER` -- and every
+    condition also kept as its own flag, so the ordering hides nothing. There is no
+    charge column at all: an excluded reading has no charge, which is a different fact
+    from a charge of zero. A *charged* reading of zero kWh does produce a zero charge,
+    and it lives in the fact.
+    """
+    source = classified or f"({CLASSIFIED_READINGS}) classified"
+    return f"""
+SELECT {_validated_value(run_id)} AS run_id,
        household_id,
        tariff_group,
        source_timestamp_text,
@@ -300,9 +385,21 @@ SELECT ? AS run_id,
        is_missing_value,
        is_unmatched_label,
        is_unpriced_band
-FROM ({CLASSIFIED_READINGS}) classified
+FROM {source}
 WHERE {_EXCLUDED}
 """
+
+
+#: Model: the scenario fact. Charged rows only -- one row per included reading.
+FACT_SELECT: Final[str] = (
+    "\nINSERT INTO fact_interval_charge_scenario" + fact_projection_sql()
+)
+
+#: Model: everything the scenario did **not** charge, each with one explicit reason and
+#: every condition kept as its own flag. Never a zero charge.
+EXCLUSION_SELECT: Final[str] = (
+    "\nINSERT INTO fact_interval_charge_exclusion" + exclusion_projection_sql()
+)
 
 
 @dataclass(frozen=True, slots=True)

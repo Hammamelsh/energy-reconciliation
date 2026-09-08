@@ -94,7 +94,7 @@ Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.m
 
 ### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
 
-**Status: steps 0–3 implemented 2026-09-08; steps 4–7 not started.** Decisions in
+**Status: steps 0–4 implemented 2026-09-08; steps 5–7 not started.** Decisions in
 [`anl-003-dbt-design.md`](anl-003-dbt-design.md), sequenced in
 [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md).
 
@@ -109,10 +109,18 @@ fixtures; both dimensions come out row-for-row identical to the Python-built one
 materialisation. `uv run run-dbt` is the supported entry point and validates the database
 path before anything can create it.
 
-**What does not exist:** the classification model, both facts, the dbt tests and the
-publisher. The scenario is still built entirely by `build-tariff-scenario` in Python, from
-its own dimensions — it consumes nothing dbt produces. **The "Expressed as dbt models" row
-above stays *not done*** — the models that produce the charge are not in dbt.
+**Added at step 4:** the classification model and both facts, plus 49 dbt tests. Every
+rule is **generated** from `policy.py` and `models.py`, so nothing is written twice; the
+published SQL constants are byte-identical to before. On the three-member warehouse the
+dbt facts match the Python path exactly — 0 differing charged rows of 456,096 over every
+column, the same exact total `£11675.4339216532500000`, 0 differing exclusion rows of
+2,541,866, and identical per-band and per-household aggregates.
+
+**What does not exist: the publisher.** The scenario is still built entirely by
+`build-tariff-scenario` in Python, from its own dimensions; the dbt tables are *candidate*
+outputs that nothing reads, and the dashboard does not consume them. Concurrent-reader
+availability and recovery are undecided (I-14). **The "Expressed as dbt models" row above
+stays *not done*** until the publisher makes dbt's output the published one.
 
 **Not a copy-and-paste job.** The SQL is written and tested, which is the starting point,
 not the whole task. The port has to decide model boundaries and materialisations, wire

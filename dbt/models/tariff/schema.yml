@@ -1,0 +1,119 @@
+version: 2
+
+models:
+  - name: dim_tariff_band_schedule
+    description: >
+      The published band schedule. One row per half-hour label. The key is asserted here
+      because dbt materialises with CREATE TABLE AS SELECT, which carries types but drops
+      the PRIMARY KEY that models.SCHEMA declares (design D3, idea I-15).
+    columns:
+      - name: schedule_label_naive
+        description: The half-hour label. Naive; no timezone is claimed.
+        tests: [unique, not_null]
+      - name: band_label
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["High", "Normal", "Low"]
+      - name: schedule_source
+        description: Tariffs.xlsx, or synthetic-demo for the project's INVENTED schedule.
+        tests: [not_null]
+      - name: source_sha256
+        tests: [not_null]
+
+  - name: dim_tariff_price
+    description: >
+      PUBLISHER-DOCUMENTED prices. effective_from/effective_until are deliberately NOT
+      tested for non-null: the flat rate's period is UNKNOWN, and a NULL bound there means
+      "not established", never "open-ended". A blanket not_null rule would force an
+      invented period into the data.
+    columns:
+      - name: tariff_group
+        tests: [not_null]
+      - name: band_label
+        tests: [not_null]
+      - name: price_pence_per_kwh
+        tests: [not_null]
+      - name: price_gbp_per_kwh
+        tests: [not_null]
+      - name: currency
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["GBP"]
+      - name: price_unit
+        tests:
+          - accepted_values:
+              arguments:
+                values: ["pence_per_kwh"]
+      - name: catalogue_version
+        tests: [not_null]
+
+  - name: fact_interval_charge_scenario
+    description: >
+      Charged readings only. A zero-consumption reading that passes every rule is charged
+      at exactly zero and appears here; an excluded reading has no charge and does not.
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: household_id
+        tests: [not_null]
+      - name: source_timestamp_text
+        tests: [not_null]
+      - name: observed_at_naive
+        description: Must be a label the schedule carries, or it could not have been banded.
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_tariff_band_schedule')
+                field: schedule_label_naive
+      - name: band_label
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["High", "Normal", "Low"]
+      - name: consumption_kwh
+        tests: [not_null]
+      - name: price_pence_per_kwh
+        tests: [not_null]
+      - name: energy_charge_gbp
+        tests: [not_null]
+      - name: assumption_id
+        description: Nothing produced here may be read without A1.
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["A1"]
+
+  - name: fact_interval_charge_exclusion
+    description: One row per uncharged distinct reading, with one reason and every flag.
+    columns:
+      - name: run_id
+        tests: [not_null]
+      - name: household_id
+        tests: [not_null]
+      - name: source_timestamp_text
+        tests: [not_null]
+      - name: value_category
+        tests: [not_null]
+      - name: exclusion_reason
+        tests: [not_null]
+      - name: is_ineligible_group
+        tests: [not_null]
+      - name: is_outside_schedule_period
+        tests: [not_null]
+      - name: is_conflicted
+        tests: [not_null]
+      - name: is_off_grid
+        tests: [not_null]
+      - name: is_missing_value
+        tests: [not_null]
+      - name: is_unmatched_label
+        tests: [not_null]
+      - name: is_unpriced_band
+        tests: [not_null]

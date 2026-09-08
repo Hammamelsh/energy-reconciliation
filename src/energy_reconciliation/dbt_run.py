@@ -50,7 +50,12 @@ import duckdb
 
 from .dbt_macros import repository_root
 from .tariff import identity
-from .tariff.dimensions import DEMO_VARIANT, SCHEDULE_VARIANTS, WORKBOOK_VARIANT
+from .tariff import prices as pr
+from .tariff.dimensions import (
+    DEMO_VARIANT,
+    SCHEDULE_VARIANTS,
+    WORKBOOK_VARIANT,
+)
 
 #: The schema every dbt model is built into. Never ``main``: the warehouse's own tables
 #: are written by ingestion, and a dbt run must not be able to replace one.
@@ -65,6 +70,45 @@ _PROJECT_GLOBS: Final[tuple[str, ...]] = ("dbt_project.yml", "models/**/*", "mac
 
 #: dbt packages recorded with every build.
 DBT_PACKAGES: Final[tuple[str, ...]] = ("dbt-core", "dbt-duckdb")
+
+#: Prefix on every run_id this wrapper generates. A candidate build is not a published
+#: scenario run and its identifiers must never be mistaken for one in a query or a log.
+CANDIDATE_PREFIX: Final[str] = "dbtcand"
+
+#: Columns of the build record. A stored table with a different shape is dropped and
+#: rebuilt rather than migrated: it is a log of candidate builds, derivable by rebuilding,
+#: and guessing at a migration would be the riskier choice.
+_BUILD_RUN_COLUMNS: Final[tuple[str, ...]] = (
+    "run_id",
+    "built_at_utc",
+    "dbt_core_version",
+    "dbt_duckdb_version",
+    "python_version",
+    "target_schema",
+    "schedule_variant",
+    "tariff_group",
+    "dbt_command",
+    "dbt_project_sha256",
+    "macro_sha256",
+    "policy_sha256",
+    "calculation_code_sha256",
+    "note",
+)
+
+
+def candidate_run_id(project: Path, when: datetime) -> str:
+    """An identifier for one candidate build, keyed by what produced it."""
+    material = "::".join(
+        [
+            project_digest(project),
+            identity.calculation_digest(),
+            identity.policy_digest(),
+        ]
+    )
+    return (
+        f"{CANDIDATE_PREFIX}-{hashlib.sha256(material.encode()).hexdigest()[:12]}"
+        f"@{when.strftime('%Y%m%dT%H%M%S%f')}"
+    )
 
 
 class DatabasePathError(ValueError):
@@ -164,49 +208,69 @@ def _dbt_command() -> list[str]:
 
 
 def record_build(
-    database: Path, schedule: str, command: list[str], project: Path
+    database: Path,
+    schedule: str,
+    command: list[str],
+    project: Path,
+    run_id: str,
+    when: datetime,
+    tariff_group: str,
 ) -> dict[str, Any]:
     """Write one row describing the build that just succeeded.
 
     Opened read-write only after dbt has finished and released the file lock.
+
+    **Only successful builds are recorded, and a record does not certify the tables
+    afterwards.** dbt fails per model, so a later partial rebuild can leave some candidate
+    tables refreshed and others as they were, while this table still shows the earlier
+    success. The row says what produced a build, not what the schema currently holds.
     """
     record = {
-        "built_at_utc": datetime.now(UTC).replace(tzinfo=None),
+        "run_id": run_id,
+        "built_at_utc": when,
         "dbt_core_version": dbt_identity()["dbt-core"],
         "dbt_duckdb_version": dbt_identity()["dbt-duckdb"],
         "python_version": identity.runtime_identity()["python"],
         "target_schema": BUILD_SCHEMA,
         "schedule_variant": schedule,
+        "tariff_group": tariff_group,
         "dbt_command": " ".join(command),
         "dbt_project_sha256": project_digest(project),
+        "macro_sha256": hashlib.sha256(
+            (project / "macros" / "generated_policy.sql").read_bytes()
+        ).hexdigest(),
         "policy_sha256": identity.policy_digest(),
         "calculation_code_sha256": identity.calculation_digest(),
         "note": (
             "Candidate dbt outputs. NOT the published tariff scenario: that is built by "
             "build-tariff-scenario, reads its own dimensions, and does not consume "
-            "anything in this schema."
+            "anything in this schema. A row here records a build that succeeded; it does "
+            "not certify what the schema holds after any later partial rebuild."
         ),
     }
+    assert tuple(record) == _BUILD_RUN_COLUMNS
     con = duckdb.connect(str(database))
     try:
         con.execute(f"CREATE SCHEMA IF NOT EXISTS {BUILD_SCHEMA}")
-        con.execute(
-            f"""CREATE TABLE IF NOT EXISTS {BUILD_RUN_TABLE} (
-                built_at_utc            TIMESTAMP NOT NULL,
-                dbt_core_version        VARCHAR   NOT NULL,
-                dbt_duckdb_version      VARCHAR   NOT NULL,
-                python_version          VARCHAR   NOT NULL,
-                target_schema           VARCHAR   NOT NULL,
-                schedule_variant        VARCHAR   NOT NULL,
-                dbt_command             VARCHAR   NOT NULL,
-                dbt_project_sha256      VARCHAR   NOT NULL,
-                policy_sha256           VARCHAR   NOT NULL,
-                calculation_code_sha256 VARCHAR   NOT NULL,
-                note                    VARCHAR   NOT NULL
-            )"""
+        existing = tuple(
+            r[0]
+            for r in con.execute(
+                "SELECT column_name FROM information_schema.columns WHERE "
+                f"table_schema = '{BUILD_SCHEMA}' AND table_name = 'dbt_build_run' "
+                "ORDER BY ordinal_position"
+            ).fetchall()
         )
+        if existing and existing != _BUILD_RUN_COLUMNS:
+            print(f"rebuilding {BUILD_RUN_TABLE}: recorded shape is out of date")
+            con.execute(f"DROP TABLE {BUILD_RUN_TABLE}")
+        columns = ",\n                ".join(
+            f"{name:24s} {'TIMESTAMP' if name.endswith('_utc') else 'VARCHAR'} NOT NULL"
+            for name in _BUILD_RUN_COLUMNS
+        )
+        con.execute(f"CREATE TABLE IF NOT EXISTS {BUILD_RUN_TABLE} (\n{columns}\n)")
+        placeholders = ",".join("?" * len(_BUILD_RUN_COLUMNS))
         con.execute(
-            f"INSERT INTO {BUILD_RUN_TABLE} VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            f"INSERT INTO {BUILD_RUN_TABLE} VALUES ({placeholders})",
             list(record.values()),
         )
     finally:
@@ -239,10 +303,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--workbook", default="", help="explicit workbook path")
     parser.add_argument(
+        "--tariff-group",
+        default=pr.TOU_GROUP,
+        help=f"tariff group the scenario is scoped to (default: {pr.TOU_GROUP})",
+    )
+    parser.add_argument(
         "--project-dir",
         type=Path,
         default=repository_root() / "dbt",
-        help=argparse.SUPPRESS,
+        help="dbt project to run (default: this repository's dbt/)",
     )
     args, passthrough = parser.parse_known_args(argv)
 
@@ -252,6 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run-dbt: {error}", file=sys.stderr)
         return 2
 
+    when = datetime.now(UTC).replace(tzinfo=None)
+    run_id = candidate_run_id(args.project_dir, when)
     dbt_args = passthrough or ["build"]
     command = [
         *_dbt_command(),
@@ -261,7 +332,14 @@ def main(argv: list[str] | None = None) -> int:
         "--profiles-dir",
         str(args.project_dir),
         "--vars",
-        json.dumps({"schedule": args.schedule, "workbook": args.workbook}),
+        json.dumps(
+            {
+                "schedule": args.schedule,
+                "workbook": args.workbook,
+                "tariff_group": args.tariff_group,
+                "run_id": run_id,
+            }
+        ),
     ]
     # argv is built here and no shell is involved.
     completed = subprocess.run(
@@ -276,10 +354,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return completed.returncode
 
-    record = record_build(database, args.schedule, dbt_args, args.project_dir)
+    record = record_build(
+        database,
+        args.schedule,
+        dbt_args,
+        args.project_dir,
+        run_id,
+        when,
+        args.tariff_group,
+    )
     print(
-        f"recorded in {BUILD_RUN_TABLE}: dbt-core {record['dbt_core_version']}, "
-        f"dbt-duckdb {record['dbt_duckdb_version']}, schedule {record['schedule_variant']}"
+        f"recorded in {BUILD_RUN_TABLE}: {record['run_id']} · dbt-core "
+        f"{record['dbt_core_version']}, dbt-duckdb {record['dbt_duckdb_version']}, "
+        f"schedule {record['schedule_variant']}, group {record['tariff_group']}"
     )
     return 0
 

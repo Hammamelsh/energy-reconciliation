@@ -1,10 +1,10 @@
 # ANL-003 — Design: porting the tariff models to dbt
 
-**Date:** 2026-09-08. **Status: steps 0–3 BUILT; steps 4–7 not built.** The staging view,
-the two policy models and **both tariff dimensions** exist and run. **No fact and no
-publisher does**, and the published scenario is still built entirely by
-`build-tariff-scenario`. dbt is installed (versions in D1). Every figure in §2 is still the
-acceptance target, not a claim about dbt output. The ticket that would build
+**Date:** 2026-09-08. **Status: steps 0–4 BUILT; steps 5–7 not built.** The staging view,
+the two policy models, both tariff dimensions, the classification and **both facts** exist,
+run, and reproduce §2's figures exactly. **No publisher does.** The published scenario is
+still built entirely by `build-tariff-scenario`, from its own dimensions, and consumes
+nothing dbt produces. dbt is installed (versions in D1). The ticket that would build
 it is [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). The roadmap entry it
 answers is `roadmap.md` § M3 → ANL-003.
 
@@ -131,6 +131,17 @@ from dbt without a second definition:
    {% macro exclusion_flags_any() %}is_ineligible_group OR ... {% endmacro %}
    {% macro exclusion_reasons() %}('ineligible_tariff_group', ...){% endmacro %}
    ```
+
+   **Extended at step 4.** The generator now also renders `classified_readings`,
+   `scenario_fact`, `exclusion_fact`, `exclusion_reason_case` and `exclusion_reasons`,
+   from `models.classified_readings_sql`, `models.fact_projection_sql`,
+   `models.exclusion_projection_sql` and `EXCLUSION_ORDER` — the same functions the Python
+   path calls. That was not optional: eligibility, schedule coverage, conflict, off-grid,
+   missing value, unmatched label, unpriced band and the reason precedence are *rules*, and
+   hand-writing them in a dbt model would have been the second implementation this
+   decision exists to prevent. `models.py`'s published SQL constants are now the default
+   renderings of those functions and are **byte-identical to their previous values**, so no
+   figure could move.
 
    The generated file **is committed** — dbt needs it present — and
    `tests/test_dbt_generated.py` asserts that a fresh render equals the committed bytes.
@@ -300,6 +311,15 @@ warehouse. **Not decided here, and not implemented in this slice** — recorded 
 published result **and its identity** intact — the `scenario_run` row, its fingerprint and
 its digests included, not merely the fact rows.
 
+**A build record is not a certificate of the tables (measured at step 4).** dbt fails per
+model, so a failed run can still leave independently successful models rebuilt. `run-dbt`
+returns dbt's non-zero exit and records **nothing** for a failed attempt, which keeps the
+log truthful about builds. It does not, and cannot, make the earlier success row describe
+the schema afterwards: after a partial rebuild some candidate tables are new and others
+are as they were, while the last row still reads "succeeded". Reading a candidate table
+therefore requires the last build to have succeeded, not merely for a success to be on
+record. Step 5's publisher is where that becomes a guarantee rather than a caveat.
+
 **Rollback.** There is no in-place undo today and the port does not add one: when a run
 supersedes another, the previous rows are gone (as they are now). The recovery path is
 the one REC-001 already uses — replay the previous baseline into a **fresh** database
@@ -351,12 +371,35 @@ The rest of this decision applies from step 5:
 
 ### D7 — Tests: dbt tests for structure and identities, pytest for arithmetic
 
-**dbt schema tests (`schema.yml`):** `dim_tariff_band_schedule.schedule_label_naive`
-unique + not_null; `band_label` accepted_values High/Normal/Low; `dim_tariff_price`
-unique combination (`tariff_group`, `band_label`), not_null on both prices;
-`fact_interval_charge_scenario.assumption_id` accepted_values `['A1']`; `run_id` not_null
-on both facts; `fact_interval_charge_scenario` unique on (`run_id`, `household_id`,
-`source_timestamp_text`) — the charged-output grain from D4.
+**BUILT at step 4: 49 dbt tests, 11 of them singular.** Schema tests cover
+`schedule_label_naive` (unique, not_null), the band vocabularies, the price not-nulls, the
+assumption id, both facts' key columns and every exclusion flag, plus a `relationships`
+test tying every charged reading's label back to the schedule dimension. Singular tests
+cover the fact key, the price key, `charged + excluded = distinct`, disjointness,
+**membership** (every distinct reading in exactly one fact, and neither fact holding a key
+the grain does not), row-by-row charge arithmetic, the reason vocabulary **and its
+precedence**, at-least-one-flag, price validity being both-or-neither, unknown validity
+pricing nothing, and the four required price values.
+
+**`effective_from` / `effective_until` are deliberately given no not_null test.** The flat
+rate's period is UNKNOWN; a NULL bound there means "not established", never "open-ended",
+and a blanket rule would force an invented period into the data. What *is* asserted is the
+consequence: a price with unknown validity charges nothing.
+
+**Mutation-tested, because a passing suite proves nothing about the tests themselves.**
+Two deliberate defects, each built against a **copy** of the project and a disposable
+warehouse:
+
+| Mutation | Tests that failed | Tests that still passed |
+|---|---|---|
+| One exclusion flag inverted in the exclusion projection only | reconciliation, disjointness, at-least-one-flag, reason not-null | the reason-precedence test |
+| Two reasons swapped inside the exclusion fact only | **the reason-precedence test alone** | reconciliation and disjointness — `4 + 10 = 14` still closed exactly |
+
+The second is the one that matters. Every count, every total and the accounting identity
+were untouched; only recomputing the precedence from the stored flags found it. A
+reconciliation test on its own would have reported success on wrong data.
+
+**The original schema-test list, for reference:**
 
 **dbt singular tests (`dbt/tests/`):**
 

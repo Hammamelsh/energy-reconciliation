@@ -95,16 +95,33 @@ def test_anything_that_is_not_a_relation_name_is_refused(hostile):
         policy.conflicting_labels_sql(hostile)
 
 
-def test_the_dbt_placeholder_is_permitted_by_name_only():
-    """dbt fills the relation in at compile time, so the macro body carries a token.
+@pytest.mark.parametrize(
+    "placeholder",
+    ["{{ readings }}", "{{ schedule }}", "{{ price }}", "{{ classified }}"],
+)
+def test_a_bare_jinja_variable_is_permitted_as_a_relation(placeholder):
+    """dbt fills the relation in at compile time, so a macro body carries a token.
 
-    It is allowed because it is *that* exact string, not because the validator is lax:
-    a near miss is still refused.
+    The accepted shape is a **bare Jinja variable reference**, single-spaced, naming a
+    lower-case identifier -- widened from the single ``{{ readings }}`` token in step 1
+    because the tariff classification reads three relations, not one. It is still not a
+    licence for arbitrary text: everything below is refused.
     """
-    assert policy.DBT_RELATION_PLACEHOLDER == "{{ readings }}"
-    rendered = policy.distinct_readings_sql(policy.DBT_RELATION_PLACEHOLDER)
-    assert "FROM {{ readings }}" in rendered
+    assert f"FROM {placeholder}" in policy.distinct_readings_sql(placeholder)
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "{{ readings }} WHERE 1=1",  # SQL after the reference
+        "{{ readings|upper }}",  # a filter
+        "{{ ref('x') }}",  # a call
+        "{{ a.b }}",  # an attribute
+        "{{readings}}",  # not the single-spaced form
+        "{{ Readings }}",  # not lower case
+        "{{ 1 }}",  # not an identifier
+    ],
+)
+def test_anything_beyond_a_bare_jinja_variable_is_refused(hostile):
     with pytest.raises(policy.PolicyRelationError):
-        policy.distinct_readings_sql("{{ readings }} WHERE 1=1")
-    with pytest.raises(policy.PolicyRelationError):
-        policy.distinct_readings_sql("{{ anything_else }}")
+        policy.distinct_readings_sql(hostile)

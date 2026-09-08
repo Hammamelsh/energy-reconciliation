@@ -74,6 +74,13 @@ DBT = Path(sys.executable).with_name("dbt")
 
 
 def _dbt(database: Path, target: Path, *args: str) -> subprocess.CompletedProcess:
+    """dbt, driven directly rather than through `run-dbt`.
+
+    Direct invocation is a supported route for reading, and it is the right one here
+    because this module compares *output*, not the wrapper. It carries none of the
+    wrapper's database-path guarantees, and it has to supply the vars the project
+    requires itself -- which `run-dbt` would otherwise do.
+    """
     command = [str(DBT)] if DBT.is_file() else [sys.executable, "-m", "dbt.cli.main"]
     return subprocess.run(
         [
@@ -85,6 +92,15 @@ def _dbt(database: Path, target: Path, *args: str) -> subprocess.CompletedProces
             str(PROJECT),
             "--target-path",
             str(target),
+            "--vars",
+            json.dumps(
+                {
+                    "schedule": "demo",
+                    "workbook": "",
+                    "tariff_group": "ToU",
+                    "run_id": "equivalence-fixture",
+                }
+            ),
         ],
         capture_output=True,
         text=True,

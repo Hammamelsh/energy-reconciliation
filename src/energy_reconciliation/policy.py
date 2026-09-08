@@ -59,11 +59,18 @@ FINITE: Final[str] = "finite_numeric"
 #: a different one (an attached warehouse, a dbt model) passes it explicitly.
 DEFAULT_READINGS_RELATION: Final[str] = "readings"
 
-#: The one non-identifier value :func:`_validated_relation` accepts. dbt substitutes the
-#: real relation into its macro at compile time, so the *rendered macro body* has to
-#: carry this placeholder verbatim. It is permitted by name rather than by loosening the
-#: identifier rule, so nothing else that fails validation can slip through with it.
+#: The relation placeholder used by the policy macros.
 DBT_RELATION_PLACEHOLDER: Final[str] = "{{ readings }}"
+
+#: dbt substitutes the real relation into a macro at compile time, so a *rendered macro
+#: body* carries a placeholder rather than a name. Exactly one shape is accepted: a bare
+#: Jinja variable reference, single-spaced, naming a lower-case identifier. That admits
+#: ``{{ readings }}``, ``{{ schedule }}`` and ``{{ price }}`` -- the three relations the
+#: tariff classification reads -- and admits nothing that could carry SQL: no filter, no
+#: call, no attribute, no operator, no second statement.
+_PLACEHOLDER_PATTERN: Final[re.Pattern[str]] = re.compile(
+    r"^\{\{ [a-z_][a-z0-9_]* \}\}$"
+)
 
 #: A relation name: dot-separated parts, each a bare identifier or a double-quoted one
 #: (``"dev"."main"."stg_readings"``, which is how dbt's ``ref()`` renders). Anchored, so
@@ -84,8 +91,10 @@ class PolicyRelationError(ValueError):
     """
 
 
-def _validated_relation(relation: str) -> str:
-    if relation == DBT_RELATION_PLACEHOLDER:
+def validated_relation(relation: str) -> str:
+    """A relation name, or :class:`PolicyRelationError`. Public because the tariff models
+    compose SQL over the same relations and must apply the same rule, not a second one."""
+    if _PLACEHOLDER_PATTERN.match(relation):
         return relation
     if not _RELATION_PATTERN.match(relation):
         msg = (
@@ -122,7 +131,7 @@ SELECT DISTINCT
        consumption_kwh,
        value_category,
        {SIGNATURE}     AS value_signature
-FROM {_validated_relation(relation)}
+FROM {validated_relation(relation)}
 """
 
 
@@ -134,7 +143,7 @@ def conflicting_labels_sql(relation: str = DEFAULT_READINGS_RELATION) -> str:
     """
     return f"""
 SELECT household_id, source_timestamp_text
-FROM {_validated_relation(relation)}
+FROM {validated_relation(relation)}
 GROUP BY household_id, source_timestamp_text
 HAVING COUNT(DISTINCT {SIGNATURE}) > 1
 """
