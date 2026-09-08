@@ -48,7 +48,13 @@ from typing import Any, Final
 
 from ..tariff import identity
 from .baselines import Model, default_models
-from .dataset import DayRecord, HouseholdSeries, daily_records
+from .dataset import (
+    I08_DIGEST,
+    DayRecord,
+    HouseholdSeries,
+    daily_records,
+    usable_days_digest,
+)
 from .evaluate import Metric, round_kwh
 
 #: Usable days required among the 28 dates ending at an origin. Fixed in the contract
@@ -150,6 +156,26 @@ def qualifies_at(
     )
 
 
+def classify_target(
+    target: date, usable: dict[date, Decimal], recorded: set[date]
+) -> tuple[str, str | None, Decimal | None]:
+    """Whether a target date can be scored, and if not, why.
+
+    One definition, used by the experiment and by the applicability check: a target is
+    scoreable when usable; otherwise it is *not usable* when the warehouse holds rows for
+    that date, and *absent* when it holds none. The distinction depends on unusable days
+    existing at all, which the usable-days digest cannot see -- which is exactly why the
+    check recomputes it.
+    """
+    if target in usable:
+        return SCOREABLE, None, usable[target]
+    return (
+        UNAVAILABLE,
+        (TARGET_NOT_USABLE if target in recorded else TARGET_ABSENT),
+        None,
+    )
+
+
 def _history_series(
     household: str, usable: dict[date, Decimal], origin: date, config: PriorConfig
 ) -> HouseholdSeries:
@@ -191,18 +217,9 @@ def run_prior_eligibility(
             for horizon in range(1, config.horizon + 1):
                 target = origin + timedelta(days=horizon)
                 scheduled += 1
-                if target in usable:
-                    target_state, target_reason, actual = (
-                        SCOREABLE,
-                        None,
-                        usable[target],
-                    )
-                else:
-                    target_state = UNAVAILABLE
-                    target_reason = (
-                        TARGET_NOT_USABLE if target in recorded else TARGET_ABSENT
-                    )
-                    actual = None
+                target_state, target_reason, actual = classify_target(
+                    target, usable, recorded
+                )
                 for model in models:
                     if not qualifies:
                         reason = (
@@ -312,11 +329,6 @@ def _report(
         if c.scored and (c.household_id, c.origin, c.horizon) in common_keys
     ]
 
-    dataset_digest = hashlib.sha256()
-    for household in sorted(records):
-        for r in records[household]:
-            if r.usable and r.kwh is not None:
-                dataset_digest.update(f"{household}|{r.source_date}={r.kwh}".encode())
     code = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob("*.py")):
         code.update(path.name.encode())
@@ -381,7 +393,8 @@ def _report(
         },
         "overlap_with_fore_001": _overlap(cases, database, model_names),
         "identity": {
-            "dataset_sha256": dataset_digest.hexdigest(),
+            "dataset_sha256": usable_days_digest(records),
+            "dataset_digest_definition": I08_DIGEST,
             "forecast_code_sha256": code.hexdigest(),
             "config_sha256": config.digest,
             "calculation_code_sha256": identity.calculation_digest(),

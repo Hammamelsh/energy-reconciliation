@@ -16,6 +16,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..forecast import applicability
 from ..forecast.baselines import Model, default_models
 from ..forecast.dataset import HouseholdSeries, series_for
 from ..forecast.evaluate import (
@@ -71,6 +72,73 @@ def load_prior_report(directory: Path = REPORT_DIR) -> dict[str, Any] | None:
         return None
     reports = sorted(directory.glob("i-08-*.json"), key=lambda p: p.stat().st_mtime)
     return json.loads(reports[-1].read_text()) if reports else None
+
+
+def assess_reports(
+    reports: dict[str, dict[str, Any] | None], target: Any
+) -> dict[str, applicability.Applicability | None]:
+    """Does each report describe the selected dataset? One scan for all of them.
+
+    ``target`` is the selected database path today; when the dashboard reads published
+    versions it will be a tariff ``ReadContext``, which is used as-is (its ``database``),
+    never re-resolved here. Replaces the file-name comparison the tab used to make.
+    """
+    return applicability.assess_reports(reports, target)
+
+
+def applicability_message(fit: applicability.Applicability, selected: Path) -> str:
+    """What to tell a reader when a report does not describe the selected dataset."""
+    recorded = Path(fit.recorded_database).name or "an unrecorded file"
+    head = (
+        f"**This report does not describe `{selected.name}`.** It was recorded against "
+        f"`{recorded}`"
+        + (" (a different file name)" if fit.renamed else " (the same file name)")
+        + f", and {fit.reason}."
+    )
+    if fit.outcome == applicability.UNVERIFIABLE:
+        head = (
+            f"**Whether this report describes `{selected.name}` cannot be established:** "
+            f"{fit.reason}. It is not shown, because an unverified match is not a match."
+        )
+    lines = [head]
+    differing = [c for c in fit.checks if not c.matches][:6]
+    if differing:
+        lines.append("")
+        lines.append("| Recorded claim | In the report | In this dataset |")
+        lines.append("|---|---|---|")
+        for c in differing:
+            lines.append(
+                f"| `{c.field}` | {_short(c.recorded)} | {_short(c.current)} |"
+            )
+    lines.append("")
+    lines.append(
+        "Rerun the experiment for this dataset before reading its figures: "
+        f"`uv run {'run-prior-eligibility' if fit.kind == applicability.I08 else 'run-forecast-experiment'}"
+        f" --database {selected}`"
+    )
+    return "\n".join(lines)
+
+
+def applicability_note(fit: applicability.Applicability, selected: Path) -> str:
+    """One line for an applicable report: what was verified, and the provenance."""
+    recorded = Path(fit.recorded_database).name
+    where = (
+        f"recorded against `{recorded}`, now read from `{selected.name}` -- same content, "
+        "different file"
+        if fit.renamed
+        else f"recorded against and read from `{selected.name}`"
+    )
+    return (
+        f"**Applies to this dataset**: {len(fit.checks)} recorded claims recompute "
+        f"identically from its rows ({fit.definition}); {where}."
+    )
+
+
+def _short(value: str | None, limit: int = 60) -> str:
+    if value is None:
+        return "*not recorded*"
+    text = value.replace("|", "/")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 def prior_comparison_table(prior: dict[str, Any]) -> pd.DataFrame:

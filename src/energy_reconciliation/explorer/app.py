@@ -1202,17 +1202,19 @@ with forecast_tab:
     )
 
     report = fc.load_latest_report()
+    prior = fc.load_prior_report()
+    # Content, not file names: each report's own dataset digest and every displayed
+    # context figure are recomputed from the selected database, in one scan for both
+    # reports. The file the report was run against is kept as provenance only.
+    fits = fc.assess_reports({"fore": report, "prior": prior}, database)
+    fit, prior_fit = fits["fore"], fits["prior"]
     if report is None:
         st.info(
             "No forecast experiment has been run for this database yet.\n\n"
             f"`uv run run-forecast-experiment --database {database}`"
         )
-    elif Path(report["database"]).name != database.name:
-        st.warning(
-            f"The recorded experiment was run against `{Path(report['database']).name}`, "
-            f"not the dataset selected in the sidebar (`{database.name}`). Rerun it for "
-            "this dataset before reading these figures."
-        )
+    elif not fit.applicable:
+        st.warning(fc.applicability_message(fit, database))
     else:
         selectable = [h["household_id"] for h in report["households"]]
         cfg = report["config"]
@@ -1225,11 +1227,12 @@ with forecast_tab:
             )
 
         st.markdown(
-            f"**Dataset** `{Path(report['database']).name}` · **cohort** "
+            f"**Dataset** `{database.name}` · **cohort** "
             f"{fc.describe_cohort(sel)} · **retrospective clean-run benchmark**: each "
             "household's longest clean run was chosen over its whole history, holdout "
             "included, so this is not operational accuracy across all households."
         )
+        st.caption(fc.applicability_note(fit, database))
         scope = st.columns(4)
         scope[0].metric(
             "Households evaluated",
@@ -1413,11 +1416,16 @@ with forecast_tab:
                     f"{sweep['note']}"
                 )
 
-        prior = fc.load_prior_report()
-        if prior:
+        if prior and not prior_fit.applicable:
             with st.expander(
                 "A different experiment — eligibility from prior data only (I-08)"
             ):
+                st.warning(fc.applicability_message(prior_fit, database))
+        elif prior:
+            with st.expander(
+                "A different experiment — eligibility from prior data only (I-08)"
+            ):
+                st.caption(fc.applicability_note(prior_fit, database))
                 st.markdown(
                     "**A separate experiment, not a restatement of the figures above.** "
                     "FORE-001 chose households by a clean run found over their whole "
@@ -1517,7 +1525,8 @@ the smallest days.
 
 | Identity | |
 |---|---|
-| Dataset | `{report["identity"]["dataset_sha256"][:16]}…` |
+| Dataset digest | `{report["identity"]["dataset_sha256"][:16]}…` ({fit.definition}), recomputed identically from `{database.name}` |
+| Recorded against | `{report["database"]}` — the path at generation time, kept as provenance |
 | Forecast code | `{report["identity"]["forecast_code_sha256"][:16]}…` |
 | Configuration | `{report["identity"]["config_sha256"][:16]}…` |
 | Runtime | {", ".join(f"{k} {v}" for k, v in sorted(report["identity"]["runtime"].items()))} |

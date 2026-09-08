@@ -62,8 +62,10 @@ from ..tariff import identity
 from .baselines import Model, WeekdayMean, default_models
 from .dataset import (
     EXPECTED_INTERVALS,
+    FORE_001_DIGEST,
     MIN_RUN_DAYS,
     HouseholdSeries,
+    cohort_series_digest,
     eligible_series,
     feasibility,
 )
@@ -337,14 +339,6 @@ def run_experiment(
             ),
         }
 
-    dataset_digest = hashlib.sha256()
-    for one in series:
-        dataset_digest.update(
-            f"{one.household_id}|{one.run_start}|{one.run_end}|{len(one.values)}".encode()
-        )
-        for day in sorted(one.values):
-            dataset_digest.update(f"{day}={one.values[day]}".encode())
-
     forecast_code = hashlib.sha256()
     for path in sorted(Path(__file__).parent.glob("*.py")):
         forecast_code.update(path.name.encode())
@@ -364,7 +358,8 @@ def run_experiment(
         "config": asdict(config),
         "models": [{"name": m.name, "description": m.description} for m in models],
         "identity": {
-            "dataset_sha256": dataset_digest.hexdigest(),
+            "dataset_sha256": cohort_series_digest(series),
+            "dataset_digest_definition": FORE_001_DIGEST,
             "forecast_code_sha256": forecast_code.hexdigest(),
             "config_sha256": config.digest,
             "ingestion_pipeline_fingerprint": identity.calculation_digest(),

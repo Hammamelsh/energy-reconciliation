@@ -146,3 +146,16 @@ uv run run-prior-eligibility --database data/warehouse/energy.duckdb
 
 FORE-001's report, identities and figures are untouched; I-08 writes its own
 `data/forecasts/i-08-*.json` with its own dataset, code and configuration digests.
+
+**Which dataset a report describes (I-19, 2026-09-08).** `identity.dataset_sha256` is
+`i-08-usable-days-1`: every household's every usable daily total, households in id order.
+Every prediction, decline, score and coverage figure reads only that map and the shared
+origin calendar, so the digest supports them — but it says nothing about households with
+no usable day, about unusable or absent days, or about the warehouse's date span. The
+dashboard therefore also recomputes and compares `universe.households`, the origin calendar
+(`origins`, `first`, `last`, `step_days`), `household_origins_scheduled`,
+`scheduled_cases_per_model`, `household_origins_qualifying` and the
+`target_availability.unavailable_by_reason` split (absent versus not usable, which depends
+on unusable rows existing at all). The report is shown only when every one of those
+recomputes identically; a report that predates the `identity.dataset_digest_definition`
+field is read under this definition (see the FORE-001 note for why that is established).

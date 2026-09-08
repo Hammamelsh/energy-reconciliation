@@ -46,6 +46,7 @@ experiment (I-08 in ``docs/ideas.md``).
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -231,9 +232,19 @@ def eligible_series(
     by id -- a deterministic rule that has nothing to do with how well any model does on
     them.
     """
+    return series_from_records(daily_records(database), min_run_days, limit)
+
+
+def series_from_records(
+    records: dict[str, list[DayRecord]],
+    min_run_days: int = MIN_RUN_DAYS,
+    limit: int | None = None,
+) -> list[HouseholdSeries]:
+    """:func:`eligible_series` over records already read, so one scan serves many uses."""
     series: list[HouseholdSeries] = []
-    for household, records in sorted(daily_records(database).items()):
-        run = longest_usable_run(records)
+    for household, rows in sorted(records.items()):
+        records_for_household = rows
+        run = longest_usable_run(records_for_household)
         if run is None:
             continue
         start, end = run
@@ -241,7 +252,7 @@ def eligible_series(
             continue
         values = {
             r.source_date: r.kwh
-            for r in records
+            for r in records_for_household
             if r.usable and start <= r.source_date <= end and r.kwh is not None
         }
         series.append(HouseholdSeries(household, start, end, values))
@@ -250,7 +261,11 @@ def eligible_series(
 
 def feasibility(database: Path) -> dict:
     """What the loaded data can and cannot support, measured before any modelling."""
-    records = daily_records(database)
+    return feasibility_from_records(daily_records(database))
+
+
+def feasibility_from_records(records: dict[str, list[DayRecord]]) -> dict:
+    """:func:`feasibility` over records already read."""
     total_days = sum(len(v) for v in records.values())
     usable_days = sum(1 for v in records.values() for r in v if r.usable)
     reasons: dict[str, int] = {}
@@ -307,3 +322,51 @@ def series_for(
         if r.usable and start <= r.source_date <= end and r.kwh is not None
     }
     return HouseholdSeries(household, start, end, values)
+
+
+# ------------------------------------------------------------ dataset identity
+#: Names of the two dataset-digest definitions, recorded in every report from now on as
+#: ``identity.dataset_digest_definition``. **Compatibility rule for reports without the
+#: field:** the field was introduced after both existing reports were written, and the
+#: digest code below is byte-for-byte the loop each generator ran at the time (it moved
+#: here unchanged; see the commits that created each report). A FORE-001 report without
+#: the field is therefore read under ``FORE_001_DIGEST``, an I-08 report under
+#: ``I08_DIGEST``. Both real reports were re-verified against the warehouse they were run
+#: on before that rule was written down. A report naming a definition this code does not
+#: know is *unverifiable*, never evaluated under a guess.
+FORE_001_DIGEST: Final[str] = "fore-001-cohort-series-1"
+I08_DIGEST: Final[str] = "i-08-usable-days-1"
+
+
+def cohort_series_digest(series: list[HouseholdSeries]) -> str:
+    """``FORE_001_DIGEST``: the selected cohort, exactly as the models saw it.
+
+    For each selected household in id order: its id, its run bounds and its count of
+    usable days, then every usable daily total inside the run in date order. This is the
+    complete input to every FORE-001 prediction and score. It says **nothing** about
+    households outside the cohort, about unusable or absent days, about tariff groups or
+    source members -- those are checked separately by ``applicability``.
+    """
+    digest = hashlib.sha256()
+    for one in series:
+        digest.update(
+            f"{one.household_id}|{one.run_start}|{one.run_end}|{len(one.values)}".encode()
+        )
+        for day in sorted(one.values):
+            digest.update(f"{day}={one.values[day]}".encode())
+    return digest.hexdigest()
+
+
+def usable_days_digest(records: dict[str, list[DayRecord]]) -> str:
+    """``I08_DIGEST``: every household's every usable daily total, households in id order.
+
+    The complete input to every I-08 prediction, decline and score. It does **not** cover
+    households with no usable day, unusable or absent days, or the warehouse's date span,
+    so the origin calendar and the households-considered count are checked separately.
+    """
+    digest = hashlib.sha256()
+    for household in sorted(records):
+        for r in records[household]:
+            if r.usable and r.kwh is not None:
+                digest.update(f"{household}|{r.source_date}={r.kwh}".encode())
+    return digest.hexdigest()

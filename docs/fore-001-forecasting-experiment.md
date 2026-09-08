@@ -275,6 +275,23 @@ Recorded with every run: dataset digest, forecast code digest, configuration dig
 first-party calculation digest and the runtime versions. The report is written to
 `data/forecasts/` (git-ignored, because it names real household ids).
 
+**Which dataset a report describes (I-19, 2026-09-08).** The dashboard decides whether a
+report applies to the selected database by **content**, never by file name. The report's
+`identity.dataset_sha256` is `fore-001-cohort-series-1`: the selected cohort's household
+ids, run bounds, usable-day counts and every usable daily total inside each run — the
+complete input to every prediction and score. It does **not** cover the warehouse-wide
+figures the page also shows, so those are recomputed separately from the same daily
+records and must agree too: `feasibility.{households, household_days,
+usable_household_days, eligible_households, min_run_days, expected_intervals}`,
+`selection.{eligible_households, selected_households, warehouse_last_date,
+runs_ending_at_warehouse_end, cohort_tariff_groups, cohort_members}` and each cohort
+household's tariff group and source members. `database`, `generated_at_utc` and the code,
+configuration and runtime digests are **provenance** — facts about the run that produced
+the report, shown as recorded and never "verified" against the selected file. A report that
+predates the `identity.dataset_digest_definition` field is read under this definition,
+because the digest code has been unchanged since the report was written and the recorded
+value recomputes; a report naming an unknown definition is *unverifiable*, not guessed.
+
 ## 9. What forecasting does not establish
 
 Nothing here bears on tariff assumption **A1**. Forecasting daily totals grouped by source

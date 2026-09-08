@@ -231,6 +231,12 @@ This is a **historical backtest, not a live forecast**, and it is not a bill, a 
 appliance claim or a statement about tariff response. Details and limits:
 [`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
 
+The tab shows a report only when it **describes the selected dataset**: the report's own
+dataset digest and every warehouse-level figure on the page are recomputed from the selected
+file's rows and must agree. File names settle nothing — a byte-identical copy under another
+name is accepted, different data under the same name is refused, and the file the report was
+originally run against is shown as provenance only.
+
 ## Tests
 
 ```bash
