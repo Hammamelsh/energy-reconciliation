@@ -21,16 +21,35 @@ for that route. Neither the wrapper nor the hook is a substitute for the other.
 What it records
 ---------------
 
-The tariff dimensions are now **persisted tables built by dbt**, so which dbt produced
-them is part of what they are. After a successful build this writes one row to
-``scenario_build.dbt_build_run``: the dbt versions, the digests of the code and project
-files that shaped the output, and the schedule variant.
+The tariff dimensions and facts are **persisted tables built by dbt**, so which dbt
+produced them, from which code, is part of what they are. Every invocation of this wrapper
+writes an **attempt** row to ``scenario_build.dbt_build_run`` **before** dbt runs, and
+completes it afterwards:
 
-That record is deliberately **separate from ``scenario_run``**. These dimensions are
-*candidate* outputs: the published tariff scenario is still built by
-``build-tariff-scenario``, reads its own dimensions, and is untouched by anything here.
-Folding dbt into the published run's fingerprint before dbt produces a published figure
-would claim a dependency that does not exist.
+- ``started`` -- written before dbt is invoked, with the run identity (dbt, Python and
+  library versions, the digests of every file that shapes an output, the resolved
+  variables) and the **path of the file it was recorded in**. The connection is closed
+  before dbt starts: DuckDB locks the file, and dbt could not open it otherwise.
+- ``succeeded`` -- dbt exited 0. The row gains a digest of the built tables (see
+  :func:`build_output_digest`) and the schedule and catalogue identity read from the
+  dimension rows dbt wrote.
+- ``failed`` -- dbt exited non-zero. Recorded when this process survives to record it.
+
+An attempt left ``started`` -- this process was killed while dbt ran, or dbt is still
+running -- is neither a success nor a recorded failure, and ``publication.finalise``
+treats it as ineligible. A refusal **before** an attempt begins (an unusable path, a sealed
+read-only file, a legacy record shape) records nothing, because nothing was attempted.
+
+**The enforcement boundary, stated plainly.** Attempts are recorded by this entry point
+and by ``build-candidate``, which calls it. Running ``dbt`` directly, or editing the
+database by hand, is outside the lifecycle: such a change is not an attempt and leaves no
+row. What catches it is content, not history -- ``finalise`` recomputes the output digest
+against the latest succeeded attempt and refuses a mismatch, and the seal's whole-file
+SHA-256 catches any change after sealing.
+
+That record is deliberately **separate from ``scenario_run``**. These are *candidate*
+outputs: the published tariff scenario is still built by ``build-tariff-scenario``, reads
+its own dimensions, and is untouched by anything here.
 """
 
 from __future__ import annotations
@@ -42,13 +61,13 @@ import os
 import subprocess
 import sys
 from datetime import UTC, datetime
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Final
 
 import duckdb
 
 from .dbt_macros import repository_root
+from .tariff import candidate_identity as cid
 from .tariff import identity
 from .tariff import prices as pr
 from .tariff.dimensions import (
@@ -64,58 +83,129 @@ BUILD_SCHEMA: Final[str] = "scenario_build"
 #: Where the build identity is recorded. Not ``scenario_run`` -- see the module docstring.
 BUILD_RUN_TABLE: Final[str] = f"{BUILD_SCHEMA}.dbt_build_run"
 
-#: Files whose bytes shape a dbt output. Directories that hold build artefacts, logs and
-#: a per-machine identifier are not among them.
-_PROJECT_GLOBS: Final[tuple[str, ...]] = ("dbt_project.yml", "models/**/*", "macros/*")
-
 #: dbt packages recorded with every build.
-DBT_PACKAGES: Final[tuple[str, ...]] = ("dbt-core", "dbt-duckdb")
+DBT_PACKAGES: Final[tuple[str, ...]] = cid.DBT_PACKAGES
 
 #: Prefix on every run_id this wrapper generates. A candidate build is not a published
 #: scenario run and its identifiers must never be mistaken for one in a query or a log.
 CANDIDATE_PREFIX: Final[str] = "dbtcand"
 
-#: Columns of the build record. A stored table with a different shape is dropped and
-#: rebuilt rather than migrated: it is a log of candidate builds, derivable by rebuilding,
-#: and guessing at a migration would be the riskier choice.
-_BUILD_RUN_COLUMNS: Final[tuple[str, ...]] = (
-    "run_id",
-    "built_at_utc",
-    "dbt_core_version",
-    "dbt_duckdb_version",
-    "python_version",
-    "target_schema",
-    "schedule_variant",
-    "tariff_group",
-    "dbt_command",
-    "dbt_project_sha256",
-    "macro_sha256",
-    "built_output_sha256",
-    "policy_sha256",
-    "calculation_code_sha256",
-    "note",
-)
+#: Attempt states. ``started`` is the only state a row is created in.
+STARTED, SUCCEEDED, FAILED = "started", "succeeded", "failed"
 
+#: Identifies the canonicalisation :func:`build_output_digest` implements. Recorded with
+#: every succeeded attempt and in the seal, and compared before a digest is compared, so
+#: a digest from a different algorithm is refused as such rather than as a mismatch.
+OUTPUT_DIGEST_VERSION: Final[str] = "canonical-rows-1"
+
+#: Columns of the attempt record, in order, with their SQL types. NULL-able columns are
+#: the ones a ``started`` row cannot know yet.
+#:
+#: A stored table with a different shape is a **legacy record** and is refused, by this
+#: wrapper (nothing runs) and by ``publication.finalise`` (nothing seals), with the same
+#: instruction: build a fresh candidate. It is never dropped or migrated in place, because
+#: either would rewrite what an older build claimed.
+_BUILD_RUN_SCHEMA: Final[tuple[tuple[str, str], ...]] = (
+    ("run_id", "VARCHAR NOT NULL"),
+    ("status", "VARCHAR NOT NULL"),
+    ("started_at_utc", "TIMESTAMP NOT NULL"),
+    ("finished_at_utc", "TIMESTAMP"),
+    ("dbt_exit_code", "INTEGER"),
+    ("database_path", "VARCHAR NOT NULL"),
+    ("target_schema", "VARCHAR NOT NULL"),
+    ("dbt_command", "VARCHAR NOT NULL"),
+    ("dbt_vars", "VARCHAR NOT NULL"),
+    ("schedule_variant", "VARCHAR NOT NULL"),
+    ("tariff_group", "VARCHAR NOT NULL"),
+    ("dbt_core_version", "VARCHAR NOT NULL"),
+    ("dbt_duckdb_version", "VARCHAR NOT NULL"),
+    ("python_version", "VARCHAR NOT NULL"),
+    ("runtime_detail", "VARCHAR NOT NULL"),
+    ("runtime_fingerprint", "VARCHAR NOT NULL"),
+    ("dbt_project_sha256", "VARCHAR NOT NULL"),
+    ("macro_sha256", "VARCHAR NOT NULL"),
+    ("policy_sha256", "VARCHAR NOT NULL"),
+    ("calculation_code_sha256", "VARCHAR NOT NULL"),
+    ("covered_files", "VARCHAR NOT NULL"),
+    ("schedule_source", "VARCHAR"),
+    ("schedule_sha256", "VARCHAR"),
+    ("schedule_rows", "INTEGER"),
+    ("price_catalogue_version", "VARCHAR"),
+    ("output_digest_version", "VARCHAR"),
+    ("built_output_sha256", "VARCHAR"),
+    ("note", "VARCHAR NOT NULL"),
+)
+_BUILD_RUN_COLUMNS: Final[tuple[str, ...]] = tuple(n for n, _ in _BUILD_RUN_SCHEMA)
 
 #: Schema dbt builds into, and the one table in it that is not a build output.
 _OUTPUT_SCHEMA: Final[str] = BUILD_SCHEMA
 _RECORD_TABLE: Final[str] = "dbt_build_run"
 
+_NOTE: Final[str] = (
+    "Candidate dbt build attempts. NOT the published tariff scenario: that is built by "
+    "build-tariff-scenario, reads its own dimensions, and consumes nothing in this "
+    "schema. A row is written as 'started' before dbt runs and completed afterwards; "
+    "only a 'succeeded' row that is the latest attempt, whose output digest still "
+    "matches the tables, can be sealed."
+)
+
+
+class LegacyRecordError(RuntimeError):
+    """``dbt_build_run`` exists with a shape this code does not write.
+
+    Raised rather than migrated: an older row's claims are not upgraded to the current
+    contract, and a fresh candidate is the supported way forward.
+    """
+
+
+class AttemptRefused(RuntimeError):
+    """The attempt could not be recorded, so dbt was not invoked and nothing ran."""
+
+
+def _quoted(name: str) -> str:
+    """A catalogue identifier, double-quoted. Names come from the catalogue, never a caller."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _canonical_rows_sql(schema: str, table: str, columns: list[str]) -> str:
+    """Per-row SHA-256 of a self-delimiting text encoding, in digest order.
+
+    Each column becomes ``N`` when NULL, else ``V<character length>:<text>`` where the text
+    is DuckDB's own ``CAST(... AS VARCHAR)`` -- a DECIMAL keeps its scale (``0.6720``, never
+    ``0.672``), a DATE is ``2013-01-01``, a TIMESTAMP ``2013-01-01 00:30:00``, a BOOLEAN
+    ``true``. The length prefix makes the concatenation unambiguous whatever a string
+    holds, and NULL is distinct from every string, the empty one included. Types are not
+    in the row text; they are in the relation header the caller writes first.
+    """
+    tokens = [
+        f"CASE WHEN {_quoted(c)} IS NULL THEN 'N' ELSE 'V' || "
+        f"length(CAST({_quoted(c)} AS VARCHAR)) || ':' || CAST({_quoted(c)} AS VARCHAR) END"
+        for c in columns
+    ]
+    expr = " || ".join(tokens) if tokens else "''"
+    return (
+        f"SELECT sha256({expr}) AS h FROM {_quoted(schema)}.{_quoted(table)} ORDER BY h"
+    )
+
 
 def build_output_digest(con) -> str:
-    """A digest of what dbt actually left in the build schema.
+    """A versioned, order-independent digest of what dbt actually left in the build schema.
 
-    Recorded with the build and re-checked before a candidate is sealed. Without it a
-    build record only says "a build succeeded in this file once", which a later failed
-    rebuild does not invalidate: dbt fails per model, so a second attempt can replace
-    some tables, skip others and leave the earlier record standing over contents it no
-    longer describes. Measured, not hypothetical -- that is exactly what a duplicated
-    schedule label does.
+    Recorded with a succeeded attempt and recomputed before a candidate is sealed. It
+    covers every **base table** in ``scenario_build`` other than the attempt record, and
+    for each one: its name, its ordered column names and types, its row count, and the
+    sorted list of per-row SHA-256 hashes over the canonical encoding described in
+    :func:`_canonical_rows_sql`. Sorting rather than summing is the point: a commutative
+    summary such as ``bit_xor`` lets two rows cancel, so ``{1, 1, 2}`` and ``{2, 3, 3}``
+    summarised identically. Here every row occurrence is present in the hashed stream, so
+    duplicate multiplicity, any value, any column type or name, and the set of relations
+    all move the digest, while physical row order does not.
 
-    Base tables only. Views are excluded because their contents come from ``main``,
-    which a build never writes, and hashing one would mean re-reading every reading.
-    ``bit_xor`` of a row hash is order-independent, so an unchanged table digests the
-    same however it was written, and a single changed cell changes the result.
+    Memory is bounded on the Python side: rows are streamed in chunks, and the sort is
+    DuckDB's. Views are excluded because their contents come from ``main``, which a build
+    never writes. **This is a digest, not a proof of equality**: two different tables
+    digesting the same is astronomically unlikely, not impossible, and migration evidence
+    still comes from row-by-row comparison.
     """
     tables = [
         name
@@ -126,13 +216,25 @@ def build_output_digest(con) -> str:
         ).fetchall()
     ]
     digest = hashlib.sha256()
+    digest.update(f"{OUTPUT_DIGEST_VERSION}\n".encode())
     for name in tables:
-        rows, checksum = con.execute(
-            # the name comes from the catalogue, quoted, never from a caller
-            f"SELECT COUNT(*), CAST(bit_xor(hash(t)) AS VARCHAR) "
-            f'FROM {_OUTPUT_SCHEMA}."{name}" t'
+        columns = con.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            [_OUTPUT_SCHEMA, name],
+        ).fetchall()
+        digest.update(f"relation\0{_OUTPUT_SCHEMA}.{name}\n".encode())
+        for column, data_type in columns:
+            digest.update(f"column\0{column}\0{data_type}\n".encode())
+        (count,) = con.execute(
+            f"SELECT COUNT(*) FROM {_quoted(_OUTPUT_SCHEMA)}.{_quoted(name)}"
         ).fetchone()
-        digest.update(f"{name}|{rows}|{checksum}\n".encode())
+        digest.update(f"rows\0{count}\n".encode())
+        cursor = con.execute(
+            _canonical_rows_sql(_OUTPUT_SCHEMA, name, [c for c, _ in columns])
+        )
+        while chunk := cursor.fetchmany(65_536):
+            digest.update("".join(f"{h}\n" for (h,) in chunk).encode())
     return digest.hexdigest()
 
 
@@ -140,8 +242,8 @@ def candidate_run_id(project: Path, when: datetime) -> str:
     """An identifier for one candidate build, keyed by what produced it."""
     material = "::".join(
         [
-            project_digest(project),
-            identity.calculation_digest(),
+            cid.dbt_project_digest(project),
+            cid.candidate_calculation_digest(project),
             identity.policy_digest(),
         ]
     )
@@ -155,36 +257,20 @@ class DatabasePathError(ValueError):
     """The database path is unusable, and nothing was opened or created because of it."""
 
 
-def _package_version(name: str) -> str:
-    try:
-        return version(name)
-    except PackageNotFoundError:  # pragma: no cover - only if uninstalled
-        return "absent"
-
-
 def dbt_identity() -> dict[str, str]:
     """The dbt versions that rendered and executed the models."""
-    return {name: _package_version(name) for name in DBT_PACKAGES}
+    runtime = cid.candidate_runtime_identity()
+    return {name: runtime[name] for name in DBT_PACKAGES}
 
 
 def project_digest(project: Path | None = None) -> str:
     """A digest over the dbt project files that can change an output.
 
-    ``target/``, ``logs/`` and ``.user.yml`` are excluded: they are artefacts of running,
-    not inputs to it, and ``.user.yml`` is a per-machine identifier that would make the
-    digest differ between machines for identical projects.
+    Delegates to :func:`candidate_identity.dbt_project_digest`: ``target/``, ``logs/`` and
+    ``.user.yml`` are excluded there because they are artefacts of running, not inputs to
+    it, and ``.user.yml`` is a per-machine identifier.
     """
-    root = project or (repository_root() / "dbt")
-    paths: list[Path] = []
-    for pattern in _PROJECT_GLOBS:
-        paths.extend(p for p in root.glob(pattern) if p.is_file())
-    digest = hashlib.sha256()
-    for path in sorted(set(paths)):
-        digest.update(str(path.relative_to(root)).encode())
-        digest.update(b"\0")
-        digest.update(path.read_bytes())
-        digest.update(b"\n")
-    return digest.hexdigest()
+    return cid.dbt_project_digest(project)
 
 
 def validated_database(raw: str | None) -> Path:
@@ -247,69 +333,116 @@ def _dbt_command() -> list[str]:
     )
 
 
-def record_build(
+def subcommand_of(dbt_command: str) -> str:
+    """The dbt subcommand in a recorded command string: the first token not a flag."""
+    return next((t for t in dbt_command.split() if not t.startswith("-")), "")
+
+
+def record_shape(con) -> tuple[str, ...]:
+    """The stored record's columns in order, or an empty tuple when there is no table."""
+    return tuple(
+        r[0]
+        for r in con.execute(
+            "SELECT column_name FROM information_schema.columns WHERE "
+            "table_schema = ? AND table_name = ? ORDER BY ordinal_position",
+            [BUILD_SCHEMA, _RECORD_TABLE],
+        ).fetchall()
+    )
+
+
+def require_current_shape(con, database: Path) -> None:
+    """Refuse a legacy record rather than migrate or drop it."""
+    existing = record_shape(con)
+    if existing and existing != _BUILD_RUN_COLUMNS:
+        raise LegacyRecordError(
+            f"{database.name}: {BUILD_RUN_TABLE} has a shape this version does not "
+            f"write ({len(existing)} columns, expected {len(_BUILD_RUN_COLUMNS)}). Its "
+            "rows were made under an earlier contract and are not upgraded: they say "
+            "neither which attempt was latest nor how their output digest was computed. "
+            "Build a fresh candidate with `uv run build-candidate`; this file is left as "
+            "it is."
+        )
+
+
+def begin_attempt(
     database: Path,
+    *,
     schedule: str,
-    command: list[str],
+    workbook: str,
+    tariff_group: str,
+    dbt_args: list[str],
     project: Path,
     run_id: str,
     when: datetime,
-    tariff_group: str,
 ) -> dict[str, Any]:
-    """Write one row describing the build that just succeeded.
+    """Record a ``started`` attempt and close the file, so dbt can open it.
 
-    Opened read-write only after dbt has finished and released the file lock.
-
-    **Only successful builds are recorded, and a record does not certify the tables
-    afterwards.** dbt fails per model, so a later partial rebuild can leave some candidate
-    tables refreshed and others as they were, while this table still shows the earlier
-    success. The row says what produced a build, not what the schema currently holds.
+    Everything that identifies the build is known before dbt runs and is written now;
+    what only the build can tell (its exit code, the tables it left) is written by
+    :func:`finish_attempt`. If the row cannot be written -- the file is sealed read-only,
+    or holds a legacy record -- :class:`AttemptRefused` is raised and **nothing ran**.
     """
-    record = {
+    runtime = cid.candidate_runtime_identity()
+    record: dict[str, Any] = {
         "run_id": run_id,
-        "built_at_utc": when,
-        "dbt_core_version": dbt_identity()["dbt-core"],
-        "dbt_duckdb_version": dbt_identity()["dbt-duckdb"],
-        "python_version": identity.runtime_identity()["python"],
+        "status": STARTED,
+        "started_at_utc": when,
+        "finished_at_utc": None,
+        "dbt_exit_code": None,
+        "database_path": str(database.resolve()),
         "target_schema": BUILD_SCHEMA,
+        "dbt_command": " ".join(dbt_args),
+        "dbt_vars": json.dumps(
+            {
+                "schedule": schedule,
+                "workbook": workbook,
+                "tariff_group": tariff_group,
+                "run_id": run_id,
+                "project_dir": str(project.resolve()),
+            },
+            sort_keys=True,
+        ),
         "schedule_variant": schedule,
         "tariff_group": tariff_group,
-        "dbt_command": " ".join(command),
-        "dbt_project_sha256": project_digest(project),
+        "dbt_core_version": runtime["dbt-core"],
+        "dbt_duckdb_version": runtime["dbt-duckdb"],
+        "python_version": runtime["python"],
+        "runtime_detail": json.dumps(runtime, sort_keys=True),
+        "runtime_fingerprint": cid.candidate_runtime_fingerprint(),
+        "dbt_project_sha256": cid.dbt_project_digest(project),
         "macro_sha256": hashlib.sha256(
             (project / "macros" / "generated_policy.sql").read_bytes()
         ).hexdigest(),
-        "built_output_sha256": "",  # filled in below, from the database being written
         "policy_sha256": identity.policy_digest(),
-        "calculation_code_sha256": identity.calculation_digest(),
-        "note": (
-            "Candidate dbt outputs. NOT the published tariff scenario: that is built by "
-            "build-tariff-scenario, reads its own dimensions, and does not consume "
-            "anything in this schema. A row here records a build that succeeded; it does "
-            "not certify what the schema holds after any later partial rebuild."
+        "calculation_code_sha256": cid.candidate_calculation_digest(project),
+        "covered_files": json.dumps(
+            cid.candidate_file_digests(project), sort_keys=True
         ),
+        "schedule_source": None,
+        "schedule_sha256": None,
+        "schedule_rows": None,
+        "price_catalogue_version": None,
+        "output_digest_version": None,
+        "built_output_sha256": None,
+        "note": _NOTE,
     }
     assert tuple(record) == _BUILD_RUN_COLUMNS
-    con = duckdb.connect(str(database))
+    try:
+        con = duckdb.connect(str(database))
+    except duckdb.Error as error:
+        raise AttemptRefused(
+            f"{database} cannot be opened for writing ({error}); no attempt was "
+            "recorded and dbt was not run. A sealed candidate is read-only on purpose: "
+            "build a fresh one."
+        ) from error
     try:
         con.execute(f"CREATE SCHEMA IF NOT EXISTS {BUILD_SCHEMA}")
-        record["built_output_sha256"] = build_output_digest(con)
-        existing = tuple(
-            r[0]
-            for r in con.execute(
-                "SELECT column_name FROM information_schema.columns WHERE "
-                f"table_schema = '{BUILD_SCHEMA}' AND table_name = 'dbt_build_run' "
-                "ORDER BY ordinal_position"
-            ).fetchall()
-        )
-        if existing and existing != _BUILD_RUN_COLUMNS:
-            print(f"rebuilding {BUILD_RUN_TABLE}: recorded shape is out of date")
-            con.execute(f"DROP TABLE {BUILD_RUN_TABLE}")
-        columns = ",\n                ".join(
-            f"{name:24s} {'TIMESTAMP' if name.endswith('_utc') else 'VARCHAR'} NOT NULL"
-            for name in _BUILD_RUN_COLUMNS
-        )
-        con.execute(f"CREATE TABLE IF NOT EXISTS {BUILD_RUN_TABLE} (\n{columns}\n)")
+        try:
+            require_current_shape(con, database)
+        except LegacyRecordError as error:
+            raise AttemptRefused(str(error)) from error
+        columns = ",\n    ".join(f"{name} {kind}" for name, kind in _BUILD_RUN_SCHEMA)
+        con.execute(f"CREATE TABLE IF NOT EXISTS {BUILD_RUN_TABLE} (\n    {columns}\n)")
         placeholders = ",".join("?" * len(_BUILD_RUN_COLUMNS))
         con.execute(
             f"INSERT INTO {BUILD_RUN_TABLE} VALUES ({placeholders})",
@@ -318,6 +451,110 @@ def record_build(
     finally:
         con.close()
     return record
+
+
+def _schedule_identity(con) -> dict[str, Any]:
+    """Schedule and catalogue identity, read from the dimension rows dbt wrote.
+
+    Read from the built tables rather than resolved again in this process, so the record
+    describes what was **built**, not what the parent would have read. Absent when the
+    build did not produce the dimension (a partial selection): recorded as NULL, not
+    guessed.
+    """
+    out: dict[str, Any] = {
+        "schedule_source": None,
+        "schedule_sha256": None,
+        "schedule_rows": None,
+        "price_catalogue_version": None,
+    }
+    tables = {
+        name
+        for (name,) in con.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = ?",
+            [BUILD_SCHEMA],
+        ).fetchall()
+    }
+    if "dim_tariff_band_schedule" in tables:
+        rows = con.execute(
+            "SELECT schedule_source, source_sha256, COUNT(*) FROM "
+            f"{BUILD_SCHEMA}.dim_tariff_band_schedule GROUP BY 1, 2"
+        ).fetchall()
+        if len(rows) == 1:
+            out["schedule_source"], out["schedule_sha256"], out["schedule_rows"] = rows[
+                0
+            ]
+    if "dim_tariff_price" in tables:
+        versions = con.execute(
+            f"SELECT DISTINCT catalogue_version FROM {BUILD_SCHEMA}.dim_tariff_price"
+        ).fetchall()
+        if len(versions) == 1:
+            out["price_catalogue_version"] = versions[0][0]
+    return out
+
+
+def finish_attempt(
+    database: Path, run_id: str, exit_code: int, when: datetime
+) -> dict[str, Any]:
+    """Complete the attempt ``run_id`` as ``succeeded`` (exit 0) or ``failed``.
+
+    Opened read-write only after dbt has exited and released the file lock. On success
+    the output digest is computed **from the database being written**, so the record
+    describes this file's tables as they are at this moment.
+    """
+    con = duckdb.connect(str(database))
+    try:
+        fields: dict[str, Any] = {
+            "status": SUCCEEDED if exit_code == 0 else FAILED,
+            "finished_at_utc": when,
+            "dbt_exit_code": exit_code,
+        }
+        if exit_code == 0:
+            fields.update(_schedule_identity(con))
+            fields["output_digest_version"] = OUTPUT_DIGEST_VERSION
+            fields["built_output_sha256"] = build_output_digest(con)
+        assignments = ", ".join(f"{name} = ?" for name in fields)
+        con.execute(
+            f"UPDATE {BUILD_RUN_TABLE} SET {assignments} WHERE run_id = ?",
+            [*fields.values(), run_id],
+        )
+        row = con.execute(
+            f"SELECT * FROM {BUILD_RUN_TABLE} WHERE run_id = ?", [run_id]
+        ).fetchone()
+    finally:
+        con.close()
+    if row is None:  # pragma: no cover - the started row was written by begin_attempt
+        raise RuntimeError(f"attempt {run_id} is not recorded in {database}")
+    return dict(zip(_BUILD_RUN_COLUMNS, row, strict=True))
+
+
+def record_build(
+    database: Path,
+    schedule: str,
+    command: list[str],
+    project: Path,
+    run_id: str,
+    when: datetime,
+    tariff_group: str,
+    exit_code: int = 0,
+    workbook: str = "",
+) -> dict[str, Any]:
+    """Begin and immediately finish one attempt. For callers that ran dbt themselves.
+
+    The supported entry point is :func:`main`, which records ``started`` *before* dbt runs.
+    This shortcut exists for tests that stand in for a build; it records exactly what
+    ``main`` would have recorded had dbt exited with ``exit_code`` at once.
+    """
+    begin_attempt(
+        database,
+        schedule=schedule,
+        workbook=workbook,
+        tariff_group=tariff_group,
+        dbt_args=command,
+        project=project,
+        run_id=run_id,
+        when=when,
+    )
+    return finish_attempt(database, run_id, exit_code, when)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -383,32 +620,42 @@ def main(argv: list[str] | None = None) -> int:
             }
         ),
     ]
-    # argv is built here and no shell is involved.
+    try:
+        begin_attempt(
+            database,
+            schedule=args.schedule,
+            workbook=args.workbook,
+            tariff_group=args.tariff_group,
+            dbt_args=dbt_args,
+            project=args.project_dir,
+            run_id=run_id,
+            when=when,
+        )
+    except AttemptRefused as error:
+        print(f"run-dbt: {error}", file=sys.stderr)
+        return 2
+    # The recording connection is closed; dbt now holds the file alone. argv is built
+    # here and no shell is involved.
     completed = subprocess.run(
         command,
         env={**os.environ, "ENERGY_RECONCILIATION_DB": str(database)},
         check=False,
     )
+    finished = datetime.now(UTC).replace(tzinfo=None)
+    record = finish_attempt(database, run_id, completed.returncode, finished)
     if completed.returncode != 0:
         print(
-            f"run-dbt: dbt exited {completed.returncode}; no build was recorded.",
+            f"run-dbt: dbt exited {completed.returncode}; attempt {run_id} is recorded "
+            f"as {record['status']} in {BUILD_RUN_TABLE}. No success was recorded.",
             file=sys.stderr,
         )
         return completed.returncode
-
-    record = record_build(
-        database,
-        args.schedule,
-        dbt_args,
-        args.project_dir,
-        run_id,
-        when,
-        args.tariff_group,
-    )
     print(
-        f"recorded in {BUILD_RUN_TABLE}: {record['run_id']} · dbt-core "
+        f"recorded in {BUILD_RUN_TABLE}: {record['run_id']} {record['status']} · dbt-core "
         f"{record['dbt_core_version']}, dbt-duckdb {record['dbt_duckdb_version']}, "
-        f"schedule {record['schedule_variant']}, group {record['tariff_group']}"
+        f"schedule {record['schedule_variant']}, group {record['tariff_group']}, "
+        f"outputs {str(record['built_output_sha256'])[:12]}… "
+        f"({record['output_digest_version']})"
     )
     return 0
 

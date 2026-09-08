@@ -335,13 +335,14 @@ def test_invalid_schedule_input_creates_no_schedule_dimension_on_a_fresh_target(
     )
     con = duckdb.connect(str(database), read_only=True)
     try:
-        recorded = con.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_name = 'dbt_build_run'"
-        ).fetchone()[0]
+        statuses = con.execute(
+            f"SELECT status FROM {dbt_run.BUILD_RUN_TABLE}"
+        ).fetchall()
     finally:
         con.close()
-    assert recorded == 0, "a failed build is not recorded as a build"
+    assert statuses == [(dbt_run.FAILED,)], (
+        "the attempt is recorded, and recorded as failed -- never as a success"
+    )
 
 
 def test_a_failed_replacement_leaves_the_existing_dimension_untouched(tmp_path):
@@ -371,13 +372,15 @@ def test_a_failed_replacement_leaves_the_existing_dimension_untouched(tmp_path):
             "SELECT table_name FROM information_schema.tables "
             "WHERE table_name LIKE '%dbt_tmp%' OR table_name LIKE '%backup%'"
         ).fetchall()
-        builds = con.execute(
-            f"SELECT COUNT(*) FROM {dbt_run.BUILD_RUN_TABLE}"
-        ).fetchone()[0]
+        attempts = con.execute(
+            f"SELECT status FROM {dbt_run.BUILD_RUN_TABLE} ORDER BY started_at_utc"
+        ).fetchall()
     finally:
         con.close()
     assert leftovers == [], "a failed build must not leave a temporary relation behind"
-    assert builds == 1, "only the successful build is recorded"
+    assert attempts == [(dbt_run.SUCCEEDED,), (dbt_run.FAILED,)], (
+        "both attempts are on record, and only the first as a success"
+    )
 
 
 def test_the_boundary_is_per_model_not_whole_build_atomicity(tmp_path):

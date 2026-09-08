@@ -366,9 +366,56 @@ record outliving the tables it described — the second by adding `built_output_
 the build record and recomputing it at `finalise`. Real-data check: a candidate built from
 the three-member warehouse matched the Python path exactly (456,096 charged rows with 0
 differing over every column, 2,541,866 excluded with 0 differing, total
-`£11675.4339216532500000`, per-band and per-household identical). **It does not complete
-published-run identity integration**: `calculation_files()` still omits `dimensions.py`
-and the dbt project, `RUNTIME_PACKAGES` still omits dbt, and baselines are still format 1.
+`£11675.4339216532500000`, per-band and per-household identical).
+
+**Implemented (attempt lifecycle, canonical digest, candidate identity — 2026-09-08).** The
+review after 5(b) found three gaps and this closed them; each was reproduced before it
+was changed.
+
+- *Attempt lifecycle.* `run-dbt` writes a **`started`** row to `scenario_build.dbt_build_run`
+  **before** dbt is invoked (the recording connection is closed first, because DuckDB locks
+  the file) and completes it as **`succeeded`** or **`failed`** afterwards. A row left
+  `started` means the orchestrator died or is still running. **Contract:** `finalise` seals
+  only when the **latest** attempt (by start time) is `succeeded`, ran `build`, was recorded
+  **in this file** (`database_path`), is the **only** attempt (a retry is a new file), and
+  the tables still digest as it recorded. A failed or unfinished attempt after a success
+  is refused **even when the tables are unchanged** — attempt success and output equality
+  are separate checks and neither is inferred from the other. A refusal before an attempt
+  begins (unusable path, sealed read-only file, legacy record shape) records nothing.
+  **Boundary:** attempts are recorded by `run-dbt` and `build-candidate` only; a direct
+  `dbt` run or a hand edit is not an attempt and is caught by content (the output digest
+  at sealing, the whole-file SHA-256 after it), not by history. Legacy record shapes and
+  legacy seals are **refused with a rebuild message**, never migrated or reinterpreted.
+- *Canonical digest* (`canonical-rows-1`, recorded as `output_digest_version`). The former
+  `COUNT + bit_xor(hash(row))` summary was measured to collide: `{1,1,2}` and `{2,3,3}`
+  summarised identically. The digest now covers, per base table in `scenario_build`
+  (record excluded, views excluded): relation name, ordered column names **and types**, row
+  count, and the **sorted stream of per-row SHA-256** over a self-delimiting text encoding
+  — `N` for NULL, else `V<length>:<DuckDB VARCHAR cast>` so a `DECIMAL(9,4)` stays
+  `0.6720`, never `0.672`. Independent of physical order; moves for any value, duplicate
+  multiplicity, type, name or relation change. Rows are streamed in chunks (bounded on the
+  Python side; the sort is DuckDB's). Measured on the three-member candidate: 2.4 s for
+  ~3.0 M rows; full sealing validation 2.2 s; whole-file SHA-256 (210 MB) 0.13 s. **Two
+  digests, two claims:** the attempt's `built_output_sha256` says the built tables are the
+  ones dbt left; the seal's `sha256` says the whole file is the one validated. Neither is a
+  proof of equality — migration evidence stays row-by-row (`EXCEPT ALL` both ways).
+- *Candidate identity* (`tariff/candidate_identity.py`, a **sibling** of `identity.py`).
+  Every attempt records `calculation_code_sha256` over the published calculation files
+  **plus** `tariff/dimensions.py` and the dbt project (`dbt_project.yml`, `models/**`,
+  `macros/*`; not `target/`, `logs/`, `.user.yml`, `profiles.yml`, `tests/`), the per-file
+  digests (`covered_files`), `runtime_detail` naming Python, DuckDB, PyArrow, pandas,
+  openpyxl, dbt-core and dbt-duckdb, the resolved dbt variables, and the schedule source,
+  file digest, row count and price catalogue version **read from the dimension rows dbt
+  wrote**. Coverage is guarded: the import closure of the dbt Python models in a fresh
+  interpreter, and an independent walk of `dbt/` against the globs. **The published
+  identity is deliberately untouched** — `identity.py` is itself a covered file, so editing
+  it would have moved the published fingerprint for a change that cannot alter a published
+  figure, and the dashboard reads no candidate yet. Verified: `calculation_digest()` is
+  byte-identical before and after (`262491c4…`), and the format-1 replay of baseline
+  `4b3ee235d7ac` gives the same 16/17 result as before this slice.
+
+**Still not done**: the dashboard reads no candidate (the read contract is the next slice),
+the published identity switch that comes with it, baseline format 2, retention (I-17).
 
 **Implemented (step 5(a)).** `src/energy_reconciliation/publication.py` carries the proof's
 primitives over with three additions: **`finalise`** seals a built candidate (exactly one
@@ -464,19 +511,21 @@ version, runtime or input identity, all of which the fingerprint must cover.
 
 ### D6 — Run identity extends to the dbt files; nothing is dropped
 
-**Already done at step 3, because dbt now persists analytical tables.** The dimensions are
-real outputs, so which dbt produced them is part of what they are. `run-dbt` writes one row
-to `scenario_build.dbt_build_run` after a successful build: `dbt-core` and `dbt-duckdb`
-versions, Python version, the schedule variant, a digest over the dbt project files, and
-the policy and calculation digests. It is **separate from `scenario_run`** and creates
-nothing in `main`, because these are *candidate* outputs: the published scenario is still
-built by `build-tariff-scenario` from its own dimensions and consumes none of them. A
-failed build records nothing. `identity.RUNTIME_PACKAGES` and `calculation_files()` are
-still unchanged for the same reason, and `tariff/dimensions.py` joins
-`CALCULATION_TARIFF_FILES` at **step 5**, the moment a dbt dimension feeds a published
-figure.
+**Candidate identity complete (2026-09-08); published identity deliberately unchanged.**
+The dimensions and facts are real outputs, so which dbt produced them, from which code and
+runtime, is part of what they are. Every `run-dbt` attempt records it in
+`scenario_build.dbt_build_run` (see D5): dbt-core and dbt-duckdb versions, Python, DuckDB,
+PyArrow, pandas and openpyxl versions, a digest and per-file digests over the published
+calculation files **plus** `tariff/dimensions.py` and the dbt project, the policy digest,
+the resolved dbt variables, and the schedule/catalogue identity of what was built. This
+lives in `tariff/candidate_identity.py`, a sibling of `identity.py` that reuses its helpers,
+so that `identity.calculation_files()` and `RUNTIME_PACKAGES` — and with them every
+`scenario_run` fingerprint and format-1 baseline — are untouched. It is **separate from
+`scenario_run`** and creates nothing in `main`: the published scenario is still built by
+`build-tariff-scenario` from its own dimensions and consumes none of it.
 
-The rest of this decision applies from step 5:
+The rest of this decision applies when the dashboard reads published candidates (the read
+contract slice), at which point the candidate identity becomes the published one:
 
 - `identity.calculation_files()` gains every file under `dbt/models/`, `dbt/macros/` and
   `dbt/dbt_project.yml`. A new test globs those directories and fails if a file is present

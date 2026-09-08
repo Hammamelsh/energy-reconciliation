@@ -24,6 +24,7 @@ from conftest import HEADER, row
 from test_tariff import load, make_schedule
 
 from energy_reconciliation.tariff import analytics as ta
+from energy_reconciliation.tariff import candidate_identity as cid
 from energy_reconciliation.tariff import identity
 from energy_reconciliation.tariff import prices as pr
 from energy_reconciliation.tariff.models import build_scenario
@@ -110,6 +111,118 @@ def test_runtime_identity_names_the_libraries_that_do_the_arithmetic():
     assert runtime["python"] and runtime["duckdb"]
     assert set(runtime) >= {"python", "implementation", *identity.RUNTIME_PACKAGES}
     assert len(identity.runtime_fingerprint()) == 64
+
+
+# ---------------------------------------------------------- candidate identity
+def _covered_for_candidates(project=None) -> set[str]:
+    return {
+        str(p.relative_to(identity.PACKAGE_ROOT))
+        if p.is_relative_to(identity.PACKAGE_ROOT)
+        else str(p)
+        for p in cid.candidate_calculation_files(project)
+    }
+
+
+def test_every_first_party_module_the_dbt_python_models_import_is_covered():
+    """The dbt Python models import ``dimensions`` and ``schedule``; take their closure."""
+    script = (
+        "import sys, json;"
+        f"sys.path.insert(0, {str(SRC)!r});"
+        "import energy_reconciliation.tariff.dimensions;"
+        "import energy_reconciliation.tariff.schedule;"
+        "from energy_reconciliation.tariff import identity;"
+        "print(json.dumps(identity.import_closure()))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, check=True
+    )
+    closure = set(json.loads(out.stdout).values())
+    missing = closure - _covered_for_candidates()
+    assert not missing, (
+        f"imported by the dbt Python models but not in the candidate identity: "
+        f"{sorted(missing)}"
+    )
+    assert "tariff/dimensions.py" in _covered_for_candidates()
+
+
+def test_every_dbt_project_file_is_covered_or_deliberately_excluded():
+    """An independent walk of dbt/, minus the documented exclusions, must equal the globs.
+
+    A new directory under dbt/ (seeds, snapshots, analyses) shows up here and fails, so
+    the decision to cover or exclude it is made rather than defaulted.
+    """
+    project = cid.default_dbt_project()
+    excluded_dirs = {"target", "logs", "dbt_packages", "tests"}
+    excluded_files = {".user.yml", "profiles.yml"}
+    walked = {
+        p.resolve()
+        for p in project.rglob("*")
+        if p.is_file()
+        and not (set(p.relative_to(project).parts[:-1]) & excluded_dirs)
+        and p.name not in excluded_files
+    }
+    assert walked == set(cid.dbt_project_files()), (
+        f"uncovered: {sorted(str(p.relative_to(project)) for p in walked - set(cid.dbt_project_files()))}"
+    )
+    for name in (
+        "dbt_project.yml",
+        "macros/generated_policy.sql",
+        "models/tariff/schema.yml",
+    ):
+        assert (project / name).resolve() in walked
+
+
+def test_the_candidate_digest_moves_when_a_dbt_model_changes(tmp_path):
+    """Byte-level on a COPY of the project; the repository's project is never edited."""
+    import shutil
+
+    copy = tmp_path / "dbt"
+    shutil.copytree(
+        cid.default_dbt_project(),
+        copy,
+        ignore=shutil.ignore_patterns("target", "logs", ".user.yml"),
+    )
+    assert (
+        cid.candidate_calculation_digest(copy) == cid.candidate_calculation_digest()
+    ), "an identical copy digests the same, so the digest is content, not location"
+    model = copy / "models" / "tariff" / "fact_interval_charge_scenario.sql"
+    model.write_text(model.read_text() + "\n-- touched\n")
+    assert cid.candidate_calculation_digest(copy) != cid.candidate_calculation_digest()
+    assert cid.dbt_project_digest(copy) != cid.dbt_project_digest()
+
+
+def test_the_candidate_runtime_names_every_library_that_produces_a_table():
+    runtime = cid.candidate_runtime_identity()
+    assert set(runtime) >= {
+        "python",
+        "duckdb",
+        "pyarrow",
+        "pandas",
+        "openpyxl",
+        "dbt-core",
+        "dbt-duckdb",
+    }
+    assert runtime["dbt-core"] not in {"", "absent"}
+    assert len(cid.candidate_runtime_fingerprint()) == 64
+    # the published runtime identity is a strict subset, unchanged
+    assert {
+        k: runtime[k] for k in identity.runtime_identity()
+    } == identity.runtime_identity()
+
+
+def test_the_published_identity_is_a_subset_and_untouched_by_the_candidate_one():
+    """Deliberate in this slice: the dashboard reads no candidate yet, so the published
+    fingerprint must not claim a dependency on dbt or on dimensions.py."""
+    published = {
+        str(p.relative_to(identity.PACKAGE_ROOT)) for p in identity.calculation_files()
+    }
+    candidate = _covered_for_candidates()
+    assert published < candidate
+    assert "tariff/dimensions.py" not in published
+    assert "tariff/candidate_identity.py" not in published
+    assert "tariff/candidate_identity.py" not in candidate, (
+        "the identity code is not the calculation; over-inclusion is the failure here"
+    )
 
 
 # ------------------------------------------- invalidation reaches a real rebuild

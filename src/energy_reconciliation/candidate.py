@@ -19,10 +19,20 @@ unsealed for inspection -- never retried in place.
 promotion*; the manifest and whatever the dashboard reads are untouched. Promotion stays
 a separate, deliberate act (``publication promote``).
 
-**It does not complete published-run identity integration.** The candidate's tariff tables
-are built by dbt and carry the dbt run identity, but ``identity.calculation_files()`` does
-not yet cover ``tariff/dimensions.py`` or the dbt project, ``RUNTIME_PACKAGES`` does not
-yet name dbt, and baselines are still format 1. Those are ticket step 5(d).
+**What the seal certifies.** ``run-dbt`` records a ``started`` attempt before dbt runs and
+completes it afterwards; ``finalise`` seals only when the **latest** attempt succeeded in
+this file and the tables still digest as it recorded. So a failed or interrupted attempt
+after a success is refused even when the tables are unchanged -- attempt success and output
+equality are separate facts. The recorded identity covers what actually produces the
+tables: the published calculation files plus ``tariff/dimensions.py``, the dbt project and
+the dbt, DuckDB, PyArrow and pandas versions (``tariff/candidate_identity.py``).
+
+**Outside the lifecycle**: running ``dbt`` directly or editing the database by hand records
+no attempt. Content checks -- the output digest at sealing and the whole-file SHA-256 after
+it -- are what catch those; the attempt record cannot.
+
+**Still not done**: the dashboard reads no candidate; the published scenario is still the
+Python one and its identity (``identity.py``) is unchanged; baselines are format 1.
 """
 
 from __future__ import annotations
@@ -246,8 +256,8 @@ def build_candidate(
     if code != 0:
         raise CandidateError(
             BUILD,
-            f"dbt exited {code}; nothing was recorded and the candidate is unsealed. "
-            f"Inspect it, then build a fresh one -- this file is not reused.",
+            f"dbt exited {code}; the attempt is recorded as failed and the candidate "
+            f"is unsealed. Inspect it, then build a fresh one -- this file is not reused.",
             candidate,
         )
     models, tests = _run_results(target)
@@ -260,8 +270,16 @@ def build_candidate(
         )
     try:
         seal = publication.finalise(candidate)
-    except publication.PublicationError as error:
-        raise CandidateError(SEAL, str(error), candidate) from error
+    except (publication.PublicationError, OSError) as error:
+        # A refusal, or the sidecar could not be written. The succeeded attempt is still
+        # recorded in the file, so `publication finalise <candidate>` can retry sealing
+        # once the cause is fixed -- and it re-validates everything before it does.
+        raise CandidateError(
+            SEAL,
+            f"{error} -- the build succeeded and is recorded; retry with "
+            f"`uv run publication finalise {candidate}` once the cause is fixed.",
+            candidate,
+        ) from error
     return Built(
         candidate=candidate, seal=seal, models=models, tests=tests, source=source
     )

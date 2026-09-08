@@ -1,6 +1,6 @@
-"""ANL-003 step 5(b): building one candidate, and the stale-record risk it closes.
+"""ANL-003 step 5(b)/(c'): building one candidate, and the attempt lifecycle that seals it.
 
-Two defects were measured before this command existed, and both are regression-tested
+Two defects were measured before the command existed, and both are regression-tested
 here rather than described:
 
 1. **Inherited history.** ``COPY FROM DATABASE`` copies ``scenario_build`` whole, build
@@ -10,17 +10,21 @@ here rather than described:
    same file replaced some tables, skipped others, and left the first attempt's record
    standing; ``finalise`` accepted that too.
 
-The lifecycle closes the first by clearing the build schema at creation, and the second
-two ways: the supported command refuses to reuse a file at all (so a rebuild is refused
-**before** any mutation), and the build record now carries a digest of the built tables
-that ``finalise`` recomputes, so a record that no longer describes its file is refused
-whatever path produced it.
+A third was measured after the first fix: a failed rebuild that left the tables
+**identical** was invisible to the output digest, so an earlier success sealed a file
+whose latest attempt had failed. The lifecycle now records every ``run-dbt`` attempt
+before dbt runs -- ``started``, then ``succeeded`` or ``failed`` -- and ``finalise``
+requires the **latest** attempt to have succeeded, in this file, with the tables still
+digesting as it recorded. Output equality and attempt success are checked separately.
 """
 
 from __future__ import annotations
 
 import shutil
 import stat
+import subprocess
+import sys
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -155,6 +159,47 @@ def test_the_recorded_identity_agrees_with_the_seal_and_the_build(work):
     )
     assert built.seal.sha256 == pub._sha256(built.candidate)
     assert built.seal.dbt_core_version == dbt_run.dbt_identity()["dbt-core"]
+    assert built.seal.output_digest_version == dbt_run.OUTPUT_DIGEST_VERSION
+
+
+def test_the_recorded_identity_covers_what_produces_the_tables(work):
+    """dbt, DuckDB, PyArrow, pandas, dimensions.py and the dbt project, all on the record."""
+    import json
+
+    from energy_reconciliation.tariff import candidate_identity as cid
+
+    source = _warehouse(work)
+    built = _build(work, source)
+    con = duckdb.connect(str(built.candidate), read_only=True)
+    try:
+        record = dict(
+            zip(
+                dbt_run._BUILD_RUN_COLUMNS,
+                con.execute(f"SELECT * FROM {dbt_run.BUILD_RUN_TABLE}").fetchone(),
+                strict=True,
+            )
+        )
+    finally:
+        con.close()
+    runtime = json.loads(record["runtime_detail"])
+    assert set(runtime) >= {"duckdb", "pyarrow", "pandas", "dbt-core", "dbt-duckdb"}
+    assert runtime == cid.candidate_runtime_identity()
+    covered = json.loads(record["covered_files"])
+    assert "src/energy_reconciliation/tariff/dimensions.py" in covered
+    assert "dbt/macros/generated_policy.sql" in covered
+    assert "dbt/models/tariff/fact_interval_charge_scenario.sql" in covered
+    assert "src/energy_reconciliation/policy.py" in covered
+    assert record["calculation_code_sha256"] == cid.candidate_calculation_digest()
+    assert record["database_path"] == str(built.candidate.resolve())
+    assert record["status"] == dbt_run.SUCCEEDED and record["dbt_exit_code"] == 0
+    # resolved configuration and the schedule identity of what was actually built
+    assert json.loads(record["dbt_vars"])["schedule"] == "demo"
+    assert (
+        record["schedule_source"] == "synthetic-demo" and record["schedule_rows"] == 48
+    )
+    assert record["price_catalogue_version"]
+    assert built.seal.schedule_source == "synthetic-demo"
+    assert built.seal.calculation_code_sha256 == record["calculation_code_sha256"]
 
 
 def test_each_invocation_writes_a_fresh_file(work):
@@ -320,9 +365,10 @@ def test_a_source_carrying_build_history_does_not_confuse_the_candidate(work):
 def test_a_bare_snapshot_of_a_built_warehouse_cannot_be_sealed(work):
     """The inherited record must not authorise a file that was never built as a candidate.
 
-    Before the digest check this passed, because the inherited tables and the inherited
-    record agreed with each other -- they were simply not this candidate's build. The
-    row-count guard catches it here; `_clear_inherited_build` is what stops it arising.
+    Before the attempt record carried the path it was written in, this passed only
+    because `_clear_inherited_build` removed the record first: the inherited tables and
+    the inherited record agreed with each other -- they were simply not this file's
+    build. Now `finalise` sees that the attempt names the source, not the copy.
     """
     source = _warehouse(work)
     assert (
@@ -345,8 +391,23 @@ def test_a_bare_snapshot_of_a_built_warehouse_cannot_be_sealed(work):
     con.execute(f"ATTACH '{bare}' AS d")
     con.execute("COPY FROM DATABASE s TO d")
     con.close()
-    assert cand._clear_inherited_build(bare), "the snapshot did inherit a build schema"
-    with pytest.raises(pub.PromotionRefused):
+    # the inherited record is a real success whose digest matches the copied tables...
+    con = duckdb.connect(str(bare), read_only=True)
+    try:
+        status, path, digest = con.execute(
+            f"SELECT status, database_path, built_output_sha256 FROM {dbt_run.BUILD_RUN_TABLE}"
+        ).fetchone()
+        assert status == dbt_run.SUCCEEDED
+        assert digest == dbt_run.build_output_digest(con)
+    finally:
+        con.close()
+    # ...but it names the source file, so it does not authorise the copy
+    assert Path(path) == source.resolve()
+    with pytest.raises(pub.PromotionRefused, match="not this file"):
+        pub.finalise(bare)
+    # and the supported command clears the whole inherited schema before building anyway
+    assert "dbt_build_run" in cand._clear_inherited_build(bare)
+    with pytest.raises(pub.PromotionRefused, match="no successful build record"):
         pub.finalise(bare)
 
 
@@ -415,20 +476,37 @@ def test_a_failed_rebuild_that_moved_the_tables_cannot_be_sealed(work):
         ).fetchall()
     finally:
         con.close()
-    assert still == [(first_run,)], "the failed attempt recorded nothing, as designed"
-    assert bands == [("Peak",)], "but it did replace the schedule dimension"
+    assert [r for (r,) in still if r == first_run], (
+        "the first attempt is still recorded"
+    )
+    assert bands == [("Peak",)], (
+        "and the failed attempt did replace the schedule dimension"
+    )
     assert _digest_of_outputs(candidate) != good_digest
-    with pytest.raises(pub.PromotionRefused, match="changed them after that build"):
+    # Refused for the most specific cause first: the latest attempt failed. The digest
+    # mismatch is a second, independent reason -- proved separately below.
+    with pytest.raises(pub.PromotionRefused, match="latest attempt .* failed"):
         pub.finalise(candidate)
+    con = duckdb.connect(str(candidate), read_only=True)
+    try:
+        latest = con.execute(
+            f"SELECT status FROM {dbt_run.BUILD_RUN_TABLE} ORDER BY started_at_utc DESC"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert latest == dbt_run.FAILED
 
 
-def test_a_failed_rebuild_leaving_tables_identical_is_not_detectable_by_digest(work):
-    """The honest limit of the digest, measured rather than assumed.
+def test_a_failed_rebuild_leaving_tables_identical_is_refused_by_the_attempt_record(
+    work,
+):
+    """The case the digest cannot see, closed by the attempt lifecycle.
 
     When the second attempt fails on the very first model, dbt rebuilds the independent
     models to identical contents and skips the rest. Nothing moved, so the digest cannot
-    object -- and should not: the record does still describe the file. What protects the
-    supported path here is the lifecycle, which the next test proves.
+    object -- and before attempts were recorded, `finalise` sealed the file on the
+    strength of the first success. Now the failed attempt is on record, it is the latest,
+    and that alone refuses the seal. Output equality and attempt success are two facts.
     """
     source = _warehouse(work)
     candidate, first_run, good_digest = _reusable_candidate(work, source, "same.duckdb")
@@ -452,10 +530,199 @@ def test_a_failed_rebuild_leaving_tables_identical_is_not_detectable_by_digest(w
     assert _digest_of_outputs(candidate) == good_digest, (
         "measured: a first-model failure leaves the built tables unchanged"
     )
-    seal = pub.finalise(candidate)
-    assert seal.run_id == first_run, (
-        "so sealing succeeds, over contents that are genuinely unchanged"
+    con = duckdb.connect(str(candidate), read_only=True)
+    try:
+        attempts = con.execute(
+            f"SELECT run_id, status, dbt_exit_code FROM {dbt_run.BUILD_RUN_TABLE} "
+            "ORDER BY started_at_utc"
+        ).fetchall()
+    finally:
+        con.close()
+    assert [a[1] for a in attempts] == [dbt_run.SUCCEEDED, dbt_run.FAILED]
+    assert attempts[0][0] == first_run and attempts[1][2] not in (None, 0)
+    with pytest.raises(pub.PromotionRefused, match="latest attempt .* failed"):
+        pub.finalise(candidate)
+    assert not pub._seal_path(candidate).exists()
+
+
+def test_a_direct_edit_after_a_success_is_caught_by_the_digest_not_the_record(work):
+    """Outside the lifecycle: no attempt is recorded, so content is the only witness."""
+    source = _warehouse(work)
+    candidate, _first_run, good_digest = _reusable_candidate(
+        work, source, "edited.duckdb"
     )
+    con = duckdb.connect(str(candidate))
+    con.execute(
+        "UPDATE scenario_build.dim_tariff_price SET price_pence_per_kwh = "
+        "price_pence_per_kwh + 1 WHERE band_label = 'Low'"
+    )
+    con.close()
+    con = duckdb.connect(str(candidate), read_only=True)
+    try:
+        statuses = con.execute(
+            f"SELECT status FROM {dbt_run.BUILD_RUN_TABLE}"
+        ).fetchall()
+    finally:
+        con.close()
+    assert statuses == [(dbt_run.SUCCEEDED,)], "the edit left no attempt behind"
+    assert _digest_of_outputs(candidate) != good_digest
+    with pytest.raises(pub.PromotionRefused, match="changed them after that build"):
+        pub.finalise(candidate)
+
+
+def test_an_interrupted_attempt_stays_started_and_cannot_be_sealed(work):
+    """A real interruption: the run-dbt process is killed while dbt runs.
+
+    dbt is a child process and survives its parent, so it finishes the build, closes the
+    file cleanly (no `.wal`) and leaves tables that would digest exactly as a success
+    would have recorded. Nobody is left to record the outcome, so the attempt stays
+    `started`, and that alone makes the candidate ineligible.
+    """
+    source = _warehouse(work)
+    candidate = work / "interrupted.duckdb"
+    con = duckdb.connect(":memory:")
+    con.execute(f"ATTACH '{source}' AS s (READ_ONLY)")
+    con.execute(f"ATTACH '{candidate}' AS d")
+    con.execute("COPY FROM DATABASE s TO d")
+    con.close()
+    target = work / "t-interrupted"
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "energy_reconciliation.dbt_run",
+            "--database",
+            str(candidate),
+            "--schedule",
+            "demo",
+            "build",
+            "--target-path",
+            str(target),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    # The target directory appears once dbt is running, which is after the started row
+    # was written and the recording connection closed.
+    deadline = time.monotonic() + 120
+    while not target.exists():
+        assert process.poll() is None, "run-dbt exited before dbt started"
+        assert time.monotonic() < deadline, "dbt did not start in time"
+        time.sleep(0.05)
+    process.kill()  # SIGKILL the orchestrator only; dbt keeps running
+    process.wait()
+
+    # wait for the orphaned dbt to finish and release the file
+    deadline = time.monotonic() + 300
+    while True:
+        assert time.monotonic() < deadline, "dbt did not finish in time"
+        if (target / "run_results.json").is_file():
+            try:
+                con = duckdb.connect(str(candidate), read_only=True)
+                break
+            except duckdb.Error:
+                pass
+        time.sleep(0.2)
+    try:
+        attempts = con.execute(
+            f"SELECT status, finished_at_utc, dbt_exit_code FROM {dbt_run.BUILD_RUN_TABLE}"
+        ).fetchall()
+        facts = con.execute(
+            "SELECT COUNT(*) FROM scenario_build.fact_interval_charge_scenario"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    assert not pub._wal(candidate).exists(), "dbt closed the file cleanly"
+    assert facts > 0, "the orphaned dbt did complete the build"
+    assert attempts == [(dbt_run.STARTED, None, None)]
+    with pytest.raises(pub.PromotionRefused, match="never finished"):
+        pub.finalise(candidate)
+    assert not pub._seal_path(candidate).exists()
+
+
+def test_a_sealing_failure_is_retried_by_finalise_while_the_attempt_is_still_latest(
+    work, monkeypatch
+):
+    """The build succeeded and is recorded; only the sidecar write failed.
+
+    The directory is made unwritable for the duration of the seal, so the sidecar cannot
+    be created. `build-candidate` reports the SEAL stage and how to retry; a later
+    `finalise` re-runs every check and seals the same attempt.
+    """
+    source = _warehouse(work)
+    real_finalise = pub.finalise
+
+    def finalise_with_unwritable_directory(candidate: Path):
+        candidate.parent.chmod(0o555)
+        try:
+            return real_finalise(candidate)
+        finally:
+            candidate.parent.chmod(0o755)
+
+    monkeypatch.setattr(
+        cand.publication, "finalise", finalise_with_unwritable_directory
+    )
+    with pytest.raises(cand.CandidateError) as error:
+        _build(work, source)
+    monkeypatch.undo()
+    assert error.value.stage == cand.SEAL
+    assert "retry" in str(error.value) and "publication finalise" in str(error.value)
+    failed = error.value.candidate
+    assert failed is not None and failed.is_file()
+    assert not pub._seal_path(failed).exists(), "nothing was sealed"
+    assert failed.stat().st_mode & stat.S_IWUSR, "and the file was not made read-only"
+
+    seal = pub.finalise(failed)  # the retry
+    con = duckdb.connect(str(failed), read_only=True)
+    try:
+        (run_id, status) = con.execute(
+            f"SELECT run_id, status FROM {dbt_run.BUILD_RUN_TABLE}"
+        ).fetchone()
+    finally:
+        con.close()
+    assert (seal.run_id, status) == (run_id, dbt_run.SUCCEEDED)
+    assert seal.built_output_sha256 == _digest_of_outputs(failed)
+    assert not failed.stat().st_mode & stat.S_IWUSR
+
+
+def test_a_legacy_build_record_is_refused_with_a_rebuild_message(work):
+    """A record in the pre-attempt shape is neither migrated nor reinterpreted."""
+    source = _warehouse(work)
+    legacy = work / "legacy.duckdb"
+    con = duckdb.connect(":memory:")
+    con.execute(f"ATTACH '{source}' AS s (READ_ONLY)")
+    con.execute(f"ATTACH '{legacy}' AS d")
+    con.execute("COPY FROM DATABASE s TO d")
+    con.close()
+    con = duckdb.connect(str(legacy))
+    con.execute("CREATE SCHEMA scenario_build")
+    con.execute(
+        f"CREATE TABLE {dbt_run.BUILD_RUN_TABLE} (run_id VARCHAR, built_at_utc TIMESTAMP, "
+        "built_output_sha256 VARCHAR)"
+    )
+    con.execute(
+        f"INSERT INTO {dbt_run.BUILD_RUN_TABLE} VALUES ('old-run', now(), 'abc')"
+    )
+    con.close()
+    before = pub._sha256(legacy)
+
+    with pytest.raises(pub.PromotionRefused, match="shape this version does not write"):
+        pub.finalise(legacy)
+    assert (
+        dbt_run.main(
+            [
+                "--database",
+                str(legacy),
+                "--schedule",
+                "demo",
+                "build",
+                "--target-path",
+                str(work / "t-legacy"),
+            ]
+        )
+        == 2
+    ), "run-dbt refuses before building, so nothing is dropped or rewritten"
+    assert pub._sha256(legacy) == before, "the legacy file is left exactly as it was"
 
 
 def test_the_supported_command_refuses_a_rebuild_before_touching_the_file(work):
@@ -486,7 +753,9 @@ def test_the_supported_command_refuses_a_rebuild_before_touching_the_file(work):
             str(work / "t3"),
         ]
     )
-    assert code != 0, "a sealed candidate cannot be rebuilt"
-    assert pub._sha256(built.candidate) == before_bytes
+    assert code == 2, "refused as unusable, before any attempt began"
+    assert pub._sha256(built.candidate) == before_bytes, (
+        "no attempt row was written: a refusal before a build is not an attempt"
+    )
     assert _digest_of_outputs(built.candidate) == before_digest
     assert pub.read_seal(built.candidate).run_id == built.seal.run_id

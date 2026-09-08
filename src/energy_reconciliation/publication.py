@@ -27,10 +27,15 @@ volume this repository lives on. ``/tmp`` on this machine is tmpfs, and NTFS, dr
 network shares were **not** tested. The lock's liveness check reads ``/proc``, so recovery
 is Linux-specific and refuses to act where it cannot tell.
 
-What this module does **not** do: build a candidate (that is ``run-dbt`` over a snapshot,
-and the ``build-candidate`` command is a later slice), switch the dashboard (later slice),
-or delete anything (retention is a documented policy and :func:`inventory` is a dry run;
-automatic sweeping is deferred on purpose).
+Sealing (:func:`finalise`) requires the candidate's **latest recorded build attempt** to
+have succeeded, in this file, as a ``build``, with its tables still digesting as that
+attempt recorded -- see :func:`build_record` for the ordered contract. Two digests are
+kept apart on purpose: the attempt's ``built_output_sha256`` says the built tables are the
+ones dbt left; the seal's ``sha256`` says the whole file is the one validated.
+
+What this module does **not** do: build a candidate (``build-candidate`` does), switch the
+dashboard (later slice), or delete anything (retention is a documented policy and
+:func:`inventory` is a dry run; automatic sweeping is deferred on purpose).
 """
 
 from __future__ import annotations
@@ -49,6 +54,7 @@ from typing import Any, Final
 
 import duckdb
 
+from . import dbt_run
 from .dbt_run import BUILD_RUN_TABLE, build_output_digest
 
 #: Where publications live unless a caller says otherwise. Git-ignored under ``data/``.
@@ -164,34 +170,78 @@ def resolve(root: Path = DEFAULT_ROOT) -> tuple[Path, dict[str, Any]]:
 # ------------------------------------------------------------------ candidates
 @dataclass(frozen=True, slots=True)
 class Seal:
-    """What :func:`finalise` attests about a candidate."""
+    """What :func:`finalise` attests about a candidate.
+
+    ``sha256`` is the **whole file**: it says the bytes are the ones validated.
+    ``built_output_sha256`` is the **built tables** (``dbt_run.build_output_digest``,
+    algorithm named by ``output_digest_version``): it says the tables are the ones the
+    succeeded attempt left. The identity fields say which code and runtime produced them.
+    """
 
     file: str
     sha256: str
     run_id: str
+    started_at_utc: str
     built_at_utc: str
     dbt_core_version: str
     dbt_duckdb_version: str
     tariff_group: str
     schedule_variant: str
+    schedule_source: str | None
+    schedule_sha256: str | None
+    price_catalogue_version: str | None
+    output_digest_version: str
     built_output_sha256: str
+    calculation_code_sha256: str
+    runtime_fingerprint: str
     sealed_at_utc: str
 
 
+#: Attempt-record columns the seal carries, in the order :func:`build_record` reads them.
+_RECORD_KEYS: Final[tuple[str, ...]] = (
+    "run_id",
+    "status",
+    "started_at_utc",
+    "finished_at_utc",
+    "database_path",
+    "dbt_command",
+    "dbt_core_version",
+    "dbt_duckdb_version",
+    "tariff_group",
+    "schedule_variant",
+    "schedule_source",
+    "schedule_sha256",
+    "price_catalogue_version",
+    "output_digest_version",
+    "built_output_sha256",
+    "calculation_code_sha256",
+    "runtime_fingerprint",
+)
+
+
 def build_record(candidate: Path) -> dict[str, Any]:
-    """The single successful ``run-dbt`` record inside a candidate, and proof it still
-    describes the file, read-only.
+    """The attempt that authorises sealing this candidate, and proof it still describes
+    the file, read-only.
 
-    ``run-dbt`` records only successful builds, so a row's presence *is* the success. A
-    candidate is one attempt: zero rows means it was never built or the build failed, and
-    more than one means the file was reused, which the design forbids.
+    The contract, in the order it is checked -- each refusal names its own cause:
 
-    **A record alone is not enough, and that was measured rather than assumed.** dbt fails
-    per model, so a second attempt in the same file can replace some tables, skip others
-    and leave the first attempt's record standing over contents it no longer describes --
-    a duplicated schedule label does exactly that, and before this check `finalise`
-    accepted the result. So the record carries a digest of the built tables, and it is
-    recomputed here: the record must describe **this file, as it is now**.
+    1. no ``.wal`` sidecar: the writer closed and checkpointed;
+    2. an attempt record exists, in the shape this version writes (a **legacy** shape is
+       refused with a rebuild instruction, never migrated or reinterpreted);
+    3. the **latest** attempt, by start time, is ``succeeded``. A ``failed`` or a
+       ``started`` (interrupted, or still running) attempt after a success makes the
+       candidate ineligible **even when the tables are unchanged**: output equality and
+       attempt success are different facts, and neither is inferred from the other;
+    4. that attempt was a ``build`` -- models *and* tests -- not a partial command;
+    5. it was recorded **in this file**: a snapshot of a built warehouse inherits the
+       record, and the inherited row names a different path;
+    6. the candidate is one attempt (design D5): a retry is a new file;
+    7. the tables digest to what the attempt recorded, under the same digest version.
+
+    A record alone was measured to be insufficient before (7) existed: dbt fails per
+    model, so a later attempt can replace some tables and leave the earlier record
+    standing over contents it no longer describes. (3) closes the case (7) cannot see --
+    a later failure that left the tables identical.
     """
     if _wal(candidate).exists():
         raise PromotionRefused(
@@ -200,50 +250,95 @@ def build_record(candidate: Path) -> dict[str, Any]:
         )
     con = duckdb.connect(str(candidate), read_only=True)
     try:
-        try:
-            rows = con.execute(
-                "SELECT run_id, CAST(built_at_utc AS VARCHAR), dbt_core_version, "
-                "dbt_duckdb_version, tariff_group, schedule_variant, "
-                f"built_output_sha256 FROM {BUILD_RUN_TABLE}"
-            ).fetchall()
-        except duckdb.Error as error:
+        if not dbt_run.record_shape(con):
             raise PromotionRefused(
-                f"{candidate.name}: no successful build record ({BUILD_RUN_TABLE} "
-                f"is absent). Either run-dbt was never run on it or the build failed. "
-                f"Underlying: {error}"
-            ) from error
-    finally:
-        con.close()
-    if len(rows) != 1:
-        raise PromotionRefused(
-            f"{candidate.name}: {len(rows)} build records; a candidate is one attempt "
-            "and must carry exactly one. A snapshot of a warehouse that was itself built "
-            "inherits its history, which is why a candidate starts with the build schema "
-            "cleared."
-        )
-    keys = (
-        "run_id",
-        "built_at_utc",
-        "dbt_core_version",
-        "dbt_duckdb_version",
-        "tariff_group",
-        "schedule_variant",
-        "built_output_sha256",
-    )
-    record = dict(zip(keys, rows[0], strict=True))
-    con = duckdb.connect(str(candidate), read_only=True)
-    try:
+                f"{candidate.name}: no successful build record ({BUILD_RUN_TABLE} is "
+                "absent). Either run-dbt was never run on it or the build never began."
+            )
+        try:
+            dbt_run.require_current_shape(con, candidate)
+        except dbt_run.LegacyRecordError as error:
+            raise PromotionRefused(str(error)) from error
+        rows = con.execute(
+            "SELECT run_id, status, CAST(started_at_utc AS VARCHAR), "
+            "CAST(finished_at_utc AS VARCHAR), database_path, dbt_command, "
+            "dbt_core_version, dbt_duckdb_version, tariff_group, schedule_variant, "
+            "schedule_source, schedule_sha256, price_catalogue_version, "
+            "output_digest_version, built_output_sha256, calculation_code_sha256, "
+            f"runtime_fingerprint FROM {BUILD_RUN_TABLE} "
+            "ORDER BY started_at_utc DESC, run_id DESC"
+        ).fetchall()
+        attempts = [dict(zip(_RECORD_KEYS, r, strict=True)) for r in rows]
+        if not attempts:
+            raise PromotionRefused(
+                f"{candidate.name}: {BUILD_RUN_TABLE} exists but holds no attempt."
+            )
+        latest = attempts[0]
+        if latest["status"] == dbt_run.STARTED:
+            raise PromotionRefused(
+                f"{candidate.name}: the latest attempt {latest['run_id']} (started "
+                f"{latest['started_at_utc']}) never finished -- its run-dbt process was "
+                "interrupted, or is still running. An unfinished attempt cannot be "
+                "sealed whatever the tables hold; build a fresh candidate."
+            )
+        if latest["status"] != dbt_run.SUCCEEDED:
+            raise PromotionRefused(
+                f"{candidate.name}: the latest attempt {latest['run_id']} "
+                f"{latest['status']} (dbt exited non-zero at {latest['finished_at_utc']}). "
+                "A candidate is sealed on its latest attempt succeeding, not on an "
+                "earlier success whose tables happen to be unchanged; build a fresh one."
+            )
+        if dbt_run.subcommand_of(latest["dbt_command"]) != "build":
+            raise PromotionRefused(
+                f"{candidate.name}: the latest attempt ran `dbt "
+                f"{latest['dbt_command']}`, not `build`. Only a build -- models and tests "
+                "-- can be sealed."
+            )
+        if latest["database_path"] != str(candidate.resolve()):
+            raise PromotionRefused(
+                f"{candidate.name}: its attempt record was written in "
+                f"{latest['database_path']}, not this file. A snapshot of a built "
+                "warehouse inherits the source's history; that history does not "
+                "authorise the copy. Build this file as a candidate instead."
+            )
+        if len(attempts) != 1:
+            raise PromotionRefused(
+                f"{candidate.name}: {len(attempts)} attempts; a candidate is one attempt "
+                "and a retry is a new file. Rebuilding in place is what lets a record "
+                "outlive the tables it described."
+            )
+        if latest["output_digest_version"] != dbt_run.OUTPUT_DIGEST_VERSION:
+            raise PromotionRefused(
+                f"{candidate.name}: the attempt recorded its outputs under digest "
+                f"{latest['output_digest_version']!r}; this version computes "
+                f"{dbt_run.OUTPUT_DIGEST_VERSION!r}. Not comparable; build a fresh one."
+            )
         current = build_output_digest(con)
     finally:
         con.close()
-    if record["built_output_sha256"] != current:
+    if latest["built_output_sha256"] != current:
         raise PromotionRefused(
             f"{candidate.name}: the built tables digest {current[:12]}… but the build "
-            f"record describes {str(record['built_output_sha256'])[:12]}…. Something "
-            "changed them after that build -- most likely a later attempt that failed "
-            "part way. This candidate cannot be sealed; build a fresh one."
+            f"record describes {str(latest['built_output_sha256'])[:12]}…. Something "
+            "changed them after that build -- an attempt this lifecycle did not record, "
+            "or a direct edit. This candidate cannot be sealed; build a fresh one."
         )
-    return record
+    return {
+        "run_id": latest["run_id"],
+        "started_at_utc": latest["started_at_utc"],
+        "built_at_utc": latest["finished_at_utc"],
+        "dbt_core_version": latest["dbt_core_version"],
+        "dbt_duckdb_version": latest["dbt_duckdb_version"],
+        "tariff_group": latest["tariff_group"],
+        "schedule_variant": latest["schedule_variant"],
+        "schedule_source": latest["schedule_source"],
+        "schedule_sha256": latest["schedule_sha256"],
+        "price_catalogue_version": latest["price_catalogue_version"],
+        "output_digest_version": latest["output_digest_version"],
+        "built_output_sha256": latest["built_output_sha256"],
+        "calculation_code_sha256": latest["calculation_code_sha256"],
+        "runtime_fingerprint": latest["runtime_fingerprint"],
+    }
 
 
 def finalise(candidate: Path) -> Seal:
@@ -253,6 +348,11 @@ def finalise(candidate: Path) -> Seal:
     The digest is taken over the closed file; the sidecar records it beside the run_id
     that produced the file; the file's mode drops the write bits, so a read-write open
     fails from here on. Sealing an already sealed file with unchanged bytes is a no-op.
+
+    Every check in :func:`build_record` runs again on every call, so a sealing that
+    failed part way (sidecar unwritable, disk full) is retried by calling this again --
+    and succeeds only while the succeeded attempt is still the latest and the tables
+    still digest as recorded.
     """
     if not candidate.is_file():
         raise PromotionRefused(f"{candidate} does not exist")
@@ -266,7 +366,11 @@ def finalise(candidate: Path) -> Seal:
                 f"{candidate.name} was sealed with digest {existing.get('sha256', '')[:12]}… "
                 f"but now has {digest[:12]}…: the file changed after sealing."
             )
-        return Seal(**existing)
+        # Re-sealing unchanged bytes is a no-op, except that the mode is made read-only
+        # again: a sealing run that died after writing the sidecar and before chmod is
+        # completed here rather than left half done.
+        candidate.chmod(stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        return _seal_from(existing, seal_path)
     seal = Seal(
         file=candidate.name,
         sha256=digest,
@@ -282,13 +386,24 @@ def finalise(candidate: Path) -> Seal:
     return seal
 
 
+def _seal_from(fields: dict[str, Any], seal_path: Path) -> Seal:
+    """A seal from its sidecar, or a refusal when the sidecar predates this contract."""
+    try:
+        return Seal(**fields)
+    except TypeError as error:
+        raise PromotionRefused(
+            f"{seal_path.name} was written under an earlier seal contract (fields differ: "
+            f"{error}). Its claims are not upgraded; build and seal a fresh candidate."
+        ) from error
+
+
 def read_seal(candidate: Path) -> Seal:
     seal_path = _seal_path(candidate)
     if not seal_path.is_file():
         raise PromotionRefused(
             f"{candidate.name} is not sealed. Run finalise on it after a successful build."
         )
-    return Seal(**json.loads(seal_path.read_text()))
+    return _seal_from(json.loads(seal_path.read_text()), seal_path)
 
 
 # ------------------------------------------------------------------ promotion
@@ -373,6 +488,9 @@ def publish(
             "dbt_duckdb_version": seal.dbt_duckdb_version,
             "tariff_group": seal.tariff_group,
             "schedule_variant": seal.schedule_variant,
+            "schedule_source": seal.schedule_source,
+            "output_digest_version": seal.output_digest_version,
+            "built_output_sha256": seal.built_output_sha256,
             "previous": current_version,
             "previous_file": current["file"] if current else None,
             "promoted_at_utc": _utc_now(),

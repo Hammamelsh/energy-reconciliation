@@ -5,7 +5,8 @@ against :mod:`energy_reconciliation.publication`. Where a scenario needs another
 -- a reader holding a file, a builder dying mid-write, two promoters racing, a promoter
 dying between fsync and rename, a live lock holder -- it uses a **real** child process,
 not a thread and not a mock. Where it needs a build, it writes the same
-``scenario_build.dbt_build_run`` record that ``run-dbt`` writes, through the same function.
+``scenario_build.dbt_build_run`` attempt that ``run-dbt`` writes, through the same
+functions (``begin_attempt`` then ``finish_attempt``, via ``record_build``).
 
 Two boundaries this file keeps visible:
 
@@ -289,7 +290,7 @@ def test_a_candidate_reused_for_two_builds_is_refused(root):
     source = _source_warehouse(root)
     candidate = _candidate(root, source, "0001")
     _stand_in_build(candidate, "run-0001b", 5)  # a second attempt in the same file
-    with pytest.raises(pub.PromotionRefused, match="2 build records"):
+    with pytest.raises(pub.PromotionRefused, match="2 attempts"):
         pub.finalise(candidate)
 
 

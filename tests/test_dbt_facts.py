@@ -406,9 +406,13 @@ def test_a_failed_build_is_not_recorded_as_a_successful_one(tmp_path):
     )
     database = _warehouse(tmp_path, "unrecorded")
     assert _build(database, tmp_path, project) != 0
-    recorded = _rows(
-        built_database := database,
-        "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'dbt_build_run'",
-    )[0][0]
-    assert recorded == 0, "a failed build must record nothing"
-    assert built_database.exists()
+    attempts = _rows(
+        database,
+        "SELECT status, dbt_exit_code, built_output_sha256 FROM "
+        f"{dbt_run.BUILD_RUN_TABLE}",
+    )
+    assert len(attempts) == 1, "the attempt is recorded once"
+    status, exit_code, digest = attempts[0]
+    assert status == dbt_run.FAILED and exit_code not in (None, 0)
+    assert digest is None, "a failed attempt records no output digest"
+    assert database.exists()

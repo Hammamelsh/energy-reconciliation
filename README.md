@@ -342,8 +342,9 @@ applied — and changed — without reprocessing.
   it reproduces the Python figures exactly. **It has no publisher**: `build-tariff-scenario`
   still does every scenario build from its own dimensions, and the dbt tables are candidate
   outputs that nothing reads. `uv run build-candidate` creates and seals an isolated warehouse
-  candidate, and `uv run publication` promotes or rolls one back, but the dashboard is not yet
-  pointed at them. Design in
+  candidate — sealed only when its latest recorded build attempt succeeded and its tables still
+  digest as that attempt recorded — and `uv run publication` promotes or rolls one back, but
+  the dashboard is not yet pointed at them. Design in
   [`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md), progress in
   [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md). See
   [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
