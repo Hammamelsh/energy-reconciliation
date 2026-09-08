@@ -263,7 +263,7 @@ than charging the wrong group). The product stays
 DuckDB is exact, and the singular test in D7 recomputes it row by row. After D5 the SQL constants in `models.py` are **deleted**, so the
 dbt models are the definition and Python holds no copy.
 
-### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED at the step-5 review, 2026-09-08; PROVED on disposable fixtures; NOT implemented)
+### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED and PROVED 2026-09-08; the **core is implemented** in `publication.py`; the build command and the dashboard switch are not)
 
 **Why the first draft below was wrong.** It built into a `scenario_build` schema inside
 the live warehouse and published with one transaction. Measured (table further down):
@@ -357,6 +357,18 @@ fields format 1 lacks as *absent*, not as mismatches.
 | Stale request | formed against v1, submitted after v2: refused; v2 stayed |
 | Rollback | manifest change under five seconds; reader saw v1's data |
 | Retention | protected versions and the grace window respected; an open connection survived the unlink; a new open failed |
+
+**Implemented (step 5(a)).** `src/energy_reconciliation/publication.py` carries the proof's
+primitives over with three additions: **`finalise`** seals a built candidate (exactly one
+`run-dbt` record, no `.wal`, SHA-256 written to a `.validated.json` sidecar, file mode
+dropped to read-only), so *writable during construction, immutable after* is enforced by
+the filesystem and re-checked by digest at promotion; the lock records **pid and process
+start time**, so recovery cannot mistake a reused pid for the live owner; and there is
+**no sweep** — `inventory` is the dry run and deleting waits for a confirmed command
+(I-17). The proof scenarios run against the module (`tests/test_publication.py`, 19
+tests, real child processes). Measured in the walkthrough: a candidate whose dbt build
+failed on a duplicated schedule label closed cleanly and left **no `.wal`**; the absent
+build record and absent seal are what refuse it. The sidecar check is a second gate.
 
 **What the proof does not establish.** Power-loss durability (fsyncs were called, not
 tested by pulling power); behaviour on NTFS/drvfs or a network share (ext4 only); the

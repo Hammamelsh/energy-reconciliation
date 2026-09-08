@@ -341,7 +341,8 @@ applied — and changed — without reprocessing.
   all of its SQL is generated from `policy.py` and `models.py` so no rule is written twice, and
   it reproduces the Python figures exactly. **It has no publisher**: `build-tariff-scenario`
   still does every scenario build from its own dimensions, and the dbt tables are candidate
-  outputs that nothing reads. Design in
+  outputs that nothing reads. A publication core (`uv run publication`) can seal, promote and roll
+  back versioned warehouse files, but the dashboard is not yet pointed at it. Design in
   [`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md), progress in
   [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md). See
   [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
