@@ -1418,11 +1418,13 @@ with forecast_tab:
                 worst = fc.worst_days(series, fc.default_models(), fc.config_from(cfg))
                 st.markdown(
                     f"The ten largest absolute errors for **{household_pick}**, across "
-                    "every origin in its run. Large errors concentrate on days unlike "
-                    "the same weekday before them — a household's routine changing, or "
-                    "an unusually high or low day. A weekday average cannot anticipate "
-                    "a one-off, and neither baseline is given anything but the "
-                    "household's own past totals."
+                    "every origin in its run. **The reason differs by model.** For the "
+                    "weekday models a large error means the target was unlike its "
+                    "weekday lag — compare *Observed kWh* with *Same weekday a week "
+                    "earlier*. For *Origin day repeated*, the weekday lag can be almost "
+                    "exact while the prediction is far out, because it repeats the "
+                    "origin day whatever fell on it. Read the two columns together "
+                    "rather than assuming a single explanation."
                 )
                 st.dataframe(worst, width="stretch", hide_index=True)
             st.markdown(
@@ -1437,9 +1439,14 @@ with forecast_tab:
 **Eligibility, fixed before any result was read.** A day is usable only when all
 {f["expected_intervals"]} nominal half-hour labels carry a finite value, no missing-value
 token is recorded, and no label disagrees with itself. A household is eligible when it has
-one **contiguous** run of usable days of at least {f["min_run_days"]} days. Contiguity is
-required because the models are lag-based: a hole would change what "seven days earlier"
-means. Households are chosen by that rule and by id, never by how well they forecast.
+one **contiguous** run of usable days of at least {f["min_run_days"]} days. Households are
+chosen by that rule and by id, never by how well they forecast.
+
+**Contiguity is a benchmark choice, not a correctness requirement.** Lag lookup is keyed by
+date, so a hole never shifts what "seven days earlier" means -- the lookup returns nothing
+and the model declines. Contiguity gives every household a dense frame of the same shape and
+well-defined split boundaries, so the comparison is not confounded by differing decline
+rates.
 
 **Nothing is repaired.** Missing observations are not filled with zero, absent dates are
 not bridged, and a partially observed date is never treated as whole. A prediction that

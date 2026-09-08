@@ -66,9 +66,16 @@ missing-value token; no label carrying disagreeing readings. Off-grid observatio
 date are permitted and counted — policy already excludes them from the total.
 
 **An eligible household** has one **contiguous** run of usable days of at least
-**168 days**. Contiguity is required because the models are lag-based: a hole inside a run
-would silently change what "seven days earlier" means. 168 days accommodates a 28-day
-warm-up, weekly rolling origins and a 28-day holdout.
+**168 days**, which accommodates a 28-day warm-up, weekly rolling origins and a 28-day
+holdout.
+
+**Contiguity is a benchmark choice, not a correctness requirement.** Lag lookup is keyed
+by date: a model asks for `target − 7 days` and receives that date's value or nothing. A
+hole never shifts what "seven days earlier" means — it makes the lookup return nothing and
+the model declines. Contiguity is imposed so every household contributes a dense frame of
+the same shape and the split boundaries are well defined in calendar days, which keeps the
+model comparison from being confounded by differing decline rates. Relaxing it is a
+separate experiment (I-08).
 
 Households are selected by that rule and then by **household id**, bounded to the first
 **40**. Nothing in the selection depends on how well anything forecasts.
@@ -220,10 +227,27 @@ measuring the change on a fresh holdout.
 
 ## 6. Where the predictions fail
 
-Errors concentrate on days unlike the same weekday before them: a household's routine
-changing, or a one-off unusually high or low day. A weekday average cannot anticipate a
-one-off, and by construction these models see **only** one household's earlier daily
-totals — no weather, occupancy, holidays, tariff band, price, or any other household.
+**The reason differs by model, and one explanation for all three would be wrong.**
+Measured on `MAC000131`'s ten largest errors:
+
+- For the **weekday models**, a large error does coincide with a target unlike its weekday
+  lag. 8 Jan 2014: observed 11.242 against a lag of 21.388, and `seasonal_naive_7` — which
+  *is* that lag — is wrong by exactly 10.146.
+- For **`persistence_1`** the largest error of all occurs where the weekday lag was nearly
+  exact. 1 Jan 2014: observed 21.388, the previous Wednesday 21.369, a difference of
+  **0.019** — yet persistence predicted 11.061, because it repeats the origin day, and the
+  origin was New Year's Eve.
+
+So "large errors happen on days unlike the same weekday before them" describes the weekday
+models and is contradicted by the worst persistence case. Cohort-wide, the top 1% of errors
+(286 of 28,665) are 120 `seasonal_naive_7`, 98 `persistence_1` and 68 `weekday_mean_4`,
+against an equal 9,555 scored predictions each — the four-week mean is under-represented
+among the worst errors, consistent with averaging damping one-off days, though that is an
+association rather than a demonstrated mechanism.
+
+What remains true of all three: by construction they see **only** one household's earlier
+daily totals — no weather, occupancy, holidays, tariff band, price, or any other
+household.
 
 ## 7. What the real data did not exercise
 

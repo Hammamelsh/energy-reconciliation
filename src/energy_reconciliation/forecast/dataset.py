@@ -31,9 +31,17 @@ treated as a whole one -- it is simply unavailable, and every prediction that wo
 depended on it is excluded with a reason.
 
 A household is eligible when it has one **contiguous run** of usable days at least
-``MIN_RUN_DAYS`` long. Contiguity is required because the models are lag-based: a run
-with a hole in it would silently change what "seven days earlier" means. Households are
-selected by that rule and by household id, **never** by how well anything forecasts them.
+``MIN_RUN_DAYS`` long. Households are selected by that rule and by household id,
+**never** by how well anything forecasts them.
+
+**Contiguity is a benchmark choice, not a correctness requirement.** Lag lookup is keyed
+by date, not by row position: a model asks for ``target - 7 days`` and receives that
+date's value or nothing. A hole therefore never shifts what "seven days earlier" means;
+it makes the lookup return nothing, and the model declines. Contiguity is imposed so that
+every household contributes a dense frame of the same shape and the warm-up, development
+and holdout boundaries are well defined in calendar days -- which keeps the model
+comparison from being confounded by differing decline rates. Relaxing it is a separate
+experiment (I-08 in ``docs/ideas.md``).
 """
 
 from __future__ import annotations
@@ -193,9 +201,10 @@ def daily_records(
 def longest_usable_run(records: list[DayRecord]) -> tuple[date, date] | None:
     """The longest run of consecutive **calendar-adjacent** usable days.
 
-    A gap of even one date ends a run. That is deliberate: the models index by lag, and
-    a run containing an absent date would make "seven days earlier" mean something
-    different at different points in the series.
+    A gap of even one date ends a run. That is deliberate, but not because a gap would
+    corrupt the lag: lookups are date-keyed, so an absent date yields nothing and the
+    model declines. It is so that each household contributes one dense window of the same
+    shape, with split boundaries well defined in calendar days.
     """
     usable = sorted(r.source_date for r in records if r.usable)
     if not usable:
