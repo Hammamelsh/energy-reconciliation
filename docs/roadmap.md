@@ -94,10 +94,21 @@ Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.m
 
 ### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
 
-**Status: design complete 2026-09-08, implementation pending.** The decisions are in
-[`anl-003-dbt-design.md`](anl-003-dbt-design.md) and the sequenced ticket in
-[`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). **No dbt code exists yet**
-and no dbt package is installed; the "Expressed as dbt models" row above stays *not done*.
+**Status: steps 0–2 implemented 2026-09-08; steps 3–7 not started.** Decisions in
+[`anl-003-dbt-design.md`](anl-003-dbt-design.md), sequenced in
+[`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md).
+
+**What runs today:** `dbt-core 1.12.4` / `dbt-duckdb 1.11.0` installed and pinned; a `dbt/`
+project with a staging view over `readings` and the two policy models, whose SQL bodies
+are a macro **generated from `policy.py`** so the rules still have one definition. `dbt
+build` runs, and on the three-member warehouse dbt returns the same distinct-reading
+count, keys and category counts as the Python path (2,997,962), with row-level equality
+checked on fixtures.
+
+**What does not exist:** the tariff dimensions, the classification model, both facts, the
+dbt tests and the publisher. The scenario is still built entirely by
+`build-tariff-scenario` in Python. **The "Expressed as dbt models" row above stays *not
+done*** — the models that produce the charge are not in dbt.
 
 **Not a copy-and-paste job.** The SQL is written and tested, which is the starting point,
 not the whole task. The port has to decide model boundaries and materialisations, wire

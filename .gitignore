@@ -25,3 +25,11 @@ data/demo/*-profile.json
 
 # Local Claude Code settings (attribution preference): local only, never published.
 /.claude/settings.local.json
+
+# dbt build artefacts (ANL-003). The project files and the generated macro ARE tracked;
+# compiled SQL, logs and installed packages are not.
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+# A random per-machine identifier written by dbt. Never committed.
+dbt/.user.yml

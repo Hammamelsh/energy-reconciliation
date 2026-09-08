@@ -1,0 +1,31 @@
+# ANL-003 step 2. The tariff facts are NOT here yet -- this project currently defines
+# the staging view and the two policy models only. See docs/anl-003-dbt-design.md.
+name: energy_reconciliation
+version: 0.1.0
+config-version: 2
+profile: energy_reconciliation
+
+# Off deliberately. dbt otherwise reports anonymous usage events and writes a random
+# machine identifier to dbt/.user.yml; this repository does not send its activity
+# anywhere, and a per-machine id is exactly the kind of thing it keeps out of history.
+flags:
+  send_anonymous_usage_stats: false
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+# Fail before touching anything if the database named by ENERGY_RECONCILIATION_DB is not
+# a loaded warehouse. Without this a wrong path is an empty DuckDB file, and every model
+# would return zero rows and report success.
+on-run-start:
+  - "{{ assert_warehouse_is_loaded() }}"
+
+models:
+  energy_reconciliation:
+    staging:
+      +materialized: view
+    policy:
+      +materialized: ephemeral

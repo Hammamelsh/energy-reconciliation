@@ -38,7 +38,7 @@ from typing import Any
 
 import duckdb
 
-from ..policy import CONFLICTING_LABELS, DISTINCT_READINGS, TEXT_KEY
+from ..policy import TEXT_KEY, conflicting_labels_sql, distinct_readings_sql
 
 BASE, COMP = "base", "comp"
 
@@ -60,9 +60,9 @@ class ComparisonError(RuntimeError):
     """The two warehouses differ in something other than loaded source."""
 
 
-def _on(schema: str, sql: str) -> str:
-    """Point one of the shared policy queries at an attached warehouse."""
-    return sql.replace("FROM readings", f"FROM {schema}.readings")
+def _readings(schema: str) -> str:
+    """The ``readings`` relation inside an attached warehouse."""
+    return f"{schema}.readings"
 
 
 @dataclass
@@ -171,10 +171,11 @@ def _compare(con, baseline_db: Path, comparison_db: Path) -> dict[str, Any]:
     ).fetchone()[0]
 
     # ------------------------------------------------ distinct readings (policy grain)
-    con.execute(f"CREATE TEMP TABLE d_b AS {_on(BASE, DISTINCT_READINGS)}")
-    con.execute(f"CREATE TEMP TABLE d_c AS {_on(COMP, DISTINCT_READINGS)}")
+    con.execute(f"CREATE TEMP TABLE d_b AS {distinct_readings_sql(_readings(BASE))}")
+    con.execute(f"CREATE TEMP TABLE d_c AS {distinct_readings_sql(_readings(COMP))}")
     con.execute(
-        f"CREATE TEMP TABLE d_added AS {_on(COMP, DISTINCT_READINGS)} WHERE {in_added}",
+        f"CREATE TEMP TABLE d_added AS {distinct_readings_sql(_readings(COMP))} "
+        f"WHERE {in_added}",
         added_members,
     )
     distinct_b = con.execute("SELECT COUNT(*) FROM d_b").fetchone()[0]
@@ -239,8 +240,8 @@ def _compare(con, baseline_db: Path, comparison_db: Path) -> dict[str, Any]:
     ]
 
     # ---------------------------------------------------------- disagreements
-    con.execute(f"CREATE TEMP TABLE c_b AS {_on(BASE, CONFLICTING_LABELS)}")
-    con.execute(f"CREATE TEMP TABLE c_c AS {_on(COMP, CONFLICTING_LABELS)}")
+    con.execute(f"CREATE TEMP TABLE c_b AS {conflicting_labels_sql(_readings(BASE))}")
+    con.execute(f"CREATE TEMP TABLE c_c AS {conflicting_labels_sql(_readings(COMP))}")
     new_conflicts = con.execute(
         "SELECT household_id, source_timestamp_text FROM c_c EXCEPT "
         "SELECT household_id, source_timestamp_text FROM c_b"

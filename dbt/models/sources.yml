@@ -1,0 +1,14 @@
+version: 2
+
+sources:
+  - name: warehouse
+    description: >
+      Tables written by `uv run ingest-member`. dbt READS these and never writes them:
+      the raw-to-warehouse step keeps its rejected-record accounting, its load registry
+      and its supersede rules in Python, and none of that is expressible as a model.
+    schema: main
+    tables:
+      - name: readings
+        description: One row per source record as loaded. Duplicates are evidence here, not defects.
+      - name: load_registry
+        description: One row per load event, with the content digests that identify the input.

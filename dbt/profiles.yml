@@ -1,0 +1,20 @@
+# Committed on purpose: it holds no credential and no machine-specific path. DuckDB is
+# a file, and the file is named by ENERGY_RECONCILIATION_DB.
+#
+# env_var() is called WITHOUT a default. That is deliberate: an unset variable must be a
+# hard error at parse time, because dbt-duckdb would otherwise happily CREATE an empty
+# database at whatever path it was given and every model would succeed with zero rows.
+#
+#   ENERGY_RECONCILIATION_DB=/path/to/dev.duckdb \
+#     uv run dbt build --project-dir dbt --profiles-dir dbt
+energy_reconciliation:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('ENERGY_RECONCILIATION_DB') }}"
+      # Models are built in their own schema, never into main, so a dbt run cannot
+      # overwrite an ingested table. main holds the warehouse; scenario_build holds
+      # everything dbt derives.
+      schema: scenario_build
+      threads: 1

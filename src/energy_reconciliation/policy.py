@@ -25,6 +25,7 @@ are unresolved, so a repeated label could in principle be two different half hou
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 #: Consecutive grid readings are half an hour apart. A longer step between two
@@ -54,14 +55,64 @@ GRID: Final[str] = "on_half_hour_grid"
 #: The value category that carries a usable number.
 FINITE: Final[str] = "finite_numeric"
 
-#: One row per *distinct recorded reading*: exact duplicates and equivalent numeric
-#: representations both collapse to one row, a conflicting label keeps one row per
-#: distinct signature, and every row keeps the columns a downstream model needs.
-#:
-#: This is the accounting unit for the tariff scenario. Its row count is what the
-#: reconciliation identity balances:
-#: ``distinct readings in scope = included in the scenario + excluded, with a reason``.
-DISTINCT_READINGS: Final[str] = f"""
+#: The relation the policy queries read when no other is named. Every caller that reads
+#: a different one (an attached warehouse, a dbt model) passes it explicitly.
+DEFAULT_READINGS_RELATION: Final[str] = "readings"
+
+#: The one non-identifier value :func:`_validated_relation` accepts. dbt substitutes the
+#: real relation into its macro at compile time, so the *rendered macro body* has to
+#: carry this placeholder verbatim. It is permitted by name rather than by loosening the
+#: identifier rule, so nothing else that fails validation can slip through with it.
+DBT_RELATION_PLACEHOLDER: Final[str] = "{{ readings }}"
+
+#: A relation name: dot-separated parts, each a bare identifier or a double-quoted one
+#: (``"dev"."main"."stg_readings"``, which is how dbt's ``ref()`` renders). Anchored, so
+#: nothing may follow -- a trailing ``WHERE``, a comment or a second statement is refused
+#: rather than concatenated into the query.
+_RELATION_PART = r'(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")'
+_RELATION_PATTERN: Final[re.Pattern[str]] = re.compile(
+    rf"^{_RELATION_PART}(?:\.{_RELATION_PART})*$"
+)
+
+
+class PolicyRelationError(ValueError):
+    """A relation name was not an identifier, so it was not interpolated into SQL.
+
+    These queries are built by string composition, which is the only way to share one
+    SQL definition across DuckDB connections and dbt. A relation name is not a bind
+    parameter -- no database accepts one -- so it is validated instead of trusted.
+    """
+
+
+def _validated_relation(relation: str) -> str:
+    if relation == DBT_RELATION_PLACEHOLDER:
+        return relation
+    if not _RELATION_PATTERN.match(relation):
+        msg = (
+            f"{relation!r} is not a relation name. Expected an identifier, optionally "
+            "schema-qualified and optionally quoted, and nothing after it."
+        )
+        raise PolicyRelationError(msg)
+    return relation
+
+
+def distinct_readings_sql(relation: str = DEFAULT_READINGS_RELATION) -> str:
+    """One row per *distinct recorded reading*, read from ``relation``.
+
+    Exact duplicates and equivalent numeric representations both collapse to one row, a
+    conflicting label keeps one row per distinct signature, and every row keeps the
+    columns a downstream model needs.
+
+    This is the accounting unit for the tariff scenario. Its row count is what the
+    reconciliation identity balances:
+    ``distinct readings in scope = included in the scenario + excluded, with a reason``.
+
+    ``relation`` exists so that **one** definition serves every caller: the warehouse
+    (``readings``), an attached warehouse in a comparison (``base.readings``), and a dbt
+    model (the placeholder dbt fills in). It changes where the rows come from and
+    nothing else -- the projection, the DISTINCT and the signature are fixed here.
+    """
+    return f"""
 SELECT DISTINCT
        household_id,
        tariff_group,
@@ -71,14 +122,27 @@ SELECT DISTINCT
        consumption_kwh,
        value_category,
        {SIGNATURE}     AS value_signature
-FROM readings
+FROM {_validated_relation(relation)}
 """
 
-#: Labels where the source does not agree with itself. Any aggregate touching one of
-#: these is withheld, and every reading at such a label is excluded with a reason.
-CONFLICTING_LABELS: Final[str] = f"""
+
+def conflicting_labels_sql(relation: str = DEFAULT_READINGS_RELATION) -> str:
+    """Labels where the source does not agree with itself, read from ``relation``.
+
+    Any aggregate touching one of these is withheld, and every reading at such a label
+    is excluded with a reason.
+    """
+    return f"""
 SELECT household_id, source_timestamp_text
-FROM readings
+FROM {_validated_relation(relation)}
 GROUP BY household_id, source_timestamp_text
 HAVING COUNT(DISTINCT {SIGNATURE}) > 1
 """
+
+
+#: The default renderings, kept as constants because most callers read the warehouse's
+#: own ``readings`` table. **Byte-identical to the pre-parameterisation constants**, so
+#: this refactor cannot have changed a stored figure; the equality is asserted in
+#: ``tests/test_policy_sql.py``.
+DISTINCT_READINGS: Final[str] = distinct_readings_sql()
+CONFLICTING_LABELS: Final[str] = conflicting_labels_sql()

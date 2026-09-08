@@ -1,7 +1,9 @@
 # ANL-003 — Design: porting the tariff models to dbt
 
-**Date:** 2026-09-08. **Status: DESIGN, not built.** Nothing in this document has been
-executed; no dbt package is installed; no figure here is new. The ticket that would build
+**Date:** 2026-09-08. **Status: steps 0–2 BUILT; steps 3–7 not built.** The staging view
+and the two policy models exist and run; **no tariff fact, dimension or publisher does**.
+dbt is installed (versions in D1). Every figure in §2 is still the acceptance target, not
+a claim about dbt output. The ticket that would build
 it is [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md). The roadmap entry it
 answers is `roadmap.md` § M3 → ANL-003.
 
@@ -61,10 +63,21 @@ dbt/
 committed inside the project directory (`--profiles-dir dbt`), so a clone runs without
 touching the user's home directory.
 
-**Versions.** Resolved by `uv pip install --dry-run dbt-duckdb` on 2026-09-08, **not
-installed**: `dbt-core 1.12.4`, `dbt-duckdb 1.11.0`. Pin both exactly in `pyproject.toml`
-main dependencies — they are needed by `build-tariff-scenario` at runtime, not only in
-development — and record them in `identity.RUNTIME_PACKAGES` (D6).
+**Versions — INSTALLED 2026-09-08 and verified by `dbt --version`:** `dbt-core 1.12.4`,
+`dbt-duckdb 1.11.0`, both pinned exactly in `pyproject.toml` main dependencies. 40
+packages were added. **The four packages that evaluate the arithmetic are unchanged**
+(`duckdb 1.5.5`, `pyarrow 25.0.1`, `pandas 3.0.5`, `openpyxl 3.1.5`), so the recorded
+runtime identity did not move. One existing package was **downgraded**: `protobuf`
+7.36.1 → 6.33.6, required by `dbt-common`. It takes no part in the scenario arithmetic
+and is not in `RUNTIME_PACKAGES`; it is recorded here because a downgrade should never be
+discovered later from a lockfile.
+
+**`identity.RUNTIME_PACKAGES` was NOT extended in step 0** — a deliberate departure from
+this document's first draft. Adding dbt there would assert that dbt evaluated the stored
+figures, and in steps 0–2 dbt produces no stored figure at all. Recording it now would be
+the over-inclusion that `identity.py` already warns about: an invalidation signal that
+fires for things that cannot change a result stops being believed. dbt joins
+`RUNTIME_PACKAGES` and `calculation_files()` in **step 5**, when it first writes a fact.
 
 *Rejected:* a separate repository or a `dbt/` package that vendors its own copy of the
 warehouse path. The models must read the warehouse that ingestion writes; one path, one
@@ -224,6 +237,29 @@ follows:
 
 Readers already scope every query by the published `run_id`
 (`analytics._fact_scope`), so this changes nothing for them.
+
+**Atomic publication is not the same problem as reader availability, and a staging
+schema does not solve the second.** DuckDB locks the **file**, not the schema. Measured
+on duckdb 1.5.5, two processes, this machine:
+
+| While one process holds the file | another process opening read-write | another opening read-only |
+|---|---|---|
+| read-write | **refused** (`IOException: Could not set lock`) | **refused** |
+| read-only | **refused** | opened |
+
+So a dbt build that holds the warehouse read-write makes the dashboard unable to open it
+**at all** — not stale, unopenable — and a dashboard holding it read-only blocks the
+build. Building into `scenario_build` inside the same file changes nothing about this,
+because the lock is taken on the file the schema lives in. D5's transaction therefore
+buys atomicity (a reader never sees half a scenario) and buys **nothing** about
+availability. The publisher in step 5 must additionally decide one of: a short declared
+write window with readers retrying; readers pointed at a published copy rather than the
+live warehouse; or the build running in a separate file and only the publish touching the
+warehouse. **Not decided here, and not implemented in this slice** — recorded as I-14.
+
+**What must remain true whatever is chosen:** a failed build leaves the last successful
+published result **and its identity** intact — the `scenario_run` row, its fingerprint and
+its digests included, not merely the fact rows.
 
 **Rollback.** There is no in-place undo today and the port does not add one: when a run
 supersedes another, the previous rows are gone (as they are now). The recovery path is
