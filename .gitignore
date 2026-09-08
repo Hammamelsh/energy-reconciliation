@@ -6,6 +6,7 @@ __pycache__/
 data/raw/
 data/processed/
 data/sample/
+data/warehouse/
 # The demo fixture itself is tracked; profiler output over it is not.
 data/demo/*-profile.json
 *.duckdb

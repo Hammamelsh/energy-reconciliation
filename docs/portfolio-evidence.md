@@ -86,6 +86,10 @@ Each item names what was measured and how, so it can be defended under questioni
 | 2.28 | Percentiles use nearest rank, so every reported figure is an **observed value**, not an interpolation | profile §15.3 | **VERIFIED** |
 | 2.29 | Percentiles and the zero count agree by independent routes: 45,538 zeros = 4.554%, p1 (rank 10,000) `0`, p5 (rank 49,999) `0.005` | profile §15.3 | **VERIFIED** |
 | 2.30 | The **source** contains binary-float artefacts (`6.5279999` for `6.528`); our arithmetic is Decimal throughout | profile §15.3 | **VERIFIED observation**, cause UNKNOWN |
+| 2.31 | Ingestion into DuckDB with a decided rerun policy: unchanged source **and** pipeline skips, either changing rebuilds; publication atomic per member; superseded loads kept in the registry | ING-001, `tests/test_ingest.py` (10 tests) | **VERIFIED** |
+| 2.32 | Explorer computes every tab for one household and one date range; three kinds of repetition kept apart (exact duplicate, equivalent representation, conflict); conflict days publish no total and the rendered chart spec draws no bar for them | ING-001, `tests/test_explorer_policy.py` | **VERIFIED** (spec asserted, layout not visually inspected) |
+| 2.33 | Off-grid observations excluded from half-hour totals, counted and plotted with provenance; `Null` beside a number withholds the total as an analytical policy | ING-001 closing policies | **VERIFIED**, policy labelled as ours |
+| 2.34 | Tariff workbook read-only: one sheet, 17,520 unique on-grid half-hour labels for 2013, three band labels, no prices, no formulas, no DST representation; schedule-side join uniqueness measured (factor 1.0000) | `docs/anl-001-tariff-workbook-findings.md` | **VERIFIED**; time alignment remains an **assumption** |
 
 ---
 
@@ -291,7 +295,17 @@ explicit `git_identity_sufficient` flag. Tests assert the digest changes when a 
 **Lesson:** "we record the git commit" sounds like reproducibility and isn't, the moment the tree is
 dirty — which for a working session is most of the time.
 
-### 4.11 "The report that disagreed with its own JSON"
+### 4.11 "The withheld total that had a bar"
+
+The demo conflict day read "total withheld" beside a 3.5 kWh bar. Tracing the SQL showed the
+daily sum included **both** disputed values at 03:30. The fix was not to hide the bar but to
+make the day carry no number at all, and to assert on the chart specification the UI renders
+that a withheld day appears only in a baseline marker layer that encodes no quantity.
+
+**Lesson:** "withheld" is a property of the number, not of the label next to it. Test the
+artefact the user sees.
+
+### 4.12 "The report that disagreed with its own JSON"
 
 A test compared the in-memory report with its serialised form and failed: the malformed-field-count
 distribution used **integer** dict keys, which JSON silently converts to **strings**. A caller

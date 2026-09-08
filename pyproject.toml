@@ -6,6 +6,7 @@ dependencies = [
     "duckdb>=1.5.5",
     "pandas>=3.0.5",
     "pyarrow>=25.0.1",
+    "streamlit>=1.40",
 ]
 
 [dependency-groups]
@@ -23,6 +24,7 @@ packages = ["src/energy_reconciliation"]
 
 [project.scripts]
 profile-member = "energy_reconciliation.profiling.cli:main"
+ingest-member = "energy_reconciliation.ingest.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

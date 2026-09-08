@@ -2,9 +2,15 @@
 
 Tools and analysis for half-hourly electricity meter data from the Low Carbon London trial.
 
-What exists today is a **profiler**: it reads one CSV member from the dataset archive, classifies
-every value, counts everything, and writes a JSON report whose totals reconcile. It is the
-groundwork for billing and reconciliation work, not a billing system.
+What exists today:
+
+- a **profiler** that reads one CSV member, classifies every value and writes a JSON report whose
+  totals reconcile;
+- an **ingestion command** that loads members into a local DuckDB database with a stable schema;
+- a **household explorer** for looking at one household's data quality.
+
+This is the groundwork for billing and reconciliation work. It is not a billing system and produces
+no bills.
 
 ## Try it without downloading anything
 
@@ -45,6 +51,63 @@ Read the report it writes at `data/demo/demo-profile.json`.
 
 **Exit status:** `0` when the run completes and the counts reconcile, `1` if the report was written
 but is incomplete or a core reconciliation failed, `2` if the archive is missing.
+
+## Explore household energy use
+
+Load the synthetic demo into a local DuckDB database and browse it:
+
+```bash
+uv run ingest-member --demo --database data/warehouse/demo.duckdb
+uv run streamlit run src/energy_reconciliation/explorer/app.py
+```
+
+Choose the dataset under **Data source** in the sidebar — each option is labelled by what
+it contains (synthetic demo, or which Low Carbon London members are loaded). Household and
+period sit at the top of the page. Period presets of 7, 14 and 30 days are anchored to the
+**last date recorded for that household**, not to today; the trial ended in 2014, so a window
+around the current date would be empty. *Custom* exposes explicit start and end dates.
+
+Everything on the page is computed for the same household and the same source-date range:
+
+- **Overview** — recorded kWh, contributing readings, and issues requiring review (missing
+  values + gaps + conflicting timestamps in the period); a status that says what was and
+  was not detected, with the standing caveat that boundary coverage and clock semantics are
+  unresolved; daily bars grouped by source date, with a day inside the recorded span but
+  with no rows shown as "no readings recorded" rather than omitted; half-hour detail for a
+  chosen day, with the line broken at gaps.
+- **Data quality** — the counters for the period, findings first (conflicts, gaps, repeated
+  timestamps, missing values) with source references, definitions collapsed below, and the
+  whole-history figures in a separately labelled expander.
+- **Source records** — rows exactly as loaded, paginated, each with its member and record
+  number, followed by the loaded-file inventory.
+
+Identical source rows are collapsed and the number collapsed is always shown. One value
+written two ways at the same timestamp (`0.5` and `0.50`) is kept as evidence and counted
+once. Different values at the same timestamp — including a `Null` beside a number, by our
+analytical policy — are a conflict: that day and the period have their totals withheld — shown as a labelled marker, never a bar — while the readings
+that exist stay visible. Gaps are steps over half an hour between consecutive grid
+timestamps, counted across midnight and attributed to the later date. Off-grid observations are
+excluded from half-hour totals but stay counted, listed and plotted with their source reference.
+
+With the real dataset, load two adjacent members:
+
+```bash
+uv run ingest-member \
+  --member "Small LCL Data/LCL-June2015v2_4.csv" \
+  --member "Small LCL Data/LCL-June2015v2_5.csv"
+uv run streamlit run src/energy_reconciliation/explorer/app.py
+```
+
+Those two members share household `MAC000166`, whose readings run to `2012-02-14 15:00`
+in member 4 and continue from `15:30` in member 5 — a good household to select first.
+
+Re-running an ingest is a no-op only when **both** the source file and the
+transformation code are unchanged. Changing either replaces that member's rows, so a
+code change rebuilds rather than silently keeping rows built by older logic. Superseded
+loads stay in the registry as history, though their readings are replaced.
+
+Two members out of 168 are not a household's complete history, and the explorer says so
+on every page.
 
 ## Tests
 
@@ -144,9 +207,14 @@ applied — and changed — without reprocessing.
 
 ## Limitations
 
-- No billing or settlement calculation. No ingestion layer, dbt models, Airflow DAGs, Spark jobs or
-  cloud deployment. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
-- One member of 168 has been profiled in full. Findings are not archive-wide.
+- No billing or settlement calculation, no forecasting, no AI features. No dbt models, Airflow DAGs,
+  Spark jobs or cloud deployment. See [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
+- One member of 168 has been profiled in full, and two loaded into the database. Findings are not
+  archive-wide, and two members are not any household's complete history.
+- Ingestion holds a whole member in one transaction so that a failure cannot publish partial data.
+  That costs about 1 GB of memory per million-row member.
+- The explorer withholds a consumption total for any household whose readings conflict, rather than
+  choosing between them.
 - The timezone convention and the interval start/end question are unresolved, which is enough to
   block any defensible billing period.
 - Causes are not interpreted. Why a zero, a `Null`, a gap or a duplicate occurs is recorded as

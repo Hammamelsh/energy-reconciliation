@@ -7,7 +7,11 @@ with what it delivers and the condition under which it is complete.
 Completing a milestone means an artefact exists and its completion condition is satisfied — nothing
 more. No milestone carries a date; completion conditions are the only measure used here.
 
-**Status:** M1 is in progress. See [`../README.md`](../README.md) for what runs today, and
+**Status:** M1 is in progress. Ingestion into DuckDB and a household explorer now exist; billing, orchestration and cloud deployment remain planned. A first slice of **M2** is built — see
+[`tickets/ING-001-standardised-ingestion-and-explorer.md`](tickets/ING-001-standardised-ingestion-and-explorer.md):
+standardised ingestion into DuckDB with a decided rerun policy, plus a household data-quality
+explorer. M2's remaining items (Parquet output, rejected-record reasons across the whole archive,
+cross-file processing beyond two members) are not done. See [`../README.md`](../README.md) for what runs today, and
 [`source-data-profile.md`](source-data-profile.md) section 16 for the REP-001 assessment.
 
 ---

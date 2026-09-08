@@ -1,0 +1,15 @@
+# Explorer theme: restrained navy with a teal accent. Amber and red are reserved in
+# the app for review and blocking states and are never the theme accent.
+[theme]
+base = "dark"
+primaryColor = "#2bb3a3"
+backgroundColor = "#0e1726"
+secondaryBackgroundColor = "#182640"
+textColor = "#e6edf3"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+headless = true
