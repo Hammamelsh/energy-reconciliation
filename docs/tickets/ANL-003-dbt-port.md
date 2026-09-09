@@ -299,6 +299,28 @@ UV_PROJECT_ENVIRONMENT=/tmp/alt312 DEMO_ROOT=data/proof-scratch/alt312 \
 Check the installed patch version first: if it is not 3.12.14 the comparison is **confounded
 by the patch level as well** and must be reported that way.
 
+### An independent-interpreter data point, obtained from hosted CI (2026-09-09)
+
+The comparison arm reported above as unavailable locally turned up for free. GitHub Actions
+run [34405294825](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34405294825)
+resolved `/usr/bin/python3.12` — **CPython 3.12.3, GCC 13.3.0, prefix `/usr`**, the Ubuntu
+distro build, *not* the uv python-build-standalone Clang build used here. It installed the
+**same locked cp312 wheels** (`duckdb 1.5.5`, `pyarrow 25.0.1`, `pandas 3.0.5`,
+`dbt-extractor 0.6.0`, `protobuf 6.33.6`, `msgpack 1.2.2`, `MarkupSafe 3.0.3`) and ran the
+full suite plus the synthetic quickstart — many real dbt builds — with **no crash**.
+
+**What this is worth, stated narrowly.** One run, no crash, against a WSL rate of roughly 3 in
+300. A single clean run at that rate is unsurprising and is **not** evidence that the distro
+build is unaffected. Four things differ at once — interpreter build (Clang 22.1.3 vs GCC
+13.3.0), patch level (3.12.14 vs 3.12.3), kernel (WSL2 6.6 vs Azure 6.17) and hardware — so
+even a crash here would not have isolated a cause. It is recorded as a data point and a
+baseline for counting, not as a comparison result.
+
+**What it does make cheap.** Every future push now exercises a GCC-built 3.12.3 with identical
+wheels. If the fault is specific to the uv/Clang build, hosted runs should stay clean while
+local ones crash; if it appears on a runner, that is the first evidence pointing away from the
+interpreter build. Either way the counting is free from here on.
+
 ### Precise next step
 
 The validated harness is ready but the fault is not reproducing on demand. The

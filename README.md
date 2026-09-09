@@ -545,10 +545,16 @@ dependencies: `ruff check`, `ruff format --check`, the policy-macro drift check,
 suite (which builds real dbt projects against synthetic warehouses and exercises the publication,
 sealing and replay boundaries), and the synthetic quickstart above.
 
+**Verified on GitHub Actions**, not merely written: run
+[34405294825](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34405294825) for
+commit `e7a2eaf` passed every step — 561 tests passed, 2 skipped, and the quickstart's 12 assertions
+matched with the replay comparing 38 fields and 0 differing.
+
 **What it cannot cover.** The real dataset and the publisher's workbook are not redistributed, so
-real-data equivalence is a **local** gate, not a CI one; the single test that needs them skips
-itself and the run prints every skip by name. The workflow has no retries: the unresolved dbt
-segfault will fail a run rather than be hidden.
+real-data equivalence is a **local** gate, not a CI one. Two tests skip there and say why: the
+real-warehouse forecast check, and one explorer check needing a loaded demo warehouse. The run
+prints every skip by name. The workflow has no retries: the unresolved dbt segfault will fail a run
+rather than be hidden.
 
 ## Documentation
 
