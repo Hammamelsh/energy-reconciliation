@@ -223,14 +223,22 @@ Jinja node compilation and one in the static parse; that is where they *surfaced
 
 ### Parser, interpreter and dependency inventory (established 2026-09-09)
 
-**Parser settings — identical now and at crash time, and none of them exotic.** Resolved
-through `dbt.cli.flags.Flags` for this project: `USE_V2_PARSER False`, `STATIC_PARSER True`,
-`PARTIAL_PARSE True`, `USE_EXPERIMENTAL_PARSER False`. The crash-era log dumps show the same
-three values across all 83 recorded invocations. `use_v2_parser` is a real parameter in
-dbt 1.12.4 but was **not** logged then, so its crash-era value is strictly **unknown**; it
-defaults to False, no `DBT_*` environment variable is set, and `dbt_project.yml`'s `flags:`
-block contains only `send_anonymous_usage_stats: false`. Nothing here distinguishes the
-crashing runs from the 300 that did not crash.
+**Parser settings — three recorded as constant, one unknown at crash time.** Resolved
+*today* through `dbt.cli.flags.Flags` for this project: `USE_V2_PARSER False`,
+`STATIC_PARSER True`, `PARTIAL_PARSE True`, `USE_EXPERIMENTAL_PARSER False`. The crash-era
+log dumps carry the same values for **three** of those — `static_parser`, `partial_parse`,
+`use_experimental_parser` — across all 83 recorded invocations. `use_v2_parser` is a real
+parameter in dbt 1.12.4 but was **not logged then**, so its crash-era value is **unknown**
+and is not claimed to have matched. What can be said: it defaults to False, no `DBT_*`
+environment variable is set now, and `dbt_project.yml`'s `flags:` block contains only
+`send_anonymous_usage_stats: false`.
+
+**Two things this does not establish.** First, a setting being constant across crashing and
+non-crashing runs does not exonerate the parser: a defect in a code path that always runs
+would be equally constant, and the crashes would then be timing- or data-dependent within
+it. Constancy removes it as a *distinguishing* variable, nothing more. Second, because the
+crash-era `use_v2_parser` is unrecoverable, "every setting was identical" is **not** a claim
+this record makes.
 
 **Interpreter provenance — the crash binary and the current one are the same file.**
 `…/uv/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12`, sha256
@@ -246,7 +254,7 @@ about memory safety. Native extensions, with wheel origin: `dbt-extractor 0.6.0`
 `rpds-py 2026.6.3`, `PyYAML 6.0.3`, `charset-normalizer 3.5.1`, `duckdb 1.5.5`,
 `pyarrow 25.0.1`, `pandas 3.0.5` — the rest cp312-cp312 manylinux.
 
-### Lead tested and weakened: CPython #149692
+### Lead tested, not reproduced: CPython #149692
 
 [cpython#149692](https://github.com/python/cpython/issues/149692) reports heap corruption in
 stdlib `re`/`_sre` on **3.12.x, Linux x86_64**, surfacing as SIGSEGV and GC-time crashes —
@@ -256,11 +264,16 @@ crashes landed) are regex-heavy.
 **Tested on this interpreter and not reproduced.** Its own published reproducer (pattern
 `\w+(?:[-']\w+)*`, 50,000 chunks of ~1,500 chars, `--listcomp`), run with
 `PYTHONFAULTHANDLER=1` for 40 rounds: **completed cleanly in 75 s**, passing straight through
-the rounds 20–25 window where the reporter sees failures on 3.12.13. The issue names 3.12.13
-and 3.12.3; this is 3.12.14, which may carry a fix, and one 40-round run does not prove the
-defect absent. But the specific published lead does not reproduce here, so it is **weakened,
-not confirmed**. A comparison arm on another interpreter was not run: it only discriminates
-if this arm crashes.
+the rounds 20–25 window where the reporter sees failures on 3.12.13.
+
+**This is non-reproduction evidence, and that is all it is.** The issue names 3.12.13 and
+3.12.3 and this interpreter is 3.12.14, but **no fix has been identified** — no CPython
+commit, changelog entry or issue resolution was found that would explain a difference, and
+the issue itself is closed as not planned. So "3.12.14 may contain a fix" is *not* claimed
+here. One 40-round run also cannot prove a defect absent, and the reporter's own crashes are
+intermittent. What is established is narrow: **this interpreter did not fail the specific
+published reproducer in 40 rounds.** The lead is neither confirmed nor eliminated. A
+comparison arm on another interpreter was not run: it only discriminates if this arm crashes.
 
 ### No suitable comparison interpreter is available, and none was installed
 
