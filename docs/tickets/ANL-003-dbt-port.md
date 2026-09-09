@@ -121,157 +121,125 @@ what catches it is content — the output digest at sealing, the seal's whole-fi
 after it. A record whose shape predates the lifecycle, or a seal that predates the current
 fields, is **refused with a rebuild message**; nothing upgrades an older claim.
 
-## OPEN RELEASE BLOCKER — `dbt build` segfaults intermittently (investigated 2026-09-09, unresolved)
+## OPEN RELEASE BLOCKER — `dbt build` segfaults intermittently (third investigation 2026-09-09, unresolved)
 
-**Status: unresolved, not mitigated.** Nothing was changed for it: no code, no dependency,
-no execution setting, no lockfile edit, no retry. The lifecycle handles every observed
-crash correctly, so nothing unsafe can reach a publication — but an **unattended** build
-cannot yet be relied on.
+**Status: unresolved, not mitigated, blocker open.** GDB is now installed and a validated
+debugger harness exists, but **no crash has occurred under it**. Nothing was changed for
+the fault: no code, no dependency, no execution setting, no lockfile edit, no retry.
 
-### Accounting (reconciled against unique invocation ids)
+### Corrections to earlier wording in this record
 
-Parsed from dbt's own rotated logs, concatenated **in chronological order** and split on
-the per-invocation banner (`===== <time> | <uuid> =====`):
-
-| Category | Count |
+| Earlier statement | Correction |
 |---|---|
-| Invocations (unique uuids) | **303** |
-| Completed — `succeeded at` | 276 |
-| Completed — `failed at` (deliberate test failures) | 24 |
-| **No completion line — crashed** | **3** |
+| "no completion line ⇒ SIGSEGV" | Each of the three is now corroborated individually (table below). A future incomplete invocation without corroboration is **incomplete/unknown**, not a crash. |
+| "faulting inside the eval loop ⇒ the GIL was held, so not extension misuse" | The resolution only says **where the fault surfaced**. An extension can corrupt memory earlier, with or without the GIL, and the damage surfaces later in the interpreter loop. It excludes nothing. |
+| "empty faulthandler output is explained by shared stderr" | That is a hypothesis. It is consistent with the transcript but not demonstrated. The GDB harness writes faulthandler to a private file so the question does not arise again. |
+| "forty attempts had a one-in-three chance" | Withdrawn. That assumes a stable, independent per-attempt probability; the three observations are **clustered in 23 minutes** with 206 clean harness attempts since, which is not that. |
+| "a native backtrace is the only next diagnostic" | Withdrawn as an absolute. Two other diagnostics were run this session (semaphore origin; fork probe) and resolved a question a backtrace would not have. |
+| "294 invocations = 261 + 32 + 2" | Superseded by the uuid-based count below. |
 
-276 + 24 + 3 = 303 exactly. An earlier note gave "294 invocations, 261 + 32 + 2 = 295":
-those figures came from `grep -c` over a **glob-order** concatenation, which splits an
-invocation across a rotation boundary and double-counts categories. They are superseded.
+### Accounting, corroborated per crash
 
-By origin, keeping test and ordinary use apart — **do not read an unattended failure rate
-off the mixed total**:
+Chronological parse of dbt's rotated logs, split on the `===== <time> | <uuid> =====` banner:
+**303 invocations = 276 `succeeded at` + 24 `failed at` (deliberate test failures) + 3
+without a completion line.** Exact. By origin: pytest 229 (1 crash), harness 67 (1),
+ordinary use 7 (1). Seven ordinary-use invocations is far too few to quote a rate from.
 
-| Origin | Invocations | Crashes |
+| Crash (local time) | Origin | Corroboration | Phase reached |
+|---|---|---|---|
+| 11:14:40 | pytest | kernel: `dbt[218376]: segfault at 8 ip 0x1816c2b … error 4` | *Began compiling node* test 53/54 |
+| 11:17:14 | build-candidate | kernel: `dbt[240559]: segfault at 100000007 ip 0x1815bfb … error 4` **and** retained attempt record `('failed', -11, 'incomplete')` | *Began compiling node* test 7/54 |
+| 11:37:11 | harness (att-7) | harness rc 245 **and** attempt record `('failed', -11, 'incomplete')`; **no kernel entry**, which is expected: it ran with `PYTHONFAULTHANDLER=1`, and the kernel logs a page-fault SIGSEGV only when the handler is `SIG_DFL` | *Starting full parse*, before any node |
+
+### Where the two recorded faults surfaced
+
+Interpreter: `…/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12`, sha256 `f7c6210eb40fadcd…`,
+Build ID `1b4adbcfef173a5a342e67de1b23f751d763439a`, `Type: EXEC` (not PIE, so the kernel's
+`ip` values are absolute). `addr2line -f` resolves **both** `0x1816c2b` and `0x1815bfb` to
+`_PyEval_EvalFrameDefault` (symbol at `0x1811500`, size 65,765; offsets +22,315 and
++18,171). Faulted addresses `0x8` (offset of `ob_type` from a NULL `PyObject*`) and
+`0x100000007` (`0xFFFFFFFF + 8`). **Established:** the fault surfaced in the bytecode loop
+dereferencing a NULL or garbage object pointer. **Not established:** what wrote it.
+
+### Debugger harness — `tools/dbt-segv-gdb.sh` — and its validation
+
+Runs the actual child under `gdb -batch`: `.venv/bin/python3 -c <wrapper>` calling
+`dbt.cli.main:cli` with the same argv, cwd and env as `run-dbt`; stops at `SIGSEGV`/`SIGBUS`/
+`SIGABRT` before the process's own handler; dumps `info program`, inferior identity,
+registers, `x/12i $pc-24`, `bt full 20`, `thread apply all bt 30`, `info sharedlibrary`;
+then `continue`s once so faulthandler writes Python frames to its private file; kills the
+inferior on the second stop. ASLR is re-enabled (`set disable-randomization off`) to match
+ordinary runs. No `python-gdb.py` helpers ship with this interpreter, so `py-bt` is
+unavailable; Python frames come from faulthandler's file.
+
+**Classification is from GDB's transcript, never its exit code** — the self-test shows why:
+
+| Tiny process | gdb's own rc | classified |
 |---|---|---|
-| pytest | 229 | 1 |
-| harness (`tools/dbt-segv-repro.sh`) | 67 | 1 |
-| ordinary use (build-candidate / replay) | 7 | 1 |
+| `sys.exit(0)` | **1** | completed |
+| `sys.exit(3)` | 1 | failed:3 |
+| `os.kill(getpid(), SIGSEGV)` | **0** | signalled:SIGSEGV |
+| `ctypes.string_at(0)` (real null deref) | 0 | signalled:SIGSEGV |
 
-The one ordinary-use crash in 7 invocations is far too small a sample to give a rate. The
-honest statement is: **3 crashes have been seen, in 303 retained invocations, all within a
-23-minute window (11:14:40, 11:17:14, 11:37:11).** Retained logs cover a moving window;
-invocations older than the rotation are gone.
+GDB's rc is the *opposite* of the child's result. A missing or ambiguous transcript is
+`unknown`. The harness records nothing in any `dbt_build_run` table and sits outside the
+`run-dbt` / `build-candidate` attestation path.
 
-### The strongest evidence
+**Stated fidelity differences from `uv run run-dbt`:** the harness calls the venv
+interpreter directly; `uv run` would additionally prepend `.venv/bin` to `PATH` and set
+`VIRTUAL_ENV`, `UV`, `UV_RUN_RECURSION_DEPTH` (same interpreter). GDB intercepts signals
+and alters timing. `PYTHONMALLOC=debug` was **not** enabled in the baseline arms.
 
-**The faulting instruction is in CPython's bytecode interpreter.** The kernel recorded
-`ip 0000000001816c2b` and `ip 0000000001815bfb` in `python3.12[1600000+8ce000]`. The
-interpreter binary is `Type: EXEC`, **not** PIE, so those are absolute addresses and
-resolve directly:
+### Experiments this session (all on the demo warehouse, fresh target per attempt)
 
-```
-$ addr2line -f -C -e .../cpython-3.12.14-linux-x86_64-gnu/bin/python3.12 0x1816c2b 0x1815bfb
-_PyEval_EvalFrameDefault
-_PyEval_EvalFrameDefault
-```
+| Arm | Attempts | completed | failed | signalled | timeout | unknown |
+|---|---|---|---|---|---|---|
+| GDB, baseline settings, sequential | 20 | 20 | 0 | 0 | 0 | 0 |
+| GDB, **two loops concurrently** (one factor changed) | 20 + 20 | 40 | 0 | 0 | 0 | 0 |
 
-Both land inside the one symbol at `0x1811500` (size 65,765), at +22,315 and +18,171. The
-faulted addresses were `0x8` and `0x100000007`, `error 4` (read of an unmapped page) —
-the shape of dereferencing a corrupted or already-freed object pointer.
+Cumulative harness attempts since the cluster: 59 plain + 40 traced + 60 GDB = **159, no
+crash**; 206 including the run that produced att-7. **This is not evidence of a fix**, and
+because the observations are clustered no per-attempt probability is claimed.
 
-**This corrects an earlier claim.** A previous note inferred "a native thread with no
-Python frames → a C extension touching the interpreter without the GIL". That inference
-was wrong. `_PyEval_EvalFrameDefault` *is* the main interpreter loop: Python bytecode was
-executing and the GIL was held. The empty faulthandler output is better explained by a
-corrupted frame chain (nothing walkable) or by output interleaving — stderr carried dbt's
-own logging and the `resource_tracker` warning at the same time. `tools/dbt-segv-trace.sh`
-now writes faulthandler to a private file for exactly this reason.
+### Two questions resolved this session
 
-**What it does not establish.** It does not identify which code corrupted memory, and a
-fault inside the eval loop says where the damage *surfaced*, not where it originated. Free
-memory at one observation (12.6 GB) does not exclude resource-related causes generally.
-The `resource_tracker: 2 leaked semaphore objects` warning appears only on crashed runs and
-is a consequence of the abrupt death, not evidence of a cause.
+- **The "2 leaked semaphore objects" warning is fully explained and is not a lead.** A
+  probe patching `multiprocessing.synchronize.SemLock.__init__` and `os.fork` shows both
+  locks are created in the **main thread by dbt itself on every run**: a
+  `multiprocessing.RLock` at `dbt/adapters/base/connections.py:78` (via
+  `dbt/adapters/duckdb/connections.py:33`) and a `multiprocessing.Lock` at
+  `dbt/parser/manifest.py:286`. **`os.fork()` is never called.** They leak only because a
+  signal death skips cleanup.
+- **protobuf#22067 is not a match:** Python 3.13 only ("not reproducible on 3.12"), at
+  exit-time GC, in `PyUpb_ModuleState_MaybeGet`. Ours is 3.12.14, mid-run, in the eval loop.
 
-**Native extensions in the process**, all loaded by importing `dbt.cli.main` alone, before
-DuckDB or PyArrow: `dbt_extractor` (Rust static SQL parser), `google/_upb/_message`
-(protobuf C++, used by dbt's structured logging on every event — pinned to 6.33.6, having
-been downgraded from 7.36.1 by `dbt-common`), `msgpack/_cmsgpack`, `markupsafe/_speedups`
-(Jinja), `pydantic_core`, `rpds`, `_yaml`, `charset_normalizer` ×2. Two of the three
-crashes occurred at *Began compiling node* (Jinja rendering) and one during full parse
-(static parser). **These are candidates, not findings.**
+### Extension inventory (candidates only — none implicated by evidence)
 
-### Phase, from the logs
+Loaded by `import dbt.cli.main` alone: `dbt-extractor 0.6.0` (abi3), `protobuf 6.33.6`
+(abi3, `_upb`), `msgpack 1.2.2`, `MarkupSafe 3.0.3`, `pydantic-core 2.46.5`,
+`rpds-py 2026.6.3`, `PyYAML 6.0.3`, `charset-normalizer 3.5.1`; later `duckdb 1.5.5`,
+`pyarrow 25.0.1`. All are cp312 or abi3 wheels for this interpreter. Two crashes were in
+Jinja node compilation and one in the static parse; that is where they *surfaced*.
 
-| When | Phase reached |
-|---|---|
-| 11:14:40 (pytest) | `Began compiling node test…not_null_fact_interval_charge_scenario_source_timestamp_text` (53 of 54) |
-| 11:17:14 (build-candidate) | `Began compiling node test…not_null_dim_tariff_band_schedule_schedule_source` (7 of 54) |
-| 11:37:11 (harness) | `Unable to do partial parsing… Starting full parse` — before any node ran |
+### Precise next step
 
-Not confined to one phase, and not confined to one warehouse size (3 M-row real warehouse
-and the 12-row demo).
-
-### Safeguards, verified against a real crash
-
-On the preserved `data/proof-scratch/segv-repro/att-7.duckdb`: attempt recorded `failed`,
-`dbt_exit_code = -11`, `required_build = incomplete`, no output digest, file **not sealed**,
-and `reads.candidate()` refuses it. `subprocess.run` reports a signal death as a negative
-returncode, which `finish_attempt` stores verbatim, so the record is unambiguous. A crashed
-build cannot become promotable: the risk is a failed build, not a wrong figure.
-
-### Reproduction attempts
-
-| Arm | Attempts | Crashes |
-|---|---|---|
-| `dbt-segv-repro.sh`, backgrounded | 7 | 1 |
-| `dbt-segv-repro.sh`, foreground | 59 | 0 |
-| `dbt-segv-trace.sh` (faulthandler → private file) | 20 | 0 |
-| `dbt-segv-trace.sh` + `PYTHONMALLOC=debug` | 20 | 0 |
-
-106 harness attempts, 1 crash. At that rate 40 traced attempts had roughly a one-in-three
-chance of catching one, so **zero crashes under tracing is not evidence that tracing
-prevents it** and certainly not a fix.
-
-### Blocked on: a native backtrace
-
-No `gdb`, `lldb`, `py-spy`, `gcc` or `clang` is installed (so an `LD_PRELOAD` handler
-cannot be compiled either), and `sudo` requires interactive authentication. `objdump` and
-`addr2line` are present, which is what made the symbol resolution above possible, but they
-cannot produce a live stack.
-
-**The one action needing administrator access**, with its reason: install a debugger so the
-faulting frame can be attributed to a library rather than guessed.
+The validated harness is ready but the fault is not reproducing on demand. The
+evidence-driven next action is to **capture the next natural occurrence** rather than
+run further unchanged loops: run every real candidate build under
+`tools/dbt-segv-gdb.sh`-style tracing until one crashes, then read `bt full` for the
+frame that owns the NULL/garbage object. Concretely, when the next `build-candidate` is
+needed, run instead:
 
 ```bash
-sudo apt-get install -y gdb          # ~30 MB; needed for a native backtrace
+LABEL=real ATTEMPTS=1 SOURCE=data/warehouse/energy.duckdb bash tools/dbt-segv-gdb.sh
 ```
 
-With that available, the prepared next command is:
+(the harness accepts `SOURCE`; it still seals nothing and records no attempt). If a crash
+is captured, the first discriminating experiment is decided by the frame **above**
+`_PyEval_EvalFrameDefault` in the native backtrace — not before.
 
-```bash
-DIR=data/proof-scratch/segv-gdb ATTEMPTS=200   GDB=1 bash tools/dbt-segv-trace.sh          # wrap each attempt in:
-# gdb -q -batch -ex run -ex "thread apply all bt" -ex "info sharedlibrary" #     --args .venv/bin/python3 -c '<same wrapper>' build --target-path … --project-dir dbt …
-```
-Run under a debugger the child's exit status is the **debugger's**, so the harness must
-read the inferior's signal from gdb's own report (`Program received signal SIGSEGV`) and
-must not treat a clean debugger exit as a successful build.
-
-### Remaining hypotheses, in the order worth testing
-
-1. **A native extension corrupting interpreter state.** `markupsafe/_speedups` and
-   `dbt_extractor` are active in the phases where the crashes landed; protobuf `_upb` is
-   active in all of them and was version-shifted by a resolver decision. *Resolve by:* the
-   native backtrace above. Only then is a targeted A/B (for example `--no-static-parser`)
-   worth its cost — at a ~1% rate an A/B needs hundreds of attempts per arm.
-2. **Concurrency or load.** All three crashes fell in one 23-minute window of heavy,
-   overlapping activity; 59 sequential attempts alone produced none. *Resolve by:* matched
-   attempt counts with and without a deliberate concurrent load.
-3. **A DuckDB Python-client lifecycle bug.** Upstream reports exist of SIGSEGV around
-   connection close and reuse ([duckdb#13940](https://github.com/duckdb/duckdb/issues/13940),
-   [duckdb-python#127](https://github.com/duckdb/duckdb-python/issues/127)). Neither is a
-   confirmed match: both describe faults inside DuckDB's own code, whereas these faults are
-   inside the CPython eval loop. *Resolve by:* the native backtrace; only then consider a
-   different DuckDB patch version, tested in an isolated environment **before** `uv.lock`.
-
-**Not done, deliberately:** no automatic retry, no dependency downgrade or threading change
-chosen because a run passed, no lockfile edit, no weakening of the complete-build check.
+**Not done, deliberately:** no retry, no dependency or threading change, no lockfile edit,
+no weakening of the complete-build check.
 
 ## Staging runbook — partly runnable
 
