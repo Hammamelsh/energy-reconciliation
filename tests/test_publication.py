@@ -13,8 +13,11 @@ Two boundaries this file keeps visible:
 - **Tested interruption recovery** (a process dies at a chosen point; the module recovers)
   is not **power-loss durability** (the disk loses what was not flushed). The fsyncs are
   called; nothing here removes power.
-- The guarantees are **filesystem properties**. The fixtures live under the repository on
-  ext4 because ``/tmp`` here is tmpfs, and the first test asserts that.
+- The guarantees are **filesystem properties**. The fixtures live under the repository, on
+  a disk filesystem, and the first test asserts that much. They are *not* put in ``/tmp``
+  because on the development machine that is ``tmpfs``, where proving a durability-adjacent
+  property would prove nothing. ``/tmp``'s type is reported but never asserted: it is ext4
+  on a GitHub runner, and asserting otherwise coupled this suite to one machine.
 """
 
 from __future__ import annotations
@@ -250,10 +253,32 @@ def _wait_for(path: Path, timeout: float = 20) -> None:
 
 
 # ================================================================ scenarios
-def test_fixtures_are_on_ext4_and_tmp_is_tmpfs(root):
-    assert _filesystem(root).startswith("ext")
-    assert _filesystem(Path("/tmp")) == "tmpfs", (
-        "update the module docstring if this changes"
+def test_fixtures_are_on_a_real_disk_filesystem(root):
+    """The guarantee under test is a filesystem property, so the fixtures must be on one.
+
+    Atomic ``rename`` and ``O_EXCL`` are what the publication design relies on, and they
+    are properties of the filesystem the version files live on. This asserts the part that
+    matters everywhere: the fixtures sit on a disk filesystem, not a memory one, so a test
+    that passes here is testing the real thing.
+
+    **Why the fixtures live under the repository rather than in ``/tmp``**: on the
+    development machine ``/tmp`` is ``tmpfs``, and proving a durability-adjacent property
+    on a memory filesystem would prove nothing. That is a fact about *that* machine, not a
+    requirement -- on a GitHub runner ``/tmp`` is ext4 and the motivation simply does not
+    apply. So ``/tmp``'s type is reported for the record and never asserted; asserting it
+    coupled the suite to one machine and failed the first hosted CI run.
+    """
+    found = _filesystem(root)
+    assert not found.startswith("tmpfs"), (
+        f"fixtures are on {found}, a memory filesystem; the rename and O_EXCL guarantees "
+        "this module tests would not be exercised"
+    )
+    assert found.startswith("ext"), (
+        f"fixtures are on {found}; this suite has only been exercised on ext filesystems, "
+        "so a different one needs its own verification before the results are trusted"
+    )
+    print(
+        f"fixtures on {found}; /tmp is {_filesystem(Path('/tmp'))} (recorded, not asserted)"
     )
 
 
