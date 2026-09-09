@@ -123,65 +123,155 @@ fields, is **refused with a rebuild message**; nothing upgrades an older claim.
 
 ## OPEN RELEASE BLOCKER — `dbt build` segfaults intermittently (investigated 2026-09-09, unresolved)
 
-**Status: unresolved, not mitigated.** No code, dependency or execution setting was changed
-for it. The lifecycle handles every observed crash correctly, so nothing unsafe reaches a
-publication — but an **unattended** build cannot yet be relied on.
+**Status: unresolved, not mitigated.** Nothing was changed for it: no code, no dependency,
+no execution setting, no lockfile edit, no retry. The lifecycle handles every observed
+crash correctly, so nothing unsafe can reach a publication — but an **unattended** build
+cannot yet be relied on.
 
-**Rate, with its denominator.** 2 crashes in **294** recorded dbt invocations in ordinary
-use (`grep -c "Running with dbt" dbt/logs/dbt.log*`; 261 succeeded, 32 ended in failures
-the tests intended). Under `tools/dbt-segv-repro.sh`: 1 crash in **66** attempts (one at
-attempt 7 of a backgrounded run, then 0 in 59 attempts run alone). An earlier "one in
-fifteen" figure was wrong — it used the builds in a single test file as the denominator.
+### Accounting (reconciled against unique invocation ids)
 
-**What the evidence says.**
+Parsed from dbt's own rotated logs, concatenated **in chronological order** and split on
+the per-invocation banner (`===== <time> | <uuid> =====`):
 
-| Observation | Evidence |
+| Category | Count |
 |---|---|
-| Killed by `SIGSEGV`, always the `dbt` child | `dbt_exit_code = -11`; kernel: `dbt[218376]: segfault at 8 … error 4 in python3.12[1600000+8ce000]` and `dbt[240559]: segfault at 100000007 …` |
-| Faulting instruction is inside **CPython itself**, twice within ~4 KB | ip `0x1816c2b` and `0x1815bfb`, both in the `python3.12` mapping |
-| Faulting addresses are a near-NULL and a wild pointer | `at 8`, `at 100000007`, `error 4` (read of an unmapped page) |
-| The crashing thread has **no Python frames** | `PYTHONFAULTHANDLER=1` prints `Current thread …:` and then no frames at all |
-| **Not** confined to one phase | two crashes during data-test execution (nodes 53/54 and 7/54, each at *Began compiling node* just after a pooled connection was closed); the reproducer's crash during **full parse**, before any node ran |
-| DuckDB runs 32 internal threads per process here | `select current_setting('threads')` → 32 (one per CPU) |
-| The leaked-semaphore warning is a **consequence**, not a cause | `resource_tracker: … 2 leaked semaphore objects` appears only on crashed runs, i.e. after the abrupt death |
+| Invocations (unique uuids) | **303** |
+| Completed — `succeeded at` | 276 |
+| Completed — `failed at` (deliberate test failures) | 24 |
+| **No completion line — crashed** | **3** |
 
-Taken together: a native thread with no Python frames faulting inside CPython on garbage
-pointers is the signature of a C extension touching interpreter state without holding the
-GIL. It is **not** established which extension, and that guess must not be turned into a fix.
+276 + 24 + 3 = 303 exactly. An earlier note gave "294 invocations, 261 + 32 + 2 = 295":
+those figures came from `grep -c` over a **glob-order** concatenation, which splits an
+invocation across a rotation boundary and double-counts categories. They are superseded.
 
-**Safeguards verified to hold on a real crash** (`att-7`): attempt recorded `failed`,
-`dbt_exit_code = -11`, `required_build = incomplete`, no output digest, **not sealed**, and
-`reads.candidate()` refuses the file. A crashed build cannot become promotable.
+By origin, keeping test and ordinary use apart — **do not read an unattended failure rate
+off the mixed total**:
 
-**What was ruled out.** Memory pressure (12.6 GB free at the second crash). A single dbt
-phase. A single warehouse size (crashes on both the 3 M-row real warehouse and the 12-row
-demo).
+| Origin | Invocations | Crashes |
+|---|---|---|
+| pytest | 229 | 1 |
+| harness (`tools/dbt-segv-repro.sh`) | 67 | 1 |
+| ordinary use (build-candidate / replay) | 7 | 1 |
 
-**Why it stopped here.** No `gdb`, `lldb` or `py-spy` is installed and core dumps are
-disabled (`ulimit -c` = 0, `core_pattern` = `core`), so the native backtrace that would
-name the faulting library cannot be obtained on this machine. Everything short of that has
-been collected. Note also that this WSL2 instance's clock jumps, so elapsed times measured
-here are unreliable; attempt counts are not.
+The one ordinary-use crash in 7 invocations is far too small a sample to give a rate. The
+honest statement is: **3 crashes have been seen, in 303 retained invocations, all within a
+23-minute window (11:14:40, 11:17:14, 11:37:11).** Retained logs cover a moving window;
+invocations older than the rotation are gone.
 
-**Remaining hypotheses, in the order worth testing.**
+### The strongest evidence
 
-1. **DuckDB's internal thread pool** (32 threads per process) racing with the interpreter.
-   *Next experiment:* copy `dbt/` and set `settings: {threads: 1}` in the copy's
-   `profiles.yml`, then `PROJECT=<copy> LABEL=threads1 ATTEMPTS=200 bash tools/dbt-segv-repro.sh`
-   against a baseline of the same size **under the same load conditions**. Needs ~200
-   attempts per arm to say anything at a ~1% rate.
-2. **Concurrent load.** The two ordinary crashes and the reproducer's one all occurred while
-   other work ran; 59 attempts alone produced none. *Next experiment:* run the harness with
-   and without a deliberate concurrent load, same attempt count.
-3. **A DuckDB Python-client lifecycle bug.** Compare against upstream reports of SIGSEGV
-   around connection close and reuse ([duckdb#13940](https://github.com/duckdb/duckdb/issues/13940),
-   [duckdb-python#127](https://github.com/duckdb/duckdb-python/issues/127)) — neither is
-   confirmed to be this one. *Next experiment:* reproduce in an isolated environment on a
-   different DuckDB patch version **before** touching `uv.lock`.
+**The faulting instruction is in CPython's bytecode interpreter.** The kernel recorded
+`ip 0000000001816c2b` and `ip 0000000001815bfb` in `python3.12[1600000+8ce000]`. The
+interpreter binary is `Type: EXEC`, **not** PIE, so those are absolute addresses and
+resolve directly:
 
-**Not done, deliberately:** no automatic retry (it would conceal a failed attempt), no
-dependency downgrade or threading change chosen because one run passed, no change to the
-lockfile.
+```
+$ addr2line -f -C -e .../cpython-3.12.14-linux-x86_64-gnu/bin/python3.12 0x1816c2b 0x1815bfb
+_PyEval_EvalFrameDefault
+_PyEval_EvalFrameDefault
+```
+
+Both land inside the one symbol at `0x1811500` (size 65,765), at +22,315 and +18,171. The
+faulted addresses were `0x8` and `0x100000007`, `error 4` (read of an unmapped page) —
+the shape of dereferencing a corrupted or already-freed object pointer.
+
+**This corrects an earlier claim.** A previous note inferred "a native thread with no
+Python frames → a C extension touching the interpreter without the GIL". That inference
+was wrong. `_PyEval_EvalFrameDefault` *is* the main interpreter loop: Python bytecode was
+executing and the GIL was held. The empty faulthandler output is better explained by a
+corrupted frame chain (nothing walkable) or by output interleaving — stderr carried dbt's
+own logging and the `resource_tracker` warning at the same time. `tools/dbt-segv-trace.sh`
+now writes faulthandler to a private file for exactly this reason.
+
+**What it does not establish.** It does not identify which code corrupted memory, and a
+fault inside the eval loop says where the damage *surfaced*, not where it originated. Free
+memory at one observation (12.6 GB) does not exclude resource-related causes generally.
+The `resource_tracker: 2 leaked semaphore objects` warning appears only on crashed runs and
+is a consequence of the abrupt death, not evidence of a cause.
+
+**Native extensions in the process**, all loaded by importing `dbt.cli.main` alone, before
+DuckDB or PyArrow: `dbt_extractor` (Rust static SQL parser), `google/_upb/_message`
+(protobuf C++, used by dbt's structured logging on every event — pinned to 6.33.6, having
+been downgraded from 7.36.1 by `dbt-common`), `msgpack/_cmsgpack`, `markupsafe/_speedups`
+(Jinja), `pydantic_core`, `rpds`, `_yaml`, `charset_normalizer` ×2. Two of the three
+crashes occurred at *Began compiling node* (Jinja rendering) and one during full parse
+(static parser). **These are candidates, not findings.**
+
+### Phase, from the logs
+
+| When | Phase reached |
+|---|---|
+| 11:14:40 (pytest) | `Began compiling node test…not_null_fact_interval_charge_scenario_source_timestamp_text` (53 of 54) |
+| 11:17:14 (build-candidate) | `Began compiling node test…not_null_dim_tariff_band_schedule_schedule_source` (7 of 54) |
+| 11:37:11 (harness) | `Unable to do partial parsing… Starting full parse` — before any node ran |
+
+Not confined to one phase, and not confined to one warehouse size (3 M-row real warehouse
+and the 12-row demo).
+
+### Safeguards, verified against a real crash
+
+On the preserved `data/proof-scratch/segv-repro/att-7.duckdb`: attempt recorded `failed`,
+`dbt_exit_code = -11`, `required_build = incomplete`, no output digest, file **not sealed**,
+and `reads.candidate()` refuses it. `subprocess.run` reports a signal death as a negative
+returncode, which `finish_attempt` stores verbatim, so the record is unambiguous. A crashed
+build cannot become promotable: the risk is a failed build, not a wrong figure.
+
+### Reproduction attempts
+
+| Arm | Attempts | Crashes |
+|---|---|---|
+| `dbt-segv-repro.sh`, backgrounded | 7 | 1 |
+| `dbt-segv-repro.sh`, foreground | 59 | 0 |
+| `dbt-segv-trace.sh` (faulthandler → private file) | 20 | 0 |
+| `dbt-segv-trace.sh` + `PYTHONMALLOC=debug` | 20 | 0 |
+
+106 harness attempts, 1 crash. At that rate 40 traced attempts had roughly a one-in-three
+chance of catching one, so **zero crashes under tracing is not evidence that tracing
+prevents it** and certainly not a fix.
+
+### Blocked on: a native backtrace
+
+No `gdb`, `lldb`, `py-spy`, `gcc` or `clang` is installed (so an `LD_PRELOAD` handler
+cannot be compiled either), and `sudo` requires interactive authentication. `objdump` and
+`addr2line` are present, which is what made the symbol resolution above possible, but they
+cannot produce a live stack.
+
+**The one action needing administrator access**, with its reason: install a debugger so the
+faulting frame can be attributed to a library rather than guessed.
+
+```bash
+sudo apt-get install -y gdb          # ~30 MB; needed for a native backtrace
+```
+
+With that available, the prepared next command is:
+
+```bash
+DIR=data/proof-scratch/segv-gdb ATTEMPTS=200   GDB=1 bash tools/dbt-segv-trace.sh          # wrap each attempt in:
+# gdb -q -batch -ex run -ex "thread apply all bt" -ex "info sharedlibrary" #     --args .venv/bin/python3 -c '<same wrapper>' build --target-path … --project-dir dbt …
+```
+Run under a debugger the child's exit status is the **debugger's**, so the harness must
+read the inferior's signal from gdb's own report (`Program received signal SIGSEGV`) and
+must not treat a clean debugger exit as a successful build.
+
+### Remaining hypotheses, in the order worth testing
+
+1. **A native extension corrupting interpreter state.** `markupsafe/_speedups` and
+   `dbt_extractor` are active in the phases where the crashes landed; protobuf `_upb` is
+   active in all of them and was version-shifted by a resolver decision. *Resolve by:* the
+   native backtrace above. Only then is a targeted A/B (for example `--no-static-parser`)
+   worth its cost — at a ~1% rate an A/B needs hundreds of attempts per arm.
+2. **Concurrency or load.** All three crashes fell in one 23-minute window of heavy,
+   overlapping activity; 59 sequential attempts alone produced none. *Resolve by:* matched
+   attempt counts with and without a deliberate concurrent load.
+3. **A DuckDB Python-client lifecycle bug.** Upstream reports exist of SIGSEGV around
+   connection close and reuse ([duckdb#13940](https://github.com/duckdb/duckdb/issues/13940),
+   [duckdb-python#127](https://github.com/duckdb/duckdb-python/issues/127)). Neither is a
+   confirmed match: both describe faults inside DuckDB's own code, whereas these faults are
+   inside the CPython eval loop. *Resolve by:* the native backtrace; only then consider a
+   different DuckDB patch version, tested in an isolated environment **before** `uv.lock`.
+
+**Not done, deliberately:** no automatic retry, no dependency downgrade or threading change
+chosen because a run passed, no lockfile edit, no weakening of the complete-build check.
 
 ## Staging runbook — partly runnable
 
