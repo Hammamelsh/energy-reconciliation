@@ -51,10 +51,27 @@ jobs:
         run: uv sync --frozen
 
       - name: Record the environment under test
+        # Deliberately specific fields, not `env`: enough to compare this runner with a
+        # local WSL run when diagnosing the open dbt segfault, and nothing more. Never
+        # dump the whole environment -- it carries tokens on a hosted runner.
         run: |
-          uv run python -c "import sys, platform; print(sys.version); print(platform.platform())"
+          echo "--- os / arch ---"
+          uname -srm; . /etc/os-release 2>/dev/null && echo "$PRETTY_NAME"
+          echo "--- uv ---"
+          uv --version
+          echo "--- interpreter ---"
+          uv run python -c "import sys, platform, sysconfig; \
+            print('version :', sys.version.replace(chr(10), ' ')); \
+            print('compiler:', platform.python_compiler()); \
+            print('machine :', platform.machine(), '| libc:', ' '.join(platform.libc_ver())); \
+            print('exe     :', sys.executable); \
+            print('prefix  :', sysconfig.get_config_var('prefix'))"
+          echo "--- interpreter origin (uv-managed python-build-standalone, or the runner's) ---"
+          uv python list --only-installed || true
+          echo "--- packages that matter to the crash ---"
           uv run dbt --version
-          uv run python -c "import duckdb, pyarrow, pandas; print('duckdb', duckdb.__version__, 'pyarrow', pyarrow.__version__, 'pandas', pandas.__version__)"
+          uv run python -c "from importlib.metadata import version; \
+            print(' '.join(f'{p}={version(p)}' for p in ('duckdb','pyarrow','pandas','dbt-extractor','protobuf','msgpack','MarkupSafe')))"
 
       - name: Lint
         run: uv run ruff check .
