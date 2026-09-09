@@ -56,6 +56,12 @@ the readings:
 | `Normal` | 84.62% | 72.85% |
 | `High` | 4.90% | 24.09% |
 
+![Dashboard tariff-scenario view for the loaded ToU sample: a grouped bar chart comparing each band's share of consumption with its share of charge — Low 10.5% of charged kWh against 3.1% of the charge, Normal 84.6% against 72.9%, High 4.9% against 24.1% — above a table giving each band's price per kWh, charged readings, charged kWh and scenario charge.](docs/images/dashboard-tariff-bands.png)
+
+*Historical tariff scenario for 27 households in the loaded sample, 2013: high-price periods
+account for 4.9% of charged consumption and 24.1% of scenario charge. Calculated under
+assumption A1; this is not a bill.*
+
 The scenario charge over the sample is £11,675.43 (recorded exactly as
 `11675.4339216532500000`). This is an **energy charge under a stated assumption**, not a bill: no
 standing charge, levy or tax treatment is modelled, and the assumption that a reading's timestamp

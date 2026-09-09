@@ -145,6 +145,28 @@ readings and the exact charge `11675.4339216532500000`
 ([ANL-002 §7.2](anl-002-tariff-scenario.md#72-loaded-households--27-tou-households-2013-only)).
 The replay over that result compared 44 fields with 0 differing.
 
+### What a published version looks like when it is read back
+
+The dashboard's tariff tab, in **Published version** mode, states the identity of the version it
+resolved before any figure on the page is read:
+
+![Dashboard panel headed "Run identity — what would have to match to reproduce this", listing the published version v0001 and its candidate file, promotion and build timestamps, a required-build line reading "complete — every one of 54 required dbt nodes passed", the workbook schedule with 17,520 labels covering 2013-01-01 to 2013-12-31, the price catalogue version, digests for the calculation code, shared policy, dbt project, built tables and version file, the dbt and runtime versions, and the whole-run exact charge of £11675.4339216532500000.](images/dashboard-published-identity.png)
+
+Three lines carry most of the weight. **Published version** names the sealed database the manifest
+points at — the version label `v0001` and the candidate file `cand-<stamp>.duckdb` are different
+things, and both are shown. **Required build** reads *complete — every one of 54 required dbt
+nodes passed*, which is the condition the seal enforces: had any model or test been skipped or
+failed, this version could not have been promoted, and the page would refuse to show figures
+rather than show unsealed ones. **Whole-run exact charge** is the unrounded decimal
+`£11675.4339216532500000`, counted from the built fact rather than read from a recorded row.
+
+**What this screenshot is.** A capture of the demonstration publication kept at
+`data/proof-scratch/demo-published-20260909/published`, taken on 2026-09-09 from a build of the
+three-member real warehouse. It is **not** a build of the latest commit: its digests — the dbt
+project digest in particular — belong to the tree as it stood when that build ran, and later
+commits that touch `dbt/` or the calculation code will produce different ones. That is the
+mechanism working as intended, not a discrepancy. Rebuild and republish to see current digests.
+
 Re-running an ingest is a no-op only when **both** the source file and the transformation code
 are unchanged; changing either replaces that member's rows, so a code change rebuilds rather than
 silently keeping rows built by older logic.
