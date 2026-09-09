@@ -1,5 +1,6 @@
-# ANL-003 step 2. The tariff facts are NOT here yet -- this project currently defines
-# the staging view and the two policy models only. See docs/anl-003-dbt-design.md.
+# The tariff scenario as a dbt project: staging view, policy models (generated from
+# policy.py / models.py), the two tariff dimensions as Python models, and the two charge
+# facts. Design and decisions: docs/anl-003-dbt-design.md.
 name: energy_reconciliation
 version: 0.1.0
 config-version: 2

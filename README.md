@@ -1,603 +1,373 @@
 # Energy Reconciliation
 
-Tools and analysis for half-hourly electricity meter data from the Low Carbon London trial.
+[![CI](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml/badge.svg)](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml)
 
-What exists today:
+Half-hourly electricity meter readings from the Low Carbon London trial (2011–2014), taken from
+the raw archive to a tested, versioned tariff calculation — with every figure traceable to the
+rows and the assumption it rests on.
 
-- a **profiler** that reads one CSV member, classifies every value and writes a JSON report whose
-  totals reconcile;
-- an **ingestion command** that loads members into a local DuckDB database with a stable schema;
-- a **household explorer** for looking at one household's data quality;
-- a **tariff scenario**: the dToU band schedule and the publisher-documented prices, modelled in
-  **dbt** over DuckDB and joined to consumption under a clearly stated, stored assumption;
-- a **publication workflow**: build a candidate warehouse, seal it only when a complete dbt build
-  passes, promote it by an atomic manifest swap, and read it back through a validated contract;
-- a **forecasting backtest** (real data only) and **format-2 baselines** that record a published
-  result and rebuild it from the source archive alone.
+**The problem.** Smart-meter data looks simple: a household id, a timestamp, a kWh value. In
+practice the timestamps carry no timezone, missing readings are written as the text `Null`, rows
+are duplicated, one household's readings are split across files, and the tariff that should be
+applied has an unknown effective period. Any total built on top of that — a bill, a forecast, a
+comparison — inherits those problems silently unless each one is found, counted and decided.
 
-This is the groundwork for billing and reconciliation work. It is not a billing system and produces
-no bills. The tariff figures are a **scenario**, not a cost anyone was charged — see
-[Tariff scenario](#tariff-scenario) below for exactly what that means.
+**What it produces.**
 
-**Not ready for unattended operation.** `dbt build` segfaults intermittently and the cause is
-unresolved. Every observed crash was contained — the attempt is recorded as failed, nothing is
-sealed and nothing can be promoted — so a crash costs you a rerun, never a wrong published figure.
-Details and the open investigation: [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md).
+- A **profile** of one source file: every record classified, with counts that reconcile.
+- A local **DuckDB warehouse** loaded from the archive, with a rerun policy that never leaves
+  half-loaded data behind.
+- A **tariff scenario** modelled in **dbt**: the trial's dynamic time-of-use price bands joined to
+  each half-hour reading, with an exact-decimal charge and a stated reason for every reading
+  that was excluded.
+- A **publication workflow**: a warehouse is built as a candidate, sealed only when every dbt
+  model and test passed, promoted by an atomic manifest swap, and read back through a validated
+  contract. A published result can be **recorded and rebuilt** from the source archive to check
+  that the same rows and the same totals come out.
+- A **Streamlit dashboard** for one household's data quality, tariff scenario and forecast
+  backtest.
+- A **forecasting backtest**: simple daily baselines, evaluated honestly on held-out days.
 
-## Try it without downloading anything
+**What it is used for.** Examining the quality of interval data before building on it; tracing
+a tariff calculation from each half-hour reading to its band, price, exact charge or exclusion
+reason; and reproducing an analytical result from its recorded inputs to confirm the same rows
+and totals come out. The same approach applies to any interval data — energy, IoT, telemetry —
+where a total is only as trustworthy as the rows and assumptions beneath it.
 
-Everything in this section runs on a **committed, invented archive**. It downloads no data, and
-needs neither the Low Carbon London dataset nor the publisher's tariff workbook.
+## What it shows
 
-**Prerequisites.** [`uv`](https://docs.astral.sh/uv/) (it fetches the right Python itself) and
-`git`. Verified on Linux (Ubuntu 24.04 under WSL2) with Python 3.12.14; see
-[Requirements](#requirements) for the support boundary.
+Three results, each measured on a stated slice of the data. Nothing here is representative of the
+trial or of London, and no figure should be scaled up.
 
-### The whole workflow in one command
+### 1. In the 2013 dynamic tariff, the expensive band is 5% of the energy and 24% of the charge
+
+*Sample: the 27 `ToU` households in source file 135 (of 168), 2013 only — 456,096 charged
+half-hour readings.*
+
+The trial's **dynamic time-of-use tariff** ("dToU") priced each half hour as `Low` (3.99 p/kWh),
+`Normal` (11.76 p/kWh) or `High` (67.20 p/kWh), announced a day ahead. Joining that schedule to
+the readings:
+
+| Band | Share of charged kWh | Share of scenario charge |
+|---|---:|---:|
+| `Low` | 10.48% | 3.06% |
+| `Normal` | 84.62% | 72.85% |
+| `High` | 4.90% | 24.09% |
+
+The scenario charge over the sample is £11,675.43 (recorded exactly as
+`11675.4339216532500000`). This is an **energy charge under a stated assumption**, not a bill: no
+standing charge, levy or tax treatment is modelled, and the assumption that a reading's timestamp
+label and a schedule label denote the same half hour (`A1`) is stored on every output row rather
+than established. The band shares follow from the price ratio (17 : 3 : 1) and the timing of the
+bands; they say nothing about whether anyone changed their behaviour. Full measurements and what
+each one does not show:
+[`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md#8-three-findings-and-what-each-does-not-show).
+
+### 2. Missing and zero are different things, and the source mixes them in
+
+*Sample: source file 0 of 168, read in full — 1,000,000 records, 30 households, timestamps from
+2011-12-06 to 2014-02-28.*
+
+| | |
+|---|---:|
+| Exact duplicate rows | 688 |
+| Same household and timestamp, different value | 0 |
+| `Null` tokens | 29 |
+| Of those, off the half-hour grid | 29 (all of them) |
+| Zero readings | 45,538 |
+| Negative or malformed values | 0 |
+
+A zero is a reading; a `Null` is the absence of one, and why it is absent is not known. Treating
+the second as the first understates a household's usage without raising any error. The profiler
+counts them separately, the warehouse policy fills nothing in, and the dashboard withholds a total
+rather than choosing when two rows disagree. Report:
+[`data/profiles/lcl-june2015v2-0-profile.json`](data/profiles/lcl-june2015v2-0-profile.json);
+investigation: [`docs/source-data-profile.md`](docs/source-data-profile.md).
+
+### 3. A four-week same-weekday mean beats last week's value on held-out days
+
+*Sample: 40 households with at least 168 consecutive clean days, from source files 4, 5 and 135;
+each scored on the final 28 days of its run.*
+
+| Baseline | Holdout MAE (kWh/day) |
+|---|---:|
+| Mean of the 4 preceding same weekdays | **1.901** |
+| Same weekday last week | 2.121 |
+| The origin day's total repeated (reference) | 2.322 |
+
+Holdout days average about 10.1 kWh. Every prediction uses only data dated on or before its
+origin (checked, not assumed), and a model that would need an unusable day declines rather than
+guessing. This is a **historical backtest of baselines**, not a live forecast, and the cohort is
+a retrospective clean-data cohort rather than an operational sample. Design and limits:
+[`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
+
+## How it is built
+
+```
+archive (zip)  ──profile-member──▶  JSON profile
+      │
+      └──ingest-member──▶  DuckDB warehouse: readings + load registry
+                                   │
+                                   └──build-candidate──▶  dbt build on an isolated copy
+                                                               │  5 models · 49 tests
+                                                          seal │  (only if all passed)
+                                                               ▼
+                                     publication promote ──▶  versions/v0001.duckdb + manifest
+                                                               │
+                              ┌────────────────────────────────┼─────────────────────────┐
+                              ▼                                ▼                         ▼
+                    publication read              Streamlit dashboard          capture / replay
+                 (validated read contract)     (Source → Published version)     format-2 baseline
+```
+
+**dbt lineage.** The tariff calculation is a small dbt project over DuckDB
+(`dbt-core 1.12.4`, `dbt-duckdb 1.11.0`):
+
+```mermaid
+flowchart LR
+  src[(warehouse.readings)] --> stg[stg_readings<br/>view]
+  stg --> dist[int_distinct_readings<br/>ephemeral]
+  stg --> conf[int_conflicting_labels<br/>ephemeral]
+  stg --> cls[int_classified_readings<br/>ephemeral]
+  sched[dim_tariff_band_schedule<br/>Python model] --> cls
+  price[dim_tariff_price<br/>Python model] --> cls
+  cls --> fact[fact_interval_charge_scenario<br/>table]
+  cls --> excl[fact_interval_charge_exclusion<br/>table]
+```
+
+- **Staging** exposes the loaded readings as dbt sees them.
+- **Policy** models decide which rows count: exact duplicates collapse to one, rows that disagree
+  at the same timestamp are conflicts. Their SQL is **generated from `policy.py` and
+  `models.py`**, so the dashboard and dbt apply one definition; `render-dbt-macros --check`
+  fails if they drift.
+- **Dimensions** are dbt Python models that read the publisher's tariff workbook (or the invented
+  demo schedule) through the project's own parsers, with `DECIMAL` prices.
+- **Facts**: one row per charged reading with its band, price and exact charge; one row per
+  excluded reading with exactly one reason (`ineligible_tariff_group`, `outside_schedule_period`,
+  `conflicting_label`, `off_grid_observation`, `missing_value`, `unmatched_schedule_label`,
+  `unpriced_band`).
+- **Tests** (49) check the accounting closes — `distinct = charged + excluded`, no reading in
+  both facts, one reason per exclusion, exact charge arithmetic, unique keys.
+
+Publication is separate from building: a candidate is sealed only when its **latest recorded
+build attempt succeeded and ran every one of the 54 required nodes**, and the sealed file is
+promoted by writing a new manifest atomically. Readers resolve the manifest once and validate the
+seal before showing anything.
+
+## Quickstart — synthetic data, one command
+
+Runs on a **committed, invented 12-row archive**. Downloads nothing; needs neither the real
+dataset nor the tariff workbook. Prerequisites: [`uv`](https://docs.astral.sh/uv/) and `git`.
 
 ```bash
 git clone https://github.com/Hammamelsh/energy-reconciliation.git
 cd energy-reconciliation
 uv sync --frozen
-
 bash tools/synthetic-quickstart.sh
 ```
 
-That ingests the invented archive, builds a candidate with dbt (all 5 models and all 49 tests),
-promotes it inside a disposable root, reads it back through the validated contract, records a
-format-2 baseline and rebuilds it from the archive alone in a fresh destination — then **checks
-each expected figure**, so exit 0 means the numbers matched rather than merely that commands ran.
-It writes only inside `data/proof-scratch/quickstart/` and never touches `data/published/`.
+The script ingests the archive, builds a candidate with dbt, promotes it inside a disposable
+root, reads it back, records a baseline and rebuilds it from the archive in a fresh directory —
+and **asserts each expected figure**, so exit `0` means the numbers matched. It writes only under
+`data/proof-scratch/quickstart/`. Expected output (candidate and run names vary):
 
-The figures it asserts are derivable by hand from the archive's 12 rows: one exact duplicate
-collapses, leaving 11 distinct; `DEMO0001` is `Std` while the scenario is scoped to `ToU`, so its
-9 rows are excluded as `ineligible_tariff_group`; `DEMO0002` contributes 1.000 kWh in the Low band
-at 3.99 p/kWh and 1.125 kWh in the High band at 67.20 p/kWh, giving exactly
-`0.0399 + 0.756 = 0.7959`.
+```
+=== 4/6 read it back through the validated read contract ===
+published v0001 (cand-….duckdb) · dbt run dbtcand-…@… · dbt build (scenario_build)
+  build      : complete, 54 required dbt nodes passed
+  schedule   : synthetic-demo (demo) · catalogue 2026-09-08.1 · group ToU
+  accounting : 12 rows recorded → 11 distinct (1 collapsed by policy) → 2 charged + 9 excluded · reconciles True
+  charge     : GBP 0.7959000000000000 (exact, unrounded)
+    band Low            1 readings  GBP 0.0399000000000000
+    band High           1 readings  GBP 0.7560000000000000
+    excluded ineligible_tariff_group           9
+  ok  12 recorded rows collapse to 11 distinct
+  …
+=== 6/6 rebuild it from the archive alone, in a fresh destination, and compare ===
+compared 38 field(s); 0 differ
+REBUILD REPRODUCED THE PUBLISHED RESULT EXACTLY.
 
-### The same steps individually
-
-```bash
-uv run ingest-member --demo --database data/proof-scratch/demo/warehouse.duckdb
-
-uv run build-candidate \
-  --source data/proof-scratch/demo/warehouse.duckdb \
-  --root   data/proof-scratch/demo/published \
-  --schedule demo
-# prints: sealed <CANDIDATE> ... READY FOR PROMOTION -- not published
-
-uv run publication --root data/proof-scratch/demo/published \
-  promote <CANDIDATE> --expect-published none
-
-uv run publication --root data/proof-scratch/demo/published read
+=== quickstart complete: every expected figure matched ===
 ```
 
-`<CANDIDATE>` is the path the build printed after `sealed ` — a placeholder, not a literal. The
-last command prints the accounting ladder and the exact charge, read through the same validated
-contract the dashboard uses.
+Those figures can be checked by hand from the archive's 12 rows: one exact duplicate collapses;
+`DEMO0001` is a `Std` household while the scenario is scoped to `ToU`, so its 9 rows are excluded
+with that reason; `DEMO0002` has 1.000 kWh in the `Low` band at 3.99 p/kWh and 1.125 kWh in the
+`High` band at 67.20 p/kWh, giving `0.0399 + 0.756 = 0.7959`.
 
-To see it in the dashboard, point the app at that same root and choose **Source → Published
-version** in the sidebar:
+Then open the dashboard on that published version:
 
 ```bash
-ENERGY_RECONCILIATION_PUBLICATION_ROOT="$PWD/data/proof-scratch/demo/published" \
+ENERGY_RECONCILIATION_PUBLICATION_ROOT="$PWD/data/proof-scratch/quickstart/published" \
   PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
 ```
 
-To record the result and rebuild it from the archive alone:
+In the sidebar choose **Source → Published version**. The dashboard shows a household's daily and
+half-hourly readings, its data-quality findings with source references, the tariff scenario per
+band and per household, and (with real data) the forecast backtest. The demo schedule covers a
+single day, so only the two `DEMO0002` readings on 2013-01-01 are charged.
 
-```bash
-uv run capture-published-baseline \
-  --root data/proof-scratch/demo/published \
-  --directory data/proof-scratch/demo/baselines
+To remove everything the quickstart created:
+`chmod -R u+w data/proof-scratch/quickstart && rm -rf data/proof-scratch/quickstart`.
 
-uv run replay-published-baseline \
-  --baseline <BASELINE> \
-  --into data/proof-scratch/demo/replay \
-  --archive data/demo/demo-lcl-sample.zip
-```
+Each step as a separate command, the real-data path, recording and replaying a published result,
+and what to keep for a later replay: [`docs/publication-workflow.md`](docs/publication-workflow.md).
 
-**What must be kept to replay later.** A baseline is not self-contained. Replay needs the source
-archive whose member digests it recorded — here the committed `data/demo/demo-lcl-sample.zip`, and
-for real data your own copy of the LCL archive plus `data/raw/Tariffs.xlsx`. It does **not** need
-the publication, the version file or the candidate: delete those and the baseline still rebuilds.
+## Engineering decisions
 
-**How the synthetic path differs from real data.** The invented schedule covers a single day
-(2013-01-01) with 48 slots, so only readings on that date can be charged; the real workbook covers
-2011–2014. The demo archive holds 12 rows for 2 households, so the forecast backtest — which needs
-a household with 168+ contiguous usable days — cannot run on it and is a real-data feature.
+The choices most likely to matter to a reader, each with where it is argued and where it is tested.
 
-### Just the profiler
+1. **One definition of every data rule.** The dashboard's Python and the dbt models cannot
+   disagree about what a duplicate or a conflict is, because the dbt macro file is generated from
+   `policy.py` and `models.py`, and a check refuses drift.
+   [Design D2](docs/anl-003-dbt-design.md#1-decisions) ·
+   [`tests/test_dbt_macros.py`](tests/test_dbt_macros.py)
+2. **Publish only what a complete build certifies.** Every `dbt build` is recorded as an attempt;
+   the seal requires the latest attempt to have succeeded, to have run all 54 required nodes, and
+   the tables to still digest as that attempt recorded. A build interrupted by a real `SIGKILL`
+   is tested to leave nothing sealable.
+   [Design D5](docs/anl-003-dbt-design.md#1-decisions) ·
+   [`tests/test_candidate.py`](tests/test_candidate.py) ·
+   [`tests/test_publication.py`](tests/test_publication.py)
+3. **Reproducibility is executed, not asserted.** A baseline records the input members by
+   content digest, the calculation identity and every logical output; replay re-ingests and
+   rebuilds into a fresh directory and compares. Running it found two real defects in an earlier
+   fingerprint that every test had passed.
+   [ANL-002 §9.3](docs/anl-002-tariff-scenario.md#93-two-defects-the-replay-found) ·
+   [`docs/rec-001-source-expansion.md`](docs/rec-001-source-expansion.md)
+4. **Exact decimals end to end.** Charges are `DECIMAL` in dbt and `Decimal` in Python; the
+   scenario total is stored unrounded, and an independent Python sum over the same rows gives the
+   same digits. [ANL-002 §7.3](docs/anl-002-tariff-scenario.md#73-independent-check--verified)
+5. **Missing is not zero, and conflicts are not resolved by guessing.** Absent readings are never
+   replaced with zero; a household whose rows disagree has its total withheld and marked.
+   [ANL-002 §4](docs/anl-002-tariff-scenario.md#4-which-policies-apply-and-where-a-figure-is-withheld)
+6. **A report applies to a dataset by content, not by file name.** The forecast tab shows a
+   report only if the selected warehouse's rows digest to what the report was run on; a renamed
+   copy is accepted, different data under the same name is refused.
+   [`src/energy_reconciliation/forecast/applicability.py`](src/energy_reconciliation/forecast/applicability.py)
+7. **Every claim is labelled by its evidence.** Statements in the investigation documents are
+   marked VERIFIED, PUBLISHER-DOCUMENTED, INFERRED, CONTRADICTED or UNKNOWN, and the open
+   questions are kept in their own list.
+   [`docs/rep-001-verified-facts.md`](docs/rep-001-verified-facts.md) ·
+   [`docs/rep-001-assumptions-and-open-questions.md`](docs/rep-001-assumptions-and-open-questions.md)
 
-```bash
-uv sync --frozen
+## Status and limitations
 
-uv run profile-member \
-  --archive data/demo/demo-lcl-sample.zip \
-  --member "Small LCL Data/DEMO-sample_0.csv" \
-  --output data/demo/demo-profile.json \
-  --no-examples
-```
+**Open incident: `dbt build` occasionally segfaults.** Three of 303 retained dbt invocations on
+the development machine crashed with `SIGSEGV` inside the CPython interpreter, all within one
+25-minute window; the cause is not established after three bounded investigations. Consequence:
+a crash costs a rerun. In each observed case the attempt was recorded as failed and nothing was
+sealed, which is the behaviour the seal gate is designed to enforce; the hosted CI run has no
+retries, so a crash there fails the run visibly. The workflow is therefore **not suitable for
+unattended operation** until the cause is found. Evidence, corrections to earlier wording, and
+the next step:
+[`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md#open-release-blocker--dbt-build-segfaults-intermittently-third-investigation-2026-09-09-unresolved).
 
-```
-status                : COMPLETE
-member                : Small LCL Data/DEMO-sample_0.csv
-data records          : 12
-structurally valid    : 12
-malformed             : 0
-records ok            : 11
-records with issues   : 1
-header matches        : True
-core partitions hold  : True
-one line per record   : True
-```
+**Scope of the data.** One source file of 168 has been profiled in full and three have been
+loaded. The 27 `ToU` households are the households that happen to occupy one file, not a sample
+drawn from the trial. Households continue across file boundaries, so three files are not any
+household's complete history.
 
-`data/demo/demo-lcl-sample.zip` is **invented data**, not a sample of the real dataset. It has 12
-records for two made-up households, `DEMO0001` and `DEMO0002`, and contains one of everything worth
-seeing: a zero reading, a `Null`, an exact duplicate row, two rows that share a household and
-timestamp but disagree on the value, and a timestamp that is not on the half-hour. The counts above
-are checked against hand-computed values in `tests/test_demo.py`.
+**Scope of the calculation.** The tariff figures are an energy charge under assumption `A1`.
+The flat rate's effective period is not documented by the publisher, so **no `Std` household
+has been costed**; a **dynamic-versus-flat comparison is proposed work**, not a result. The
+timezone and whether a timestamp marks the start or end of its half hour are unresolved, which
+is enough to block any defensible billing period. No causal claim about the tariff is made or
+supportable from this data.
 
-Read the report it writes at `data/demo/demo-profile.json`.
+**Scope of the forecasting.** Two baselines and a reference, on daily totals, for a cohort chosen
+by data cleanliness. No seasonal, weather or learned model has been tried.
 
-**Exit status:** `0` when the run completes and the counts reconcile, `1` if the report was written
-but is incomplete or a core reconciliation failed, `2` if the archive is missing.
+**Scope of the tooling.** No orchestration, no cloud deployment, no geographic breakdown.
+Ingestion holds a whole file in one transaction, which costs about 1 GB of memory per
+million-row file. Verified on Linux only: Ubuntu 24.04 under WSL2 (Python 3.12.14) and
+GitHub-hosted `ubuntu-24.04` (Python 3.12.3). The publication design relies on POSIX `rename`
+semantics on one filesystem and the recovery path reads `/proc`, so macOS and Windows would need
+their own verification.
 
-## Explore household energy use
+Planned work, in order, with completion conditions: [`docs/roadmap.md`](docs/roadmap.md).
+What is deliberately not claimed: [`docs/portfolio-evidence.md`](docs/portfolio-evidence.md).
 
-Load the synthetic demo into a local DuckDB database and browse it:
+## Working with the real dataset
 
-```bash
-uv run ingest-member --demo --database data/warehouse/demo.duckdb
-uv run build-tariff-scenario --demo --database data/warehouse/demo.duckdb
-PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
-```
+The archive is about 1.5 GB and is not in this repository (`data/raw/` is git-ignored).
 
-`PYTHONPATH=src` matters while editing. Streamlit's file watcher only reloads modules in the
-folder holding the script or on `PYTHONPATH`, so without it `policy.py`, `tariff/` and `ingest/`
-stay loaded from their first import: edits to them appear to have no effect, and a half-applied
-change can raise an `AttributeError` from a module the rest of the app has already moved past.
-With it, every project module is watched. After changing model code, restarting the server is
-still the certain option.
+1. Download *Partitioned LCL Data.zip* and *Tariffs.xlsx* from the
+   [London Datastore](https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d)
+   into `data/raw/`. Leave the archive zipped;
+   [`data/manifests/raw-file-manifest.csv`](data/manifests/raw-file-manifest.csv) records the
+   expected sizes and SHA-256 digests.
+2. Profile one file: `uv run profile-member` (defaults to file 0; options in
+   [`docs/profiling.md`](docs/profiling.md)).
+3. Load files 4, 5 and 135 — two adjacent `Std` files that share household `MAC000166`, and the
+   first `ToU` file:
 
-Choose the dataset under **Data source** in the sidebar — each option is labelled by what
-it contains (synthetic demo, or which Low Carbon London members are loaded). Household and
-period sit at the top of the page. Period presets of 7, 14 and 30 days are anchored to the
-**last date recorded for that household**, not to today; the trial ended in 2014, so a window
-around the current date would be empty. *Custom* exposes explicit start and end dates.
+   ```bash
+   uv run ingest-member \
+     --member "Small LCL Data/LCL-June2015v2_4.csv" \
+     --member "Small LCL Data/LCL-June2015v2_5.csv" \
+     --member "Small LCL Data/LCL-June2015v2_135.csv"
+   ```
 
-Everything on the page is computed for the same household and the same source-date range:
+4. Build, publish and view exactly as in the quickstart but with `--schedule workbook` and the
+   real warehouse as `--source`; run the forecast backtest with
+   `uv run run-forecast-experiment`. Steps and outputs:
+   [`docs/publication-workflow.md`](docs/publication-workflow.md).
 
-- **Overview** — recorded kWh, contributing readings, and items for review (missing values
-  + gaps + conflicting timestamps + off-grid observations in the period); a status that says what was and
-  was not detected, with the standing caveat that boundary coverage and clock semantics are
-  unresolved; daily bars grouped by source date, with a day inside the recorded span but
-  with no rows shown as "no readings recorded" rather than omitted; half-hour detail for a
-  chosen day, with the line broken at gaps.
-- **Data quality** — the counters for the period, findings first (conflicts, gaps, repeated
-  timestamps, missing values) with source references, definitions collapsed below, and the
-  whole-history figures in a separately labelled expander.
-- **Tariff scenario** — the band schedule, the prices, and the scenario charge under
-  assumption `A1`, for this household and for every charged household, with the schedule's
-  own shape kept separate from what the loaded households did. See below.
-- **Forecast (backtest)** — observed against predicted for one forecast origin, and the
-  baseline comparison by model and horizon, with the prediction target, origin, horizon and
-  evaluation scope all stated on the page.
-- **Source records** — rows exactly as loaded, paginated, each with its member and record
-  number, followed by the loaded-file inventory.
-
-Identical source rows are collapsed and the number collapsed is always shown. One value
-written two ways at the same timestamp (`0.5` and `0.50`) is kept as evidence and counted
-once. Different values at the same timestamp — including a `Null` beside a number, by our
-analytical policy — are a conflict: that day and the period have their totals withheld — shown as a labelled marker, never a bar — while the readings
-that exist stay visible. Gaps are steps over half an hour between consecutive grid
-timestamps, counted across midnight and attributed to the later date. Off-grid observations are
-excluded from half-hour totals but stay counted, listed and plotted with their source reference.
-
-With the real dataset, load two adjacent members:
-
-```bash
-uv run ingest-member \
-  --member "Small LCL Data/LCL-June2015v2_4.csv" \
-  --member "Small LCL Data/LCL-June2015v2_5.csv"
-PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
-```
-
-Those two members share household `MAC000166`, whose readings run to `2012-02-14 15:00`
-in member 4 and continue from `15:30` in member 5 — a good household to select first.
-
-Members 0–134 hold only `Std` households, so add member 135 for the `ToU` group the dynamic
-tariff applies to:
-
-```bash
-uv run ingest-member --member "Small LCL Data/LCL-June2015v2_135.csv"
-```
-
-Re-running an ingest is a no-op only when **both** the source file and the
-transformation code are unchanged. Changing either replaces that member's rows, so a
-code change rebuilds rather than silently keeping rows built by older logic. Superseded
-loads stay in the registry as history, though their readings are replaced.
-
-Three members out of 168 are not a household's complete history, and the explorer says so
-on every page.
-
-## Tariff scenario
-
-The dynamic Time-of-Use tariff ran through 2013. `Tariffs.xlsx` supplies **a schedule of price
-bands and no prices at all** — the prices are on the dataset page. Both are modelled, separately:
-
-```bash
-uv run build-tariff-scenario --demo --database data/warehouse/demo.duckdb   # synthetic schedule
-uv run build-tariff-scenario --database data/warehouse/energy.duckdb        # the real workbook
-```
-
-Then open the **Tariff scenario** tab in the explorer.
-
-If that tab reports it cannot read the scenario, the running process and the database were
-written by different generations of the code — usually a long-lived server against a
-rebuilt database. **Restart the app first**; that loads the current code and rebuilds
-nothing. Only if the message survives a restart is `build-tariff-scenario` the fix. Either
-way your readings, load history and baselines are untouched: the tariff tables are derived.
-The other three tabs keep working throughout.
-
-```
-energy_charge_gbp = consumption_kwh × price_pence_per_kwh ÷ 100
-```
-
-All `Decimal`. **Nothing is rounded per row**; rounding happens once for display, to 2 decimal
-places for money, half up, with the exact unrounded figure shown beside it. The `÷ 100` is done in
-Python when the price catalogue is built, not in SQL, because DuckDB evaluates a `DECIMAL` divided
-by 100 as a binary float.
-
-**This is a scenario, not a bill.** Every charged row carries assumption `A1`:
-
-> the consumption timestamp label and the schedule label denote corresponding half-hour intervals
-
-That is **not established**. The consumption timestamps carry no timezone. The schedule's own
-regularity — 17,520 labels, exact half-hour steps, both 2013 clock-change hours present once —
-shows the schedule is a fixed nominal grid, and says nothing about the consumption data. A unique
-schedule key stops the join multiplying rows; that is arithmetic, not semantics.
-
-The charge is an **energy** charge only. **No separate tax adjustment is applied**, and whether
-the published rates are quoted inclusive or exclusive of VAT or any levy is **not established** —
-the publisher gives pence per kWh and does not say. No standing charge, discount or settlement
-adjustment is modelled. No one was ever billed it.
-
-**Nothing becomes zero.** Every distinct reading is either charged or excluded with one explicit
-reason — ineligible tariff group, outside the schedule's coverage, conflicting readings, off-grid,
-missing value, unmatched label — and `charged + excluded = distinct readings` is asserted on every
-run.
-
-The tab has three separate views — **selected household**, **loaded ToU sample**, **published
-schedule** — with their own period control, bounded by the schedule's coverage and independent of
-the period selector at the top of the page. A household with no charged readings is told the
-**measured** reason with its count, and offered an explicit button to switch to one that has some.
-
-### Reproducing a result
-
-A fingerprint stored inside a warehouse is not historical replay: the warehouse is mutable, and
-once another member is loaded the rows the fingerprint described are gone. So capture a baseline
-first, then rebuild from it into a database that does not yet exist:
-
-```bash
-uv run capture-baseline --database data/warehouse/energy.duckdb
-uv run replay-baseline  --baseline data/baselines/<id>.json
-```
-
-Replay re-ingests each recorded member after checking its decompressed content digest, rebuilds,
-and compares field by field — per band, per household, per exclusion reason, the fingerprint, and
-a digest over every charged row. It exits non-zero if anything differs. Baselines are git-ignored.
-
-Measurements over members 4, 5 and 135 (27 real `ToU` households, 2013), what they show and what
-they do not: [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md).
-
-## Forecasting (backtest)
-
-How much of a household's next week is predictable from its own past daily totals?
-
-```bash
-uv run run-forecast-experiment --database data/warehouse/energy.duckdb
-```
-
-Then open the **Forecast (backtest)** tab. The target is one household's recorded
-consumption, in kWh, grouped by **source-date label** — a grouping of labels as written,
-whose correspondence to a local calendar day is not established, and not proof the meter
-covered the whole day.
-
-Two baselines are compared, plus a persistence reference: the same source weekday from the
-previous week, and a four-week same-weekday mean. Origins roll weekly, each model sees only
-data dated on or before its origin, and the final 28 days of each household's run are an
-holdout scored once. **Holdout MAE: 1.901 kWh for the four-week mean**, against 2.121 for
-the one-week naive, over holdout target days averaging 10.1 kWh. The forty households are
-a retrospective, clean-run cohort chosen by data criteria, not an operational sample.
-
-A model that needs an unusable day **declines** and says why. Nothing is filled with zero,
-no absent date is bridged, and a partial date is never treated as whole. MAE is used rather
-than MAPE because 975 daily totals in the loaded data are exactly zero.
-
-This is a **historical backtest, not a live forecast**, and it is not a bill, a saving, an
-appliance claim or a statement about tariff response. Details and limits:
-[`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
-
-### Recording and reproducing a published result
-
-A published dbt build can be recorded as a **format-2 baseline** and rebuilt from its
-recorded inputs alone:
-
-```bash
-uv run capture-published-baseline --root <publication root>          # -> data/baselines/pub2-<id>.json
-uv run replay-published-baseline --baseline data/baselines/pub2-<id>.json \
-    --into data/proof-scratch/replay-<id>
-```
-
-Replay verifies the source archive, each member's content digest and the workbook **before**
-creating anything, then re-ingests those members and runs the ordinary `build-candidate`
-path — a real dbt build with every model and every test — into a destination that must not
-already exist. Nothing is copied from the publication being checked. It exits `0` when every
-input, identity and output matches, `1` when something differs (naming the fields), and `2`
-when it cannot reproduce at all.
-
-*Reproduced* means the inputs, the calculation and runtime identity, and every logical
-output are identical: relation schemas, row counts, every row including duplicate
-multiplicity, the accounting ladder and the exact unrounded decimals. Execution provenance —
-run ids, timestamps, paths, the database bytes and the seal — is new by construction and is
-never compared. To replay you need the source archive and, for the workbook schedule,
-`data/raw/Tariffs.xlsx`; you do **not** need the publication that was recorded.
-
-Format 1 (`capture-baseline` / `replay-baseline`) records the Python scenario and is
-unchanged. The two formats refuse each other's files.
-
-### Viewing a published version
-
-The sidebar's **Source** control chooses between a **warehouse file** you pick yourself and
-the **published version** the publication manifest names. The warehouse picker offers the
-two ordinary choices — **Main sample** and **Synthetic demo — invented data** — and keeps
-REC-001's *replayed baseline* and *expanded sample* behind **Show comparison warehouses**,
-because those two are artefacts of one past investigation rather than alternatives to the
-working warehouse. A file with no recorded role is listed under its own file name and is
-never hidden. The exact file, its source members and its household count are in the sidebar
-caption under whatever is selected. In published mode the manifest is
-resolved once per page load and every tab reads that one sealed file: readings and load
-history from `main`, tariff figures and run identity from the dbt build the seal certifies.
-If nothing is published, or the seal and the build record disagree, the page says so and
-shows nothing — it never falls back to a local file under the word "published".
-
-Point the app at a disposable publication root rather than creating `data/published`:
-
-```bash
-uv run build-candidate --source data/warehouse/demo.duckdb --root /tmp/demo-pub --schedule demo
-uv run publication --root /tmp/demo-pub promote /tmp/demo-pub/versions/<file> --expect-published none
-ENERGY_RECONCILIATION_PUBLICATION_ROOT=/tmp/demo-pub \
-  PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
-```
-
-The tab shows a report only when it **describes the selected dataset**: the report's own
-dataset digest and every warehouse-level figure on the page are recomputed from the selected
-file's rows and must agree. File names settle nothing — a byte-identical copy under another
-name is accepted, different data under the same name is refused, and the file the report was
-originally run against is shown as provenance only.
-
-## Tests
+## Tests and CI
 
 ```bash
 uv run pytest -q
 ```
 
-305 tests, all synthetic. **No dataset needed** — every fixture builds a small zip archive in a
-temporary directory. The tariff tests check hand-computed figures written in each test's
-docstring: price-unit conversion, band boundaries, a duplicated schedule key, an unmatched
-reading, readings outside the schedule period, conflicts, and repeated autumn timestamp labels.
-Others assert the rendered chart specification, that every scope's two shares come from the same
-rows, that an empty selection produces no zero substitutes, and that the calculation fingerprint
-covers the shared policy module — checked against the models' real import closure, not assumed.
+563 tests. None needs the real dataset: fixtures build small zip archives in temporary
+directories, and the tariff tests check hand-computed figures written in each test's docstring.
+Two tests skip, by name, when a local real or demo warehouse is absent. Several tests run real
+`dbt build`s against synthetic warehouses, so the suite takes a few minutes.
 
-## What the profiler does
-
-- Streams one member out of the zip without extracting it. The archive is opened read-only.
-- Uses about 39 MB of memory for a million rows. Duplicate detection goes through a temporary
-  SQLite database rather than holding rows in memory.
-- Parses consumption with `Decimal`. `NaN` and `Infinity` are rejected into their own category
-  rather than accepted as numbers.
-- Validates timestamps against the observed format and keeps the original text. It attaches no
-  timezone and converts nothing.
-- Puts every record in exactly one category and states which counters are mutually exclusive and
-  which overlap, so the totals can be checked.
-
-Options and output layout: [`docs/profiling.md`](docs/profiling.md).
-
-## Results from the real dataset
-
-One member (`LCL-June2015v2_0.csv`) of the 168 in the archive, read in full. These numbers describe
-that member only.
-
-| | |
-|---|---:|
-| Data records | 1,000,000 |
-| Malformed records | 0 |
-| Records with no validation issue | 999,971 |
-| Finite numeric values | 999,971 |
-| `Null` tokens | 29 |
-| Zeros (part of the finite values) | 45,538 |
-| Negative values | 0 |
-| Invalid timestamps | 0 |
-| Timestamps off the half-hour | 29 |
-| Exact duplicate rows | 688 |
-| Household + timestamp collisions | 688 |
-| Collisions where the value disagreed | 0 |
-| Households | 30 |
-| Runtime / peak memory | ~11 s / ~39 MB |
-
-Consumption, over the 999,971 finite values. Count, minimum, maximum and sum are exact — accumulated
-with `Decimal` while streaming. The mean is the only rounded figure. Percentiles use nearest rank, so
-each one is a value that actually appears in the data.
-
-| | |
-|---|---:|
-| Minimum | `0` |
-| Median | `0.129` |
-| 95th / 99th percentile | `0.829` / `1.85` |
-| Maximum | `6.5279999` |
-| Mean | `0.239579733` |
-| Sum | `239572.7849879` |
-
-The distribution is heavily skewed: the maximum is about fifty times the median. Some values carry
-seven decimal places, such as `6.5279999` and `6.5100002`. Why the source stores them that way is
-unknown, and the profiler reports them as they appear rather than rounding them.
-
-Full report: [`data/profiles/lcl-june2015v2-0-profile.json`](data/profiles/lcl-june2015v2-0-profile.json).
-
-## Running on the real dataset
-
-The raw data is about 1.5 GB and is not in this repository; `data/raw/` is git-ignored.
-
-1. Download from the London Datastore:
-   <https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d>
-2. Put `Partitioned LCL Data.zip` in `data/raw/`. Leave it zipped.
-3. Run `uv run profile-member`.
-
-To check what you downloaded, [`data/manifests/raw-file-manifest.csv`](data/manifests/raw-file-manifest.csv)
-records the sizes and SHA-256 of each file. The partitioned archive is 795,722,689 bytes,
-SHA-256 `149a6a9c43c622fd0a14b7d11be055665317d3018d9fb7e1043bd51420bfaea5`.
-
-## Why the profiler counts what it counts
-
-Three things decide whether a total built from this data is correct.
-
-**Missing is not zero.** A `Null` or an absent row means the meter did not report. Zero means it
-reported no consumption. Treating the first as the second understates a real customer's usage, and
-nothing raises an error when it happens. The profiler counts them as separate categories and fills
-nothing in.
-
-**Duplicates come in two kinds.** Two rows can be identical, or they can share a household and
-timestamp while disagreeing on the value. The first is usually safe to collapse; the second means the
-source contradicts itself and something has to choose. They are counted separately. In the profiled
-member there were 688 of the first kind and none of the second.
-
-**The timestamps are ambiguous.** They carry no timezone, and nothing in the dataset or its
-documentation says whether a timestamp marks the start or the end of its half-hour. Both are recorded
-as unknown. The profiler stores timestamps exactly as supplied so that a later decision can be
-applied — and changed — without reprocessing.
-
-## Limitations
-
-- No billing or settlement calculation, no forecasting, no AI features. The tariff figures are a
-  scenario under a stated, unresolved assumption, not a cost anyone paid. No dbt models, Airflow
-  DAGs, Spark jobs or cloud deployment. A dbt project now holds the staging view, the policy
-  models, both tariff dimensions, the classification and both charge facts, with 49 dbt tests;
-  all of its SQL is generated from `policy.py` and `models.py` so no rule is written twice, and
-  it reproduces the Python figures exactly. **It has no publisher**: `build-tariff-scenario`
-  still does every scenario build from its own dimensions, and the dbt tables are candidate
-  outputs that nothing reads. `uv run build-candidate` creates and seals an isolated warehouse
-  candidate — sealed only when its latest recorded build attempt succeeded, ran every model and
-  test the project defines, and left tables that still digest as that attempt recorded — and
-  `uv run publication` promotes or rolls one back. `tariff/reads.py` is the supported way to
-  read a validated build: it validates a version once and returns a context whose relations and
-  run identity are dbt's, never the Python scenario copied into the same file. **The dashboard
-  is not yet pointed at it.** Design in
-  [`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md), progress in
-  [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md). See
-  [`docs/roadmap.md`](docs/roadmap.md) for what is planned.
-- One member of 168 has been profiled in full, and three loaded into the database. Findings are not
-  archive-wide, and three members are not any household's complete history. The 27 `ToU` households
-  in member 135 are a **bounded, non-representative subset** — the households that happen to occupy
-  one file, not a sample drawn from the trial. Nothing here is representative of the trial or of
-  London, and no figure should be scaled up.
-- A household charged for far fewer readings than its neighbours has **limited observed coverage**
-  in the loaded members. Why readings are absent is not established and is not guessed at.
-- No geographic breakdown is produced. One would be legitimate only from metadata properly linked
-  to these households, and none has been linked.
-- No causal claim is made about the tariff. Nothing measured here can show whether anyone responded
-  to a price signal.
-- Ingestion holds a whole member in one transaction so that a failure cannot publish partial data.
-  That costs about 1 GB of memory per million-row member.
-- The explorer withholds a consumption total for any household whose readings conflict, rather than
-  choosing between them.
-- The timezone convention and the interval start/end question are unresolved, which is enough to
-  block any defensible billing period.
-- Causes are not interpreted. Why a zero, a `Null`, a gap or a duplicate occurs is recorded as
-  unknown.
-- Members are cut on row count, so a household's readings can continue into the next file.
-  Processing members independently will truncate those households.
-
-[`docs/portfolio-evidence.md`](docs/portfolio-evidence.md) keeps an explicit list of what is not yet
-claimable.
-
-## Requirements
-
-Python 3.12+ and [uv](https://docs.astral.sh/uv/), which installs a matching Python itself. Use
-`uv sync --frozen` to install exactly the locked versions rather than re-resolving them.
-
-**Tested platform.** Linux — Ubuntu 24.04 running under WSL2, Python 3.12.14, dbt-core 1.12.4 with
-dbt-duckdb 1.11.0, DuckDB 1.5.5. That is the only environment the workflow has been exercised in.
-It is not known to work on macOS or on native Windows, and no claim is made for either; the
-publication design also relies on POSIX `rename` and `O_EXCL` semantics on one filesystem, and the
-recovery path reads `/proc`, so a non-Linux port would need its own verification.
-
-The profiler imports only the Python standard library — `csv`, `zipfile`, `sqlite3`, `decimal` and
-similar. Ingestion and the explorer use `duckdb`, `pyarrow`, `pandas` and `streamlit`; the tariff
-schedule is read with `openpyxl`; the tariff models are built by `dbt-core` with `dbt-duckdb`.
-`pytest` and `ruff` are development dependencies.
-
-## Continuous integration
-
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs, on Linux with the locked
-dependencies: `ruff check`, `ruff format --check`, the policy-macro drift check, the full test
-suite (which builds real dbt projects against synthetic warehouses and exercises the publication,
-sealing and replay boundaries), and the synthetic quickstart above.
-
-**Verified on GitHub Actions**, not merely written: run
-[34405294825](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34405294825) for
-commit `e7a2eaf` passed every step — 561 tests passed, 2 skipped, and the quickstart's 12 assertions
-matched with the replay comparing 38 fields and 0 differing.
-
-**What it cannot cover.** The real dataset and the publisher's workbook are not redistributed, so
-real-data equivalence is a **local** gate, not a CI one. Two tests skip there and say why: the
-real-warehouse forecast check, and one explorer check needing a loaded demo warehouse. The run
-prints every skip by name. The workflow has no retries: the unresolved dbt segfault will fail a run
-rather than be hidden.
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `ruff check`, `ruff format --check`,
+the policy-macro drift check, the test suite and the synthetic quickstart on `ubuntu-24.04` with
+locked dependencies and no retries. It passed on GitHub Actions
+([run 34406642130](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34406642130)
+for commit `336bb21`: 561 passed, 2 skipped, quickstart figures matched, replay 38 fields with
+0 differing). A green run shows the synthetic path
+reproduces on a second machine; it does not exercise the real dataset, which stays a local check.
 
 ## Documentation
 
 | | |
 |---|---|
-| [`docs/roadmap.md`](docs/roadmap.md) | Seven delivery milestones and their completion conditions |
-| [`docs/profiling.md`](docs/profiling.md) | Running the profiler; what the report contains |
+| [`docs/publication-workflow.md`](docs/publication-workflow.md) | Build, seal, promote, read, record and replay — step by step |
+| [`docs/anl-003-dbt-design.md`](docs/anl-003-dbt-design.md) | The dbt port: decisions D1–D9 and the figures it must reproduce |
+| [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md) | The tariff scenario: model, measurements, reproduction and limits |
 | [`docs/anl-001-tariff-workbook-findings.md`](docs/anl-001-tariff-workbook-findings.md) | What the tariff workbook actually contains |
-| [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md) | The tariff scenario: model, measurements and limits |
-| [`docs/rec-001-source-expansion.md`](docs/rec-001-source-expansion.md) | Reproducing a result, and explaining what more source changed |
 | [`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md) | The forecasting backtest: design, results and limits |
-| [`docs/source-data-profile.md`](docs/source-data-profile.md) | The full source investigation |
-| [`docs/rep-001-verified-facts.md`](docs/rep-001-verified-facts.md) | What is established, with evidence |
-| [`docs/rep-001-assumptions-and-open-questions.md`](docs/rep-001-assumptions-and-open-questions.md) | What is not established |
-| [`docs/portfolio-evidence.md`](docs/portfolio-evidence.md) | Measured results and what is not yet claimable |
+| [`docs/i-08-prior-data-eligibility.md`](docs/i-08-prior-data-eligibility.md) | Forecast eligibility without hindsight |
+| [`docs/rec-001-source-expansion.md`](docs/rec-001-source-expansion.md) | Reproducing a result and explaining what more source changed |
+| [`docs/source-data-profile.md`](docs/source-data-profile.md) | The full source investigation, every claim labelled |
+| [`docs/rep-001-verified-facts.md`](docs/rep-001-verified-facts.md) · [`…-assumptions-and-open-questions.md`](docs/rep-001-assumptions-and-open-questions.md) | What is established, and what is not |
+| [`docs/profiling.md`](docs/profiling.md) | Running the profiler; what the report contains |
+| [`docs/roadmap.md`](docs/roadmap.md) | Delivery milestones and their completion conditions |
+| [`docs/ideas.md`](docs/ideas.md) | Candidate work recorded but not authorised |
+| [`docs/tickets/`](docs/tickets/) | The ticket for each piece of work, written before it began |
 
-Statements in the investigation are labelled VERIFIED (measured), PUBLISHER-DOCUMENTED (stated by the
-data publisher, quoted), INFERRED (reasoned), CONTRADICTED, or UNKNOWN.
+## Data source, attribution and licence
 
-## Data source and licence
-
-> Contains data from *SmartMeter Energy Consumption Data in London Households*, published by UK Power
-> Networks via the London Datastore, licensed under the Creative Commons Attribution 4.0
+> Contains data from *SmartMeter Energy Consumption Data in London Households*, published by UK
+> Power Networks via the London Datastore under the Creative Commons Attribution 4.0
 > International licence (CC BY 4.0). Accessed 2026-09-06 from
 > <https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d>
 
-The licence link on the dataset page resolves to <https://creativecommons.org/licenses/by/4.0/>. It
-appears in the dataset's own licence field rather than in the site footer, so the version applies to
-this dataset. The publisher supplies no required attribution sentence, so the wording above is this
-project's own. Details in [`docs/source-data-profile.md`](docs/source-data-profile.md) §14.5.
+The tariff workbook (`Tariffs.xlsx`) is one of that dataset's published resources, so the same
+attribution covers it (checked on the dataset page, 2026-09-09). The publisher supplies no
+required attribution sentence; the wording above is this project's own. Details:
+[`docs/source-data-profile.md`](docs/source-data-profile.md) §14.5.
 
-**The tariff workbook is part of the same dataset.** `Tariffs.xlsx` is one of that dataset's three
-published resources — listed on the dataset page as `Tariffs`, 239.63 kB, matching the 245,384
-bytes recorded in `docs/source-data-profile.md` §14 — so the attribution above covers it. That was
-checked on the dataset page rather than assumed from the other files' licence (re-verified
-2026-09-09).
+**What is and is not redistributed.** No readings and no workbook are in this repository. One
+derived artefact is tracked: the profile report for source file 0, which holds counts,
+distributions and per-household spans keyed by the dataset's own pseudonymous household ids, and
+no reading values. The only loadable data committed is the invented demo archive.
 
-**Neither is redistributed here.** No dataset file and no workbook has ever been committed:
-`data/raw/` is ignored, and the only data in the repository is the invented demo archive. Obtain the
-real inputs yourself from the dataset page above and place them in `data/raw/`; the quickstart needs
-neither.
-
-**Code licence: none yet.** This repository carries no `LICENSE` file and no `license` field in
-`pyproject.toml`, so no permission to use, modify or redistribute the code is currently granted —
-default copyright applies. That is an open decision, not an oversight; choosing a licence is the
-owner's call. Until one is added, treat the code as readable but not reusable.
+**Code licence: not yet chosen.** There is no `LICENSE` file and no `license` field in
+`pyproject.toml`, so no permission to use, modify or redistribute the code is granted yet; default
+copyright applies. Until one is added, treat the code as readable but not reusable.

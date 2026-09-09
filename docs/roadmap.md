@@ -7,7 +7,7 @@ with what it delivers and the condition under which it is complete.
 Completing a milestone means an artefact exists and its completion condition is satisfied — nothing
 more. No milestone carries a date; completion conditions are the only measure used here.
 
-**Status:** M1 is in progress. A first slice of **M2** is built — see
+**Status (2026-09-09):** M1 is in progress. A first slice of **M2** is built — see
 [`tickets/ING-001-standardised-ingestion-and-explorer.md`](tickets/ING-001-standardised-ingestion-and-explorer.md):
 standardised ingestion into DuckDB with a decided rerun policy, plus a household data-quality
 explorer. M2's remaining items (Parquet output, rejected-record reasons across the whole archive,
@@ -16,9 +16,11 @@ cross-file processing beyond three members) are not done.
 A first slice of **M3** is also built — see
 [`tickets/ANL-002-tariff-scenario.md`](tickets/ANL-002-tariff-scenario.md): the tariff band
 schedule, the publisher-documented price catalogue and an assumption-labelled interval charge
-scenario, materialised in DuckDB and measured over one real `ToU` member. **M3's dbt deliverable
-is not met** — the models are written as standalone SELECTs, which gives the port working, tested
-SQL to start from but does not make it mechanical. Tracked as ANL-003 below. Orchestration and
+scenario, materialised in DuckDB and measured over one real `ToU` member. The tariff models
+have since been **ported to dbt** (ANL-003 below, steps 0–5): a candidate warehouse is built and
+sealed only when every dbt model and test passed, promoted by an atomic manifest swap, read
+through a validated contract, served to the dashboard, and recordable as a replayable baseline.
+An intermittent `dbt build` segfault is an open incident (ANL-003 ticket). Orchestration and
 cloud deployment remain planned.
 
 See [`../README.md`](../README.md) for what runs today, and
@@ -94,7 +96,7 @@ Candidate work that is recorded but not authorised lives in [`ideas.md`](ideas.m
 
 ### ANL-003 — Port the tariff models into dbt (follow-up inside M3)
 
-**Status: steps 0–4 implemented 2026-09-08; steps 5–7 not started.** Decisions in
+**Status: steps 0–4 implemented 2026-09-08; step 5 (publication, read contract, dashboard, format-2 baselines) implemented 2026-09-09; steps 6–7 not started; one open incident (intermittent `dbt build` segfault).** Decisions in
 [`anl-003-dbt-design.md`](anl-003-dbt-design.md), sequenced in
 [`tickets/ANL-003-dbt-port.md`](tickets/ANL-003-dbt-port.md).
 

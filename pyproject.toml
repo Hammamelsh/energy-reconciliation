@@ -1,6 +1,8 @@
 [project]
 name = "energy-reconciliation"
 version = "0.1.0"
+description = "Half-hourly smart-meter readings from the Low Carbon London trial, taken to a tested, versioned tariff calculation in DuckDB and dbt"
+readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dbt-core==1.12.4",

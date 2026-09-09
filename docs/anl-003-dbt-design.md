@@ -270,7 +270,7 @@ than charging the wrong group). The product stays
 DuckDB is exact, and the singular test in D7 recomputes it row by row. After D5 the SQL constants in `models.py` are **deleted**, so the
 dbt models are the definition and Python holds no copy.
 
-### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED and PROVED 2026-09-08; the **core and the candidate workflow are implemented**; the dashboard switch is not)
+### D5 — Publication: **immutable versioned database files and an atomically replaced manifest** (DECIDED and PROVED 2026-09-08; the **core, the candidate workflow and the dashboard switch are implemented**, the last on 2026-09-09)
 
 **Why the first draft below was wrong.** It built into a `scenario_build` schema inside
 the live warehouse and published with one transaction. Measured (table further down):

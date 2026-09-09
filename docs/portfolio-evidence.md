@@ -7,8 +7,9 @@ than from memory or optimism.
 **This file is deliberately not a CV.** No bullet here is phrased for a recruiter. Several entries
 are marked NOT-YET-CV-READY, and those must not be used until the gap named in them is closed.
 
-**Last updated:** 2026-09-07, after REP-001 Phase H. **Status of REP-001: OPEN** (criterion 11.6
-outstanding).
+**Last updated:** 2026-09-09, after ANL-003 step 5. **Status of REP-001: OPEN** (criterion 11.6
+outstanding). Sections 2–4 were written phase by phase and keep their original dates; section 1
+and section 5 are the current summary.
 
 ## How to read this file
 
@@ -26,10 +27,11 @@ Nothing in this file may be upgraded to a stronger label without new evidence re
 
 ## 1. What has actually been built so far
 
-**Honest summary: a verified source investigation plus one working, tested tool.** Eight phases are
-complete. Phase H produced the project's **first production code** — a reproducible one-member
-profiler with 48 passing tests. There is still **no pipeline**: no dbt model, no Airflow DAG, no
-orchestration, no transformation beyond profiling.
+**Honest summary (2026-09-09): a verified source investigation, a profiler, an ingestion path into
+DuckDB, a tariff scenario modelled in dbt with a sealed-and-promoted publication workflow, a
+dashboard that reads published versions, a forecasting backtest, and replayable baselines.** No
+orchestration, no cloud deployment, and one open incident (an intermittent `dbt build` segfault).
+The rows below were written after Phase H (2026-09-07) and are kept; the last row is updated.
 
 | Artefact | Status |
 |---|---|
@@ -42,11 +44,13 @@ orchestration, no transformation beyond profiling.
 | `docs/rep-001-verified-facts.md` (47) and `…-assumptions-and-open-questions.md` (32) | **VERIFIED** exist; non-overlap machine-enforced |
 | `data/profiles/lcl-june2015v2-0-profile.json` | Machine-readable full-member profile — **VERIFIED** exists |
 | `docs/profiling.md` | Exact reproduction command — **VERIFIED** exists |
-| Ingestion pipeline / dbt / Airflow / Spark | **DOES NOT EXIST** |
+| `src/energy_reconciliation/ingest/`, `dbt/`, `candidate.py`, `publication.py`, `tariff/reads.py`, `tariff/published_baseline.py`, `explorer/`, `forecast/` | **VERIFIED** exist and are exercised by `tools/synthetic-quickstart.sh` and the test suite (563 tests; 561 passed and 2 skipped on GitHub-hosted CI, run 34406642130) |
+| Airflow / Spark / cloud deployment | **DOES NOT EXIST** |
 
-> **NOT-YET-CV-READY:** the project cannot yet be described as an end-to-end pipeline, a data
-> platform, or an ELT project. It is a rigorous source investigation plus one profiling tool.
-> Claiming otherwise would fail the first technical question asked about it.
+> **NOT-YET-CV-READY:** the project can be described as a tested, versioned tariff calculation
+> over a local warehouse with an executed reproducibility check. It cannot yet be described as an
+> orchestrated or deployed pipeline, a data platform, or something run unattended — the segfault
+> incident is open. Claiming otherwise would fail the first technical question asked about it.
 
 ---
 
@@ -388,9 +392,9 @@ it: a reproducibility claim that has not been executed is a hypothesis.
 
 | Claim that must NOT be made | Why not |
 |---|---|
-| "Built an end-to-end data pipeline" | Only a profiler exists. No ingestion, no models, no orchestration. |
+| "Built an end-to-end data pipeline" | Archive → warehouse → dbt build → sealed publication → dashboard exists and is exercised end to end on synthetic data in CI, and on three real files locally. There is no orchestration, no scheduling and no deployment, and the build cannot yet run unattended (open segfault incident). Say "a tested, versioned tariff calculation", not "a pipeline in production". |
 | "Processed 167 million rows" | 1,000,000 rows have been read in full, plus roughly 350,000 in samples. The archive total is INFERRED. |
-| "Used dbt / Airflow / Spark / AWS" | Airflow, Spark and AWS: **untouched**. dbt: ANL-003 steps 0–4 (2026-09-08) — `dbt-core 1.12.4` / `dbt-duckdb 1.11.0`, staging view, policy models, both dimensions with verified `DECIMAL` types, the classification and both charge facts, and 49 dbt tests including mutation-checked reconciliation and reason precedence. Every rule is **generated** from `policy.py` / `models.py`, and the dbt facts match the Python path row for row on the three-member warehouse. **There is still no publisher**: the published scenario is built by `build-tariff-scenario` and **consumes nothing dbt produces**; the dbt tables are candidate outputs nothing reads. A publication core with sealed immutable versions and an atomically replaced manifest exists and is process-tested — a candidate seals only when its latest recorded build attempt succeeded (proved with a real process kill) and its tables digest as recorded, with the candidate's code and runtime identity (dbt included) on the record — and a supported read contract returns a validated context whose relations and identity are the dbt build's rather than the Python scenario copied into the same file. The dashboard reads a published version on request, resolving it once per rerun and showing the dbt build's own identity, with an explicit unavailable state. The claim available is "modelled the tariff calculation in dbt, validated the build, published immutable versions and served them to the dashboard"; **not** "the pipeline runs on dbt end to end" — ingestion, the forecasting work and the default dashboard view are still the Python path, and no baseline has yet been replayed from a published build. The claim available is "modelled the tariff calculation in dbt with generated, single-definition policy SQL and tested reconciliation", never "the pipeline runs on dbt". |
+| "Used dbt / Airflow / Spark / AWS" | Airflow, Spark and AWS: **untouched**. dbt: ANL-003 steps 0–4 (2026-09-08) — `dbt-core 1.12.4` / `dbt-duckdb 1.11.0`, staging view, policy models, both dimensions with verified `DECIMAL` types, the classification and both charge facts, and 49 dbt tests including mutation-checked reconciliation and reason precedence. Every rule is **generated** from `policy.py` / `models.py`, and the dbt facts match the Python path row for row on the three-member warehouse. **There is still no publisher**: the published scenario is built by `build-tariff-scenario` and **consumes nothing dbt produces**; the dbt tables are candidate outputs nothing reads. A publication core with sealed immutable versions and an atomically replaced manifest exists and is process-tested — a candidate seals only when its latest recorded build attempt succeeded (proved with a real process kill) and its tables digest as recorded, with the candidate's code and runtime identity (dbt included) on the record — and a supported read contract returns a validated context whose relations and identity are the dbt build's rather than the Python scenario copied into the same file. The dashboard reads a published version on request, resolving it once per rerun and showing the dbt build's own identity, with an explicit unavailable state. The claim available is "modelled the tariff calculation in dbt, validated the build, published immutable versions and served them to the dashboard"; **not** "the pipeline runs on dbt end to end" — ingestion, the forecasting work and the default dashboard view are still the Python path. Format-2 baselines record a published dbt build and have been replayed from the archive alone: 44 of 44 fields matched on the three-file real warehouse and 38 of 38 on the demo, in CI. The claim available is "modelled the tariff calculation in dbt with generated, single-definition policy SQL and tested reconciliation", never "the pipeline runs on dbt". |
 | "Calculated electricity bills" / "reproduced historical costs" | The tariff figures are a **scenario** under assumption A1, which is not established. No standing charge or levy is modelled, and **no separate tax adjustment is applied** — the tax treatment of the published rates is itself unresolved. The flat rate's effective period is UNKNOWN, so no `Std` household is costed at all. |
 | "Showed households responding to price signals" | Nothing measured supports a causal claim. There is no comparison group and no before-and-after in this measurement. |
 | "Analysed London energy use by area" | No geographic breakdown exists. One would require metadata legitimately linked to these households; none has been linked. |
@@ -399,7 +403,7 @@ it: a reproducibility claim that has not been executed is a hypothesis.
 | "Explained why a household's readings stop" | Short coverage is observed. The cause is not established and is not guessed at. |
 | "Handled timezone and DST correctly" | Both conventions are UNKNOWN. Phase G did not find them in the sources it searched, and they are not recoverable from the data. |
 | "Validated the full dataset" | One of two archives is CRC-unverified (deflate64); one of 168 members has been examined in depth. |
-| "Built data-quality tests" | 187 tests cover this project's own logic, including the tariff policies. No test asserts a data-quality rule over the source archive itself. |
+| "Built data-quality tests" | 563 pytest tests and 49 dbt tests cover this project's own logic, including the tariff policies and the accounting reconciliation. No test asserts a data-quality rule over the source archive itself, and a test count establishes nothing about quality by itself. |
 | "Built a schema-validating reader" | The profiler validates and reports; it does not yet emit validated records for downstream use. |
 | "Profiled the whole archive" | One member of 168. |
 
