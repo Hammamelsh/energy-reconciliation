@@ -82,10 +82,11 @@ show:
 
 A zero is a reading: the meter reported no consumption. A `Null` is a row that exists with no
 value in it, and a date with no row at all is a third, different observation — the source says
-nothing. The last two both mean the consumption is unknown, and why is not established. Filling
-either with zero can only push a total downwards, and it establishes nothing about what the
-consumption was. The
-profiler counts them separately, the warehouse policy substitutes nothing, and the dashboard
+nothing. The last two both mean the consumption is unknown, and why is not established.
+Substituting zero for either can understate a household's consumption, and it conceals that the
+coverage was incomplete: the resulting figure reads as a measured total rather than one standing
+in for readings that were never there. The profiler counts them separately, the warehouse policy
+substitutes nothing, and the dashboard
 withholds a total rather than choosing when two rows disagree. Report:
 [`data/profiles/lcl-june2015v2-0-profile.json`](data/profiles/lcl-june2015v2-0-profile.json);
 investigation: [`docs/source-data-profile.md`](docs/source-data-profile.md).
@@ -145,8 +146,8 @@ flowchart LR
   excl -.-> acc
 ```
 
-Three of the eight models are **ephemeral**: dbt inlines them into whatever selects from them
-instead of storing a table, so nothing intermediate can go stale. That is why a build reports
+Three of the eight models are **ephemeral**: dbt creates no relation for them and instead
+compiles each one into a CTE inside every query that selects it. That is why a build reports
 **5 models** — the staging view, the two dimensions and the two facts — alongside its 49 tests.
 
 - **Staging** exposes the loaded readings as dbt sees them.
@@ -154,9 +155,16 @@ instead of storing a table, so nothing intermediate can go stale. That is why a 
   at the same timestamp are conflicts. `int_distinct_readings` is selected by the two accounting
   tests (dotted above). `int_conflicting_labels` is a dead end in the dbt graph today — nothing
   selects it, because `int_classified_readings` applies the same generated conflict rule inline;
-  it is kept as the dbt-side statement of that rule and is exercised by the Python path.
-- **Dimensions** are dbt Python models that read the publisher's tariff workbook (or the invented
-  demo schedule) through the project's own parsers, with `DECIMAL` prices.
+  it is kept as the dbt-side statement of that rule and is exercised by the Python path. Whether
+  it should stay, be selected by a test, or be removed is recorded as an open maintenance
+  question (I-20 in [`docs/ideas.md`](docs/ideas.md)) rather than settled here.
+- **Dimensions** are dbt Python models, because each needs work that has to happen before any
+  row exists. `dim_tariff_band_schedule` reads the half-hourly band schedule from the publisher's
+  workbook — or from the project's invented demo schedule — through the project's own reader,
+  which refuses a duplicated label, and stamps every row with which of the two it came from.
+  `dim_tariff_price` holds the publisher-documented price catalogue, converting pence per kWh to
+  pounds once, exactly, in `Decimal`; doing that division in SQL would evaluate as `DOUBLE` and
+  turn 67.20 p into 0.7559999999999999 on a 1.125 kWh reading.
 - **Facts**: one row per charged reading with its band, price and exact charge; one row per
   excluded reading with exactly one reason (`ineligible_tariff_group`, `outside_schedule_period`,
   `conflicting_label`, `off_grid_observation`, `missing_value`, `unmatched_schedule_label`,
