@@ -231,6 +231,34 @@ This is a **historical backtest, not a live forecast**, and it is not a bill, a 
 appliance claim or a statement about tariff response. Details and limits:
 [`docs/fore-001-forecasting-experiment.md`](docs/fore-001-forecasting-experiment.md).
 
+### Recording and reproducing a published result
+
+A published dbt build can be recorded as a **format-2 baseline** and rebuilt from its
+recorded inputs alone:
+
+```bash
+uv run capture-published-baseline --root <publication root>          # -> data/baselines/pub2-<id>.json
+uv run replay-published-baseline --baseline data/baselines/pub2-<id>.json \
+    --into data/proof-scratch/replay-<id>
+```
+
+Replay verifies the source archive, each member's content digest and the workbook **before**
+creating anything, then re-ingests those members and runs the ordinary `build-candidate`
+path — a real dbt build with every model and every test — into a destination that must not
+already exist. Nothing is copied from the publication being checked. It exits `0` when every
+input, identity and output matches, `1` when something differs (naming the fields), and `2`
+when it cannot reproduce at all.
+
+*Reproduced* means the inputs, the calculation and runtime identity, and every logical
+output are identical: relation schemas, row counts, every row including duplicate
+multiplicity, the accounting ladder and the exact unrounded decimals. Execution provenance —
+run ids, timestamps, paths, the database bytes and the seal — is new by construction and is
+never compared. To replay you need the source archive and, for the workbook schedule,
+`data/raw/Tariffs.xlsx`; you do **not** need the publication that was recorded.
+
+Format 1 (`capture-baseline` / `replay-baseline`) records the Python scenario and is
+unchanged. The two formats refuse each other's files.
+
 ### Viewing a published version
 
 The sidebar's **Source** control chooses between a **warehouse file** you pick yourself and

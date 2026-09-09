@@ -55,19 +55,25 @@ class Difference:
         return self.baseline == self.replay
 
 
-def fact_row_digest(con, run_id: str) -> str:
+def fact_row_digest(con, run_id: str, *, relation: str | None = None) -> str:
     """SHA-256 over every charged row, in a fixed order.
 
     Aggregates can agree while rows differ -- a reading moved between two households, or
     two rows in one band changed by equal and opposite amounts. This digest is what turns
     "the totals match" into "every row matches". Computed in Python from a streamed
     cursor so the ordering and the rendering of every value are ours, not the engine's.
+
+    ``relation`` names the fact to read. It defaults to the unqualified name the Python
+    scenario writes, so format-1 behaviour is byte-identical; passing the dbt build's
+    ``scenario_build.fact_interval_charge_scenario`` computes **the same measure over the
+    other implementation**, which is what makes a cross-implementation claim possible
+    without either side changing what it records.
     """
     digest = hashlib.sha256()
     cur = con.execute(
         "SELECT household_id, source_timestamp_text, band_label, "
         "CAST(consumption_kwh AS VARCHAR), CAST(energy_charge_gbp AS VARCHAR) "
-        "FROM fact_interval_charge_scenario WHERE run_id = ? "
+        f"FROM {relation or 'fact_interval_charge_scenario'} WHERE run_id = ? "
         "ORDER BY household_id, source_timestamp_text, band_label",
         [run_id],
     )

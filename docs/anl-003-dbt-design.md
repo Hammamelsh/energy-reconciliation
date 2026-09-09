@@ -571,6 +571,39 @@ hashing it. Measured after: **1.01 s** per published rerun.
 path is **refused**, because the build attempt records the absolute path it was written
 in. Restoring a publication elsewhere means rebuilding, not copying.
 
+**Baseline format 2, and what "reproduced" means (IMPLEMENTED 2026-09-09).** Format 1
+records the Python scenario and replays it by calling `build_scenario`; it is untouched.
+Format 2 (`tariff/published_baseline.py`) records a **published dbt build**, read through
+the validated contract above so a version whose seal and record disagree can never reach a
+baseline. Replay re-ingests the recorded members from the archive and runs the supported
+`build-candidate` path end to end — a real dbt build with every model and every test —
+into a destination that must not exist. Nothing is copied from the publication.
+
+The contract has three groups, kept apart because they answer different questions:
+
+| Group | Examples | Must match? |
+|---|---|---|
+| Reproduction inputs | archive + per-member content digests, schedule variant/source/digest/rows, price catalogue version, tariff group | **yes** — an unverifiable artifact is a refusal, never a substitution |
+| Calculation and runtime | policy digest, candidate calculation digest (incl. `dimensions.py` + the dbt project), project digest, Python/DuckDB/PyArrow/pandas/openpyxl/dbt versions | **yes** |
+| Logical outputs | relation schemas, row counts, a `compare-rows-1` digest over **every row occurrence**, accounting ladder, exact decimal totals, per band/household/reason | **yes** |
+| Execution provenance | run and attempt ids, timestamps, dbt invocation id, destination paths, publication version, file bytes and seal | **no** — new by construction; recorded for explanation only |
+
+Only two columns are excluded from row comparison, each named and justified: `run_id` on
+both facts (it *is* the attempt identity) and `loaded_at_utc` on the schedule dimension
+(the instant it was materialised). `assumption_id`, every price column and every band label
+are compared. `compare-rows-1` is deliberately **not** `canonical-rows-1`: the latter covers
+integrity and includes `run_id`, so it can never match across two builds.
+
+*Measured on the three-member warehouse:* capture 9.2 s; replay 51.5 s end to end
+(re-ingesting 3,000,000 rows and running a complete dbt build), **44 fields compared, 0
+differ**, including row digests over 456,096 charged and 2,541,866 excluded rows and the
+exact total `£11675.4339216532500000`.
+
+*What a baseline still needs.* It is not self-contained and says so: replay requires the
+source archive with matching member digests and, for the workbook schedule,
+`data/raw/Tariffs.xlsx` with the recorded digest. It does **not** need the publication root,
+the version file, the candidate, or any demonstration directory.
+
 **Producer eligibility, and why the reader could not be exposed without it.** Before this
 slice, `finalise` accepted any attempt whose recorded command began with `build`. Measured:
 `run-dbt … build --exclude test_type:singular` builds every model, **skips all eleven

@@ -88,6 +88,11 @@ def test_reporting_and_replay_code_is_deliberately_not_covered():
         "tariff/cli.py",
         "tariff/baseline.py",
         "tariff/baseline_cli.py",
+        # Format-2 recording and replay read a result and compare it. Neither can change
+        # a stored figure, and putting them in the digest would invalidate every result
+        # whenever the reporting wording changed.
+        "tariff/published_baseline.py",
+        "tariff/reads.py",
     ):
         assert reporting not in covered
 
@@ -220,6 +225,10 @@ def test_the_published_identity_is_a_subset_and_untouched_by_the_candidate_one()
     assert published < candidate
     assert "tariff/dimensions.py" not in published
     assert "tariff/candidate_identity.py" not in published
+    assert "tariff/published_baseline.py" not in candidate, (
+        "recording and comparing a result cannot change one; over-inclusion is the "
+        "failure here"
+    )
     assert "tariff/candidate_identity.py" not in candidate, (
         "the identity code is not the calculation; over-inclusion is the failure here"
     )
