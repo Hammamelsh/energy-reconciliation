@@ -12,7 +12,6 @@ Run with:
 
 from __future__ import annotations
 
-from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -21,6 +20,7 @@ import pandas as pd
 import streamlit as st
 
 from energy_reconciliation.explorer import charts
+from energy_reconciliation.explorer import datasets as ds
 from energy_reconciliation.explorer import forecast_view as fc
 from energy_reconciliation.explorer import queries as q
 from energy_reconciliation.explorer import selection as sel
@@ -39,6 +39,8 @@ SCENARIO_PERIODS = ("Full coverage", "Custom")
 #: The household selector's widget key. Named so that an explicit, user-pressed button
 #: can move the selection -- and only a button ever does.
 HOUSEHOLD_KEY = "household-select"
+WAREHOUSE_KEY = "warehouse-file"
+COMPARISON_KEY = "show-comparison-warehouses"
 
 st.set_page_config(page_title="Household energy explorer", layout="wide")
 st.markdown(
@@ -228,23 +230,7 @@ def render_band_view(
 
 # --------------------------------------------------------------- data source
 available = sorted(WAREHOUSE_DIR.glob("*.duckdb")) if WAREHOUSE_DIR.is_dir() else []
-if not available:
-    st.error(
-        f"No database in `{WAREHOUSE_DIR}/`. Load one first:\n\n"
-        "`uv run ingest-member --demo --database data/warehouse/demo.duckdb`"
-    )
-    st.stop()
 
-# Two databases can hold the same members and therefore earn the same content-derived
-# label -- a replayed baseline beside the warehouse it was replayed from, for instance.
-# Identical entries in a picker are not a cosmetic problem: they are indistinguishable
-# to a reader and ambiguous to select. Where a label repeats, the file name settles it.
-_content_labels = {p: q.dataset_label(p) for p in available}
-_seen = Counter(_content_labels.values())
-labels = {
-    p: (f"{name} — {p.name}" if _seen[name] > 1 else name)
-    for p, name in _content_labels.items()
-}
 st.sidebar.header("Data source")
 # Two explicitly different things to look at, never blended: a mutable warehouse file
 # you pick yourself, or whatever is published right now. The publication is resolved
@@ -260,30 +246,85 @@ mode = st.sidebar.radio(
         "Published version: the sealed dbt build the publication manifest names."
     ),
 )
-picked = st.sidebar.radio(
-    "Dataset",
-    available,
-    index=next((i for i, p in enumerate(available) if p == DEFAULT_DATABASE), 0),
-    format_func=labels.get,
-    disabled=mode == sel.PUBLISHED_MODE,
-    help="Which warehouse file to inspect. Not used when reading the published version.",
-)
+
+picked: Path | None = None
+hidden_pick: Path | None = None
+chosen: ds.Dataset | None = None
+if mode == sel.WAREHOUSE_MODE:
+    # The warehouse picker exists only in this mode. In published mode it would be a
+    # control with no effect, which is worse than no control.
+    if not available:
+        st.error(
+            f"No database in `{WAREHOUSE_DIR}/`. Load one first:\n\n"
+            "`uv run ingest-member --demo --database data/warehouse/demo.duckdb`"
+        )
+        st.stop()
+    entries = ds.catalogue(available, default=DEFAULT_DATABASE)
+    show_comparisons = st.sidebar.checkbox(
+        "Show comparison warehouses",
+        value=False,
+        key=COMPARISON_KEY,
+        help=(
+            "Files kept for one past investigation (REC-001): a replayed baseline and "
+            "the same sample with an extra source file. Useful to open deliberately, "
+            "misleading to offer beside the main sample."
+        ),
+    )
+    visible = [e for e in entries if show_comparisons or not e.is_comparison]
+    # A selection is held by path, never by label text, so renaming a label cannot move
+    # what is being read. If the held path is no longer offered -- the comparisons were
+    # just hidden -- say so rather than silently substituting another file.
+    if st.session_state.get(WAREHOUSE_KEY) not in {e.path for e in visible}:
+        hidden_pick = st.session_state.pop(WAREHOUSE_KEY, None)
+    labels = ds.display_labels(visible)
+    picked = st.sidebar.radio(
+        "Dataset",
+        [e.path for e in visible],
+        index=next((i for i, e in enumerate(visible) if e.path == DEFAULT_DATABASE), 0),
+        format_func=labels.get,
+        key=WAREHOUSE_KEY,
+        help="Which warehouse file to inspect.",
+    )
+    chosen = next(e for e in visible if e.path == picked)
+    if hidden_pick is not None:
+        st.sidebar.info(
+            f"`{hidden_pick.name}` is a comparison warehouse and is now hidden, so "
+            f"**{chosen.label}** is selected instead. Tick *Show comparison "
+            "warehouses* to choose it again."
+        )
+
 selected = sel.resolve(mode, picked)
 
 if not selected.ready:
     # Explicit absence, never a quiet fall back to the local warehouse: "published"
-    # must mean published.
-    st.sidebar.error("No published version")
-    st.error(
-        f"**No published version is available.**\n\n{selected.unavailable}\n\n"
-        "Nothing local is shown in its place: what a *warehouse file* holds is a "
-        "different question from what is published. Switch the **Source** control to "
-        "*Warehouse file* to inspect one directly, or build and promote a candidate:\n\n"
-        "```bash\n"
-        "uv run build-candidate --source data/warehouse/energy.duckdb\n"
-        "uv run publication promote <candidate> --expect-published none\n"
-        "```"
-    )
+    # must mean published. An absent publication is an ordinary state and is said
+    # neutrally; only a publication that exists and fails validation is an error.
+    if selected.absent:
+        st.sidebar.info("No published version yet")
+        st.info(
+            "**No published version yet.** Nothing has been promoted, so there is "
+            "nothing to show here.\n\n"
+            "Nothing local is shown in its place: what a *warehouse file* holds is a "
+            "different question from what is published. Switch **Source** to "
+            "*Warehouse file* to inspect one directly."
+        )
+    else:
+        st.sidebar.error("Published version unavailable")
+        st.error(
+            "**The published version could not be read, so nothing is shown.**\n\n"
+            f"{selected.unavailable}\n\n"
+            "Nothing local is shown in its place: what a *warehouse file* holds is a "
+            "different question from what is published."
+        )
+    with st.expander("How to publish a version"):
+        st.markdown(
+            "```bash\n"
+            "uv run build-candidate --source data/warehouse/energy.duckdb\n"
+            "uv run publication promote <candidate> --expect-published none\n"
+            "```\n"
+            "`uv run publication status` reports what is published now, and "
+            "`uv run publication inventory` lists every version file and its role."
+        )
     st.stop()
 
 database = selected.database
@@ -298,8 +339,9 @@ if selected.is_published:
     )
 else:
     st.sidebar.caption(
-        f"File: `{database.name}` — a warehouse file you selected, **not** a published "
-        "version. Loaded files are listed under Source records."
+        f"**{chosen.label}** — {chosen.note}.\n\n{chosen.detail}. A warehouse file you "
+        "selected, **not** a published version. Loaded files are listed under Source "
+        "records."
     )
 
 people = q.households(database)

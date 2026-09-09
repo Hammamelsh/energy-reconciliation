@@ -167,12 +167,15 @@ def test_no_publication_is_an_explicit_unavailable_state(published, tmp_path):
     ):
         at = _fresh(sel.PUBLISHED_MODE)
     assert not at.exception, [e.value for e in at.exception]
-    errors = [e.value for e in at.error]
-    assert any("No published version is available" in e for e in errors), errors
-    assert any("nothing is published" in e for e in errors)
+    # An absence is an ordinary state, not a failure: neutral wording, no error styling.
+    assert not at.error, [e.value for e in at.error]
+    infos = [i.value for i in at.info]
+    assert any("No published version yet" in i for i in infos), infos
     body = _text(at)
     assert "Nothing local is shown in its place" in body
-    assert "build-candidate" in body and "publication promote" in body
+    assert "How to publish a version" in [e.label for e in at.expander], (
+        "the setup commands are available, but not in the reader's way"
+    )
     # nothing from the local warehouse leaked in under the word "published"
     assert not at.tabs, "the page stops before rendering any tab"
     assert not at.metric
@@ -197,9 +200,11 @@ def test_a_broken_publication_shows_no_stale_or_legacy_results(published):
     finally:
         seal_path.write_bytes(original)
     assert not at.exception, [e.value for e in at.exception]
+    # A publication that exists and fails validation IS an error, and stays styled as one.
     errors = [e.value for e in at.error]
-    assert any("No published version is available" in e for e in errors)
+    assert any("could not be read" in e for e in errors), errors
     assert any("the seal names" in e for e in errors), errors
+    assert not any("No published version yet" in i.value for i in at.info)
     assert not at.metric, "no figures at all, stale or otherwise"
 
 
@@ -218,7 +223,7 @@ def test_a_publication_directory_moved_to_another_path_is_refused(published, tmp
         at = _fresh(sel.PUBLISHED_MODE)
     assert not at.exception, [e.value for e in at.exception]
     errors = [e.value for e in at.error]
-    assert any("No published version is available" in e for e in errors)
+    assert any("could not be read" in e for e in errors), errors
     assert any("not this file" in e for e in errors), errors
     assert not at.metric
 

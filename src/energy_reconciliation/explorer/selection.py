@@ -98,6 +98,14 @@ def clear_caches() -> None:
     _APPLICABILITY.clear()
 
 
+def _manifest_exists(root: Path) -> bool:
+    """Is there a publication at all? A corrupt manifest counts as one that is broken."""
+    try:
+        return publication.read_manifest(root) is not None
+    except (OSError, ValueError):  # pragma: no cover - a corrupt manifest
+        return True
+
+
 def _cache_key(root: Path) -> tuple[str, str] | None:
     """The identity of whatever the manifest names now, or None if it cannot be read."""
     try:
@@ -119,6 +127,10 @@ class Selection:
     relations: ta.Relations | None
     context: reads.ReadContext | None = None
     unavailable: str = ""
+    #: True only when **nothing has been promoted**. An ordinary state, said neutrally.
+    #: A manifest that exists but does not validate is not absent -- it is broken, and
+    #: the two must not look the same to a reader.
+    absent: bool = False
 
     @property
     def ready(self) -> bool:
@@ -154,7 +166,15 @@ def published(root: Path | None = None) -> Selection:
     try:
         context = reads.published(root)
     except publication.Unavailable as error:
-        return Selection(PUBLISHED_MODE, None, None, unavailable=str(error))
+        # "nothing promoted" and "the manifest names a file that is gone" both arrive
+        # here; only the first is an absence.
+        return Selection(
+            PUBLISHED_MODE,
+            None,
+            None,
+            unavailable=str(error),
+            absent=not _manifest_exists(root),
+        )
     except reads.ReadContextError as error:
         return Selection(PUBLISHED_MODE, None, None, unavailable=str(error))
     except publication.PublicationError as error:  # pragma: no cover - defensive

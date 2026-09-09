@@ -87,29 +87,57 @@ def loaded_sources(database: Path) -> list[LoadedSource]:
     return [LoadedSource(*r) for r in rows]
 
 
-def dataset_label(database: Path) -> str:
-    """A friendly name derived from the contents, not the filename."""
+@dataclass(frozen=True, slots=True)
+class DatasetSummary:
+    """What one warehouse file holds, in the terms a picker needs.
+
+    ``all_demo`` is a property of the data, not of the file name: the synthetic archive
+    writes household ids beginning ``DEMO``, and no real household id does.
+    """
+
+    households: int
+    members: tuple[str, ...]
+    all_demo: bool
+
+
+def dataset_summary(database: Path) -> DatasetSummary:
+    """One read of a warehouse: how many households, which source files, demo or not."""
     con = _con(database)
     try:
-        people = [
-            r[0]
-            for r in con.execute(
-                "SELECT DISTINCT household_id FROM readings"
-            ).fetchall()
-        ]
-        members = [
+        total, demo = con.execute(
+            "SELECT COUNT(DISTINCT household_id), "
+            "COUNT(DISTINCT household_id) FILTER (WHERE household_id LIKE 'DEMO%') "
+            "FROM readings"
+        ).fetchone()
+        members = tuple(
             r[0].split("/")[-1]
             for r in con.execute(
                 "SELECT DISTINCT member_name FROM load_registry WHERE status = 'published' "
                 "ORDER BY member_name"
             ).fetchall()
-        ]
+        )
     finally:
         con.close()
-    if people and all(h.startswith("DEMO") for h in people):
+    return DatasetSummary(
+        households=int(total),
+        members=members,
+        all_demo=bool(total) and total == demo,
+    )
+
+
+def dataset_label(database: Path) -> str:
+    """A friendly name derived from the contents, not the filename.
+
+    Kept for callers that want a content-derived description of any warehouse. The
+    dashboard's picker uses :mod:`explorer.datasets` instead, which adds the *role* a
+    file plays -- something no amount of reading its contents can establish.
+    """
+    summary = dataset_summary(database)
+    if summary.all_demo:
         return "Synthetic demo (invented data)"
     tags = ", ".join(
-        m.replace("LCL-June2015v2_", "member ").replace(".csv", "") for m in members
+        m.replace("LCL-June2015v2_", "member ").replace(".csv", "")
+        for m in summary.members
     )
     return f"Low Carbon London sample ({tags})" if tags else "Low Carbon London sample"
 

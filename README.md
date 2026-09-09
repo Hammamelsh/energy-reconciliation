@@ -234,7 +234,13 @@ appliance claim or a statement about tariff response. Details and limits:
 ### Viewing a published version
 
 The sidebar's **Source** control chooses between a **warehouse file** you pick yourself and
-the **published version** the publication manifest names. In published mode the manifest is
+the **published version** the publication manifest names. The warehouse picker offers the
+two ordinary choices — **Main sample** and **Synthetic demo — invented data** — and keeps
+REC-001's *replayed baseline* and *expanded sample* behind **Show comparison warehouses**,
+because those two are artefacts of one past investigation rather than alternatives to the
+working warehouse. A file with no recorded role is listed under its own file name and is
+never hidden. The exact file, its source members and its household count are in the sidebar
+caption under whatever is selected. In published mode the manifest is
 resolved once per page load and every tab reads that one sealed file: readings and load
 history from `main`, tariff figures and run identity from the dbt build the seal certifies.
 If nothing is published, or the seal and the build record disagree, the page says so and
