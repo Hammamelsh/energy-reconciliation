@@ -221,6 +221,71 @@ Loaded by `import dbt.cli.main` alone: `dbt-extractor 0.6.0` (abi3), `protobuf 6
 `pyarrow 25.0.1`. All are cp312 or abi3 wheels for this interpreter. Two crashes were in
 Jinja node compilation and one in the static parse; that is where they *surfaced*.
 
+### Parser, interpreter and dependency inventory (established 2026-09-09)
+
+**Parser settings — identical now and at crash time, and none of them exotic.** Resolved
+through `dbt.cli.flags.Flags` for this project: `USE_V2_PARSER False`, `STATIC_PARSER True`,
+`PARTIAL_PARSE True`, `USE_EXPERIMENTAL_PARSER False`. The crash-era log dumps show the same
+three values across all 83 recorded invocations. `use_v2_parser` is a real parameter in
+dbt 1.12.4 but was **not** logged then, so its crash-era value is strictly **unknown**; it
+defaults to False, no `DBT_*` environment variable is set, and `dbt_project.yml`'s `flags:`
+block contains only `send_anonymous_usage_stats: false`. Nothing here distinguishes the
+crashing runs from the 300 that did not crash.
+
+**Interpreter provenance — the crash binary and the current one are the same file.**
+`…/uv/python/cpython-3.12.14-linux-x86_64-gnu/bin/python3.12`, sha256
+`f7c6210eb40fadcd3c2889dddd24a15fc2c9f926aec5a03bf9da66e12d581526`, Build ID
+`1b4adbcfef173a5a342e67de1b23f751d763439a`, `3.12.14 (main, Sep 1 2026)` built with
+**Clang 22.1.3** — a uv-managed python-build-standalone distribution, not a distro build.
+This is the binary `addr2line` resolved the two recorded faults against.
+
+**Dependencies match the lockfile.** `uv sync --frozen --dry-run` → *Checked 85 packages …
+Would make no changes*. That says the resolved set is the locked set; it says **nothing**
+about memory safety. Native extensions, with wheel origin: `dbt-extractor 0.6.0` (cp39-abi3),
+`protobuf 6.33.6` (cp39-abi3), `msgpack 1.2.2`, `MarkupSafe 3.0.3`, `pydantic-core 2.46.5`,
+`rpds-py 2026.6.3`, `PyYAML 6.0.3`, `charset-normalizer 3.5.1`, `duckdb 1.5.5`,
+`pyarrow 25.0.1`, `pandas 3.0.5` — the rest cp312-cp312 manylinux.
+
+### Lead tested and weakened: CPython #149692
+
+[cpython#149692](https://github.com/python/cpython/issues/149692) reports heap corruption in
+stdlib `re`/`_sre` on **3.12.x, Linux x86_64**, surfacing as SIGSEGV and GC-time crashes —
+a good shape match, since dbt's parse and Jinja-compile phases (where all three of our
+crashes landed) are regex-heavy.
+
+**Tested on this interpreter and not reproduced.** Its own published reproducer (pattern
+`\w+(?:[-']\w+)*`, 50,000 chunks of ~1,500 chars, `--listcomp`), run with
+`PYTHONFAULTHANDLER=1` for 40 rounds: **completed cleanly in 75 s**, passing straight through
+the rounds 20–25 window where the reporter sees failures on 3.12.13. The issue names 3.12.13
+and 3.12.3; this is 3.12.14, which may carry a fix, and one 40-round run does not prove the
+defect absent. But the specific published lead does not reproduce here, so it is **weakened,
+not confirmed**. A comparison arm on another interpreter was not run: it only discriminates
+if this arm crashes.
+
+### No suitable comparison interpreter is available, and none was installed
+
+The only independently built interpreter present is the system's **Python 3.14.4 (GCC
+15.2.0)**. Using it would change the Python *minor* version **and** force different wheel
+artifacts (cp314 instead of the cp312 wheels above), so it is doubly confounded and would not
+isolate the interpreter build. Nothing was installed and no project requirement was relaxed
+to manufacture a comparison.
+
+**The exact comparison to run, when an independent 3.12 build is available.** cp312 wheels
+are ABI-compatible across CPython 3.12 builds, so the same wheel artifacts would be reused
+and only the interpreter build would differ:
+
+```bash
+# one administrator action, and only if you want this comparison:
+sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt-get install -y python3.12 python3.12-venv
+# then, changing nothing in the project:
+uv venv --python /usr/bin/python3.12 /tmp/alt312
+UV_PROJECT_ENVIRONMENT=/tmp/alt312 uv sync --frozen
+UV_PROJECT_ENVIRONMENT=/tmp/alt312 DEMO_ROOT=data/proof-scratch/alt312 \
+  bash tools/synthetic-quickstart.sh
+```
+Check the installed patch version first: if it is not 3.12.14 the comparison is **confounded
+by the patch level as well** and must be reported that way.
+
 ### Precise next step
 
 The validated harness is ready but the fault is not reproducing on demand. The
