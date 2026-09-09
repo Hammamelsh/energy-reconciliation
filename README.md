@@ -8,8 +8,9 @@ rows and the assumption it rests on.
 
 **The problem.** Smart-meter data looks simple: a household id, a timestamp, a kWh value. In
 practice the timestamps carry no timezone, missing readings are written as the text `Null`, rows
-are duplicated, one household's readings are split across files, and the tariff that should be
-applied has an unknown effective period. Any total built on top of that — a bill, a forecast, a
+are duplicated, one household's readings are split across files, and while the dynamic tariff's
+schedule is documented for the 2013 calendar year, the flat rate the other households were on
+carries no effective dates at all. Any total built on top of that — a bill, a forecast, a
 comparison — inherits those problems silently unless each one is found, counted and decided.
 
 **What it produces.**
@@ -22,8 +23,9 @@ comparison — inherits those problems silently unless each one is found, counte
   that was excluded.
 - A **publication workflow**: a warehouse is built as a candidate, sealed only when every dbt
   model and test passed, promoted by an atomic manifest swap, and read back through a validated
-  contract. A published result can be **recorded and rebuilt** from the source archive to check
-  that the same rows and the same totals come out.
+  contract. A published result can be **recorded and rebuilt** from its recorded inputs — the
+  source archive, plus the tariff workbook when the workbook schedule was used — to check that
+  the same rows and the same totals come out.
 - A **Streamlit dashboard** for one household's data quality, tariff scenario and forecast
   backtest.
 - A **forecasting backtest**: simple daily baselines, evaluated honestly on held-out days.
@@ -58,9 +60,10 @@ The scenario charge over the sample is £11,675.43 (recorded exactly as
 `11675.4339216532500000`). This is an **energy charge under a stated assumption**, not a bill: no
 standing charge, levy or tax treatment is modelled, and the assumption that a reading's timestamp
 label and a schedule label denote the same half hour (`A1`) is stored on every output row rather
-than established. The band shares follow from the price ratio (17 : 3 : 1) and the timing of the
-bands; they say nothing about whether anyone changed their behaviour. Full measurements and what
-each one does not show:
+than established. `High` costs about 17 times `Low` and about 5.7 times `Normal`, so the charge
+shares follow from those prices together with how much energy fell in each band; they say nothing
+about whether anyone changed their behaviour. Full measurements, and what each one does not
+show:
 [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md#8-three-findings-and-what-each-does-not-show).
 
 ### 2. Missing and zero are different things, and the source mixes them in
@@ -77,10 +80,13 @@ each one does not show:
 | Zero readings | 45,538 |
 | Negative or malformed values | 0 |
 
-A zero is a reading; a `Null` is the absence of one, and why it is absent is not known. Treating
-the second as the first understates a household's usage without raising any error. The profiler
-counts them separately, the warehouse policy fills nothing in, and the dashboard withholds a total
-rather than choosing when two rows disagree. Report:
+A zero is a reading: the meter reported no consumption. A `Null` is a row that exists with no
+value in it, and a date with no row at all is a third, different observation — the source says
+nothing. The last two both mean the consumption is unknown, and why is not established. Filling
+either with zero can only push a total downwards, and it establishes nothing about what the
+consumption was. The
+profiler counts them separately, the warehouse policy substitutes nothing, and the dashboard
+withholds a total rather than choosing when two rows disagree. Report:
 [`data/profiles/lcl-june2015v2-0-profile.json`](data/profiles/lcl-june2015v2-0-profile.json);
 investigation: [`docs/source-data-profile.md`](docs/source-data-profile.md).
 
@@ -112,7 +118,8 @@ archive (zip)  ──profile-member──▶  JSON profile
                                                                │  5 models · 49 tests
                                                           seal │  (only if all passed)
                                                                ▼
-                                     publication promote ──▶  versions/v0001.duckdb + manifest
+                                     publication promote ──▶  versions/cand-<stamp>.duckdb
+                                                               │  published.json names it v0001
                                                                │
                               ┌────────────────────────────────┼─────────────────────────┐
                               ▼                                ▼                         ▼
@@ -129,17 +136,25 @@ flowchart LR
   stg --> dist[int_distinct_readings<br/>ephemeral]
   stg --> conf[int_conflicting_labels<br/>ephemeral]
   stg --> cls[int_classified_readings<br/>ephemeral]
-  sched[dim_tariff_band_schedule<br/>Python model] --> cls
-  price[dim_tariff_price<br/>Python model] --> cls
+  sched[dim_tariff_band_schedule<br/>table, Python model] --> cls
+  price[dim_tariff_price<br/>table, Python model] --> cls
   cls --> fact[fact_interval_charge_scenario<br/>table]
   cls --> excl[fact_interval_charge_exclusion<br/>table]
+  dist -.-> acc{{accounting tests}}
+  fact -.-> acc
+  excl -.-> acc
 ```
+
+Three of the eight models are **ephemeral**: dbt inlines them into whatever selects from them
+instead of storing a table, so nothing intermediate can go stale. That is why a build reports
+**5 models** — the staging view, the two dimensions and the two facts — alongside its 49 tests.
 
 - **Staging** exposes the loaded readings as dbt sees them.
 - **Policy** models decide which rows count: exact duplicates collapse to one, rows that disagree
-  at the same timestamp are conflicts. Their SQL is **generated from `policy.py` and
-  `models.py`**, so the dashboard and dbt apply one definition; `render-dbt-macros --check`
-  fails if they drift.
+  at the same timestamp are conflicts. `int_distinct_readings` is selected by the two accounting
+  tests (dotted above). `int_conflicting_labels` is a dead end in the dbt graph today — nothing
+  selects it, because `int_classified_readings` applies the same generated conflict rule inline;
+  it is kept as the dbt-side statement of that rule and is exercised by the Python path.
 - **Dimensions** are dbt Python models that read the publisher's tariff workbook (or the invented
   demo schedule) through the project's own parsers, with `DECIMAL` prices.
 - **Facts**: one row per charged reading with its band, price and exact charge; one row per
@@ -217,11 +232,14 @@ and what to keep for a later replay: [`docs/publication-workflow.md`](docs/publi
 
 The choices most likely to matter to a reader, each with where it is argued and where it is tested.
 
-1. **One definition of every data rule.** The dashboard's Python and the dbt models cannot
-   disagree about what a duplicate or a conflict is, because the dbt macro file is generated from
-   `policy.py` and `models.py`, and a check refuses drift.
+1. **One definition of every data rule.** What counts as a duplicate, a conflict or an exclusion
+   is written once in `policy.py` and `models.py`; the dbt macro file is generated from them,
+   `render-dbt-macros --check` fails the build if the two drift apart, and equivalence tests
+   compare the dbt output against the Python path row for row. That removes one class of defect
+   — the two paths quietly diverging on a rule — rather than every possible integration defect.
    [Design D2](docs/anl-003-dbt-design.md#1-decisions) ·
-   [`tests/test_dbt_macros.py`](tests/test_dbt_macros.py)
+   [`tests/test_dbt_macros.py`](tests/test_dbt_macros.py) ·
+   [`tests/test_dbt_equivalence.py`](tests/test_dbt_equivalence.py)
 2. **Publish only what a complete build certifies.** Every `dbt build` is recorded as an attempt;
    the seal requires the latest attempt to have succeeded, to have run all 54 required nodes, and
    the tables to still digest as that attempt recorded. A build interrupted by a real `SIGKILL`
@@ -276,9 +294,16 @@ is enough to block any defensible billing period. No causal claim about the tari
 supportable from this data.
 
 **Scope of the forecasting.** Two baselines and a reference, on daily totals, for a cohort chosen
-by data cleanliness. No seasonal, weather or learned model has been tried.
+by data cleanliness. Both baselines are weekly-seasonal — they read the same weekday, one week
+back or averaged over four — so weekly seasonality is modelled and nothing else is. By
+construction a model sees only that household's own earlier daily totals: no weather, occupancy,
+holidays, annual seasonality, tariff band or price, no half-hourly shape within the day, no other
+household, and no fitted or learned model.
 
-**Scope of the tooling.** No orchestration, no cloud deployment, no geographic breakdown.
+**Scope of the tooling.** Sequencing within a build and a publication is coordinated in Python —
+the candidate stages, the seal gates and the manifest swap run in a fixed, checked order — but
+there is **no scheduler and no external orchestrator**: every run is started by hand or by CI,
+nothing retries, and nothing runs on a timetable. No cloud deployment, no geographic breakdown.
 Ingestion holds a whole file in one transaction, which costs about 1 GB of memory per
 million-row file. Verified on Linux only: Ubuntu 24.04 under WSL2 (Python 3.12.14) and
 GitHub-hosted `ubuntu-24.04` (Python 3.12.3). The publication design relies on POSIX `rename`
@@ -290,11 +315,14 @@ What is deliberately not claimed: [`docs/portfolio-evidence.md`](docs/portfolio-
 
 ## Working with the real dataset
 
-The archive is about 1.5 GB and is not in this repository (`data/raw/` is git-ignored).
+The source data is not in this repository (`data/raw/` is git-ignored).
 
-1. Download *Partitioned LCL Data.zip* and *Tariffs.xlsx* from the
+1. Download *Partitioned LCL Data.zip* (795,722,689 bytes, about 796 MB) and *Tariffs.xlsx*
+   (245,384 bytes) from the
    [London Datastore](https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d)
-   into `data/raw/`. Leave the archive zipped;
+   into `data/raw/`. Those two are all this project reads; the dataset also offers
+   *LCL-FullData.zip*, an unpartitioned alternative of the same readings, which is not needed
+   and is not used here. Leave the archive zipped;
    [`data/manifests/raw-file-manifest.csv`](data/manifests/raw-file-manifest.csv) records the
    expected sizes and SHA-256 digests.
 2. Profile one file: `uv run profile-member` (defaults to file 0; options in
@@ -320,10 +348,13 @@ The archive is about 1.5 GB and is not in this repository (`data/raw/` is git-ig
 uv run pytest -q
 ```
 
-563 tests. None needs the real dataset: fixtures build small zip archives in temporary
-directories, and the tariff tests check hand-computed figures written in each test's docstring.
-Two tests skip, by name, when a local real or demo warehouse is absent. Several tests run real
-`dbt build`s against synthetic warehouses, so the suite takes a few minutes.
+563 tests. The suite runs on a fresh checkout with no real inputs: fixtures build small zip
+archives in temporary directories, and the tariff tests check hand-computed figures written in
+each test's docstring. Two checks depend on local data and skip by name when it is absent —
+`test_forecast_applicability.py` (the real warehouse and its forecast reports) and
+`test_explorer_policy.py` (a loaded demo warehouse) — so those two are not exercised unless you
+have built that data locally. Several tests run real `dbt build`s against synthetic warehouses,
+so the suite takes a few minutes.
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs `ruff check`, `ruff format --check`,
 the policy-macro drift check, the test suite and the synthetic quickstart on `ubuntu-24.04` with
