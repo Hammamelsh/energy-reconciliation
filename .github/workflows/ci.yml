@@ -1,0 +1,78 @@
+# Checks that can run without the real dataset.
+#
+# WHAT THIS DOES NOT COVER, stated here so it is not mistaken for full acceptance:
+#
+#   * Real-data equivalence. The Low Carbon London archive and the publisher's
+#     `Tariffs.xlsx` are not redistributed, so `data/raw/` is absent here. The one test
+#     that needs them skips itself, and `-rs` below prints every skip by name so the gap
+#     is visible in the log rather than silent. Real-data acceptance is a local gate:
+#     see docs/tickets/ANL-003-dbt-port.md.
+#   * The intermittent dbt SIGSEGV (open blocker, same ticket) can fail this workflow.
+#     That is deliberate: a crash is a failed run. There is no retry here, and none
+#     should be added -- a retry would hide exactly the fault being investigated. If a
+#     job fails with a signalled dbt child, reproduce it with tools/dbt-segv-gdb.sh.
+#
+# Pushing is out of scope for the change that added this file, so this workflow has not
+# yet been observed running on GitHub. It was verified locally, step for step, with the
+# same commands and the same locked dependencies.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: this workflow only reads the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: lint, macro drift and tests (Linux, Python 3.12)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.9.29"
+          enable-cache: true
+
+      - name: Install locked dependencies
+        # --frozen: use uv.lock exactly; fail rather than silently resolving new versions.
+        run: uv sync --frozen
+
+      - name: Record the environment under test
+        run: |
+          uv run python -c "import sys, platform; print(sys.version); print(platform.platform())"
+          uv run dbt --version
+          uv run python -c "import duckdb, pyarrow, pandas; print('duckdb', duckdb.__version__, 'pyarrow', pyarrow.__version__, 'pandas', pandas.__version__)"
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Policy macro drift
+        # The dbt macros are generated from policy.py. This fails if the committed macro
+        # file no longer matches its source; it never rewrites the file.
+        run: uv run render-dbt-macros --check
+
+      - name: Tests
+        # The suite builds real dbt projects against synthetic warehouses and exercises
+        # the publication, sealing and format-2 replay boundaries. -rs lists every skip.
+        run: uv run pytest -q -rs
+
+      - name: Synthetic end-to-end (ingest, build, promote, read, replay)
+        # The same commands the README quickstart documents, run against a disposable
+        # root. Nothing here touches data/published.
+        run: bash tools/synthetic-quickstart.sh

@@ -679,6 +679,10 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status", help="what is published, from one manifest read")
     sub.add_parser("inventory", help="every version file and its role (read-only)")
+    sub.add_parser(
+        "read",
+        help="resolve and validate the published version, then print its figures",
+    )
     seal = sub.add_parser("finalise", help="validate and seal a built candidate")
     seal.add_argument("candidate", type=Path)
     promote = sub.add_parser("promote", help="publish a sealed candidate")
@@ -710,6 +714,52 @@ def main(argv: list[str] | None = None) -> int:
                 f"· dbt-core {manifest['dbt_core_version']} · previous "
                 f"{manifest['previous'] or 'none'} · promoted {manifest['promoted_at_utc']}"
             )
+            return 0
+        if args.command == "read":
+            # Imported here, not at module scope: tariff.reads imports this module, and a
+            # top-level import either way would be circular.
+            from .tariff import reads
+
+            try:
+                context = reads.published(root)
+            except reads.ReadContextError as error:
+                print(f"ReadContextError: {error}", file=sys.stderr)
+                return 2
+            report = reads.tariff_report(context)
+            identity = context.identity
+            ladder = report.accounting
+            print(context.label)
+            print(
+                f"  build      : {identity.required_build}, "
+                f"{identity.required_nodes_total} required dbt nodes passed"
+            )
+            print(
+                f"  schedule   : {identity.schedule_source} "
+                f"({identity.schedule_variant}) · catalogue "
+                f"{identity.price_catalogue_version} · group {identity.tariff_group}"
+            )
+            print(
+                f"  outputs    : {identity.built_output_sha256[:16]}… "
+                f"({identity.output_digest_version})"
+            )
+            print(
+                f"  accounting : {ladder.raw_rows:,} rows recorded → "
+                f"{ladder.distinct_readings:,} distinct "
+                f"({ladder.rows_collapsed_by_policy:,} collapsed by policy) → "
+                f"{ladder.included_readings:,} charged + "
+                f"{ladder.excluded_readings:,} excluded · reconciles "
+                f"{ladder.reconciles}"
+                + ("  [counted, not recorded]" if ladder.derived else "")
+            )
+            print(f"  charge     : GBP {report.total_charge_exact} (exact, unrounded)")
+            if not report.bands.empty:
+                for row in report.bands.itertuples():
+                    print(
+                        f"    band {row.band_label:<7} {row.readings:>8,} readings  "
+                        f"GBP {row.charge_gbp_exact}"
+                    )
+            for row in report.exclusions.itertuples():
+                print(f"    excluded {row.exclusion_reason:<26} {row.readings:>8,}")
             return 0
         if args.command == "inventory":
             rows = inventory(root)

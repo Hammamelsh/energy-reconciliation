@@ -9,20 +9,108 @@ What exists today:
 - an **ingestion command** that loads members into a local DuckDB database with a stable schema;
 - a **household explorer** for looking at one household's data quality;
 - a **tariff scenario**: the dToU band schedule and the publisher-documented prices, modelled in
-  DuckDB and joined to consumption under a clearly stated, stored assumption.
+  **dbt** over DuckDB and joined to consumption under a clearly stated, stored assumption;
+- a **publication workflow**: build a candidate warehouse, seal it only when a complete dbt build
+  passes, promote it by an atomic manifest swap, and read it back through a validated contract;
+- a **forecasting backtest** (real data only) and **format-2 baselines** that record a published
+  result and rebuild it from the source archive alone.
 
 This is the groundwork for billing and reconciliation work. It is not a billing system and produces
 no bills. The tariff figures are a **scenario**, not a cost anyone was charged — see
 [Tariff scenario](#tariff-scenario) below for exactly what that means.
 
+**Not ready for unattended operation.** `dbt build` segfaults intermittently and the cause is
+unresolved. Every observed crash was contained — the attempt is recorded as failed, nothing is
+sealed and nothing can be promoted — so a crash costs you a rerun, never a wrong published figure.
+Details and the open investigation: [`docs/tickets/ANL-003-dbt-port.md`](docs/tickets/ANL-003-dbt-port.md).
+
 ## Try it without downloading anything
 
-The repository includes a tiny synthetic archive so you can run the profiler immediately.
+Everything in this section runs on a **committed, invented archive**. It downloads no data, and
+needs neither the Low Carbon London dataset nor the publisher's tariff workbook.
+
+**Prerequisites.** [`uv`](https://docs.astral.sh/uv/) (it fetches the right Python itself) and
+`git`. Verified on Linux (Ubuntu 24.04 under WSL2) with Python 3.12.14; see
+[Requirements](#requirements) for the support boundary.
+
+### The whole workflow in one command
 
 ```bash
 git clone https://github.com/Hammamelsh/energy-reconciliation.git
 cd energy-reconciliation
-uv sync
+uv sync --frozen
+
+bash tools/synthetic-quickstart.sh
+```
+
+That ingests the invented archive, builds a candidate with dbt (all 5 models and all 49 tests),
+promotes it inside a disposable root, reads it back through the validated contract, records a
+format-2 baseline and rebuilds it from the archive alone in a fresh destination — then **checks
+each expected figure**, so exit 0 means the numbers matched rather than merely that commands ran.
+It writes only inside `data/proof-scratch/quickstart/` and never touches `data/published/`.
+
+The figures it asserts are derivable by hand from the archive's 12 rows: one exact duplicate
+collapses, leaving 11 distinct; `DEMO0001` is `Std` while the scenario is scoped to `ToU`, so its
+9 rows are excluded as `ineligible_tariff_group`; `DEMO0002` contributes 1.000 kWh in the Low band
+at 3.99 p/kWh and 1.125 kWh in the High band at 67.20 p/kWh, giving exactly
+`0.0399 + 0.756 = 0.7959`.
+
+### The same steps individually
+
+```bash
+uv run ingest-member --demo --database data/proof-scratch/demo/warehouse.duckdb
+
+uv run build-candidate \
+  --source data/proof-scratch/demo/warehouse.duckdb \
+  --root   data/proof-scratch/demo/published \
+  --schedule demo
+# prints: sealed <CANDIDATE> ... READY FOR PROMOTION -- not published
+
+uv run publication --root data/proof-scratch/demo/published \
+  promote <CANDIDATE> --expect-published none
+
+uv run publication --root data/proof-scratch/demo/published read
+```
+
+`<CANDIDATE>` is the path the build printed after `sealed ` — a placeholder, not a literal. The
+last command prints the accounting ladder and the exact charge, read through the same validated
+contract the dashboard uses.
+
+To see it in the dashboard, point the app at that same root and choose **Source → Published
+version** in the sidebar:
+
+```bash
+ENERGY_RECONCILIATION_PUBLICATION_ROOT="$PWD/data/proof-scratch/demo/published" \
+  PYTHONPATH=src uv run streamlit run src/energy_reconciliation/explorer/app.py
+```
+
+To record the result and rebuild it from the archive alone:
+
+```bash
+uv run capture-published-baseline \
+  --root data/proof-scratch/demo/published \
+  --directory data/proof-scratch/demo/baselines
+
+uv run replay-published-baseline \
+  --baseline <BASELINE> \
+  --into data/proof-scratch/demo/replay \
+  --archive data/demo/demo-lcl-sample.zip
+```
+
+**What must be kept to replay later.** A baseline is not self-contained. Replay needs the source
+archive whose member digests it recorded — here the committed `data/demo/demo-lcl-sample.zip`, and
+for real data your own copy of the LCL archive plus `data/raw/Tariffs.xlsx`. It does **not** need
+the publication, the version file or the candidate: delete those and the baseline still rebuilds.
+
+**How the synthetic path differs from real data.** The invented schedule covers a single day
+(2013-01-01) with 48 slots, so only readings on that date can be charged; the real workbook covers
+2011–2014. The demo archive holds 12 rows for 2 households, so the forecast backtest — which needs
+a household with 168+ contiguous usable days — cannot run on it and is a real-data feature.
+
+### Just the profiler
+
+```bash
+uv sync --frozen
 
 uv run profile-member \
   --archive data/demo/demo-lcl-sample.zip \
@@ -436,11 +524,31 @@ claimable.
 
 ## Requirements
 
-Python 3.12+ and [uv](https://docs.astral.sh/uv/).
+Python 3.12+ and [uv](https://docs.astral.sh/uv/), which installs a matching Python itself. Use
+`uv sync --frozen` to install exactly the locked versions rather than re-resolving them.
+
+**Tested platform.** Linux — Ubuntu 24.04 running under WSL2, Python 3.12.14, dbt-core 1.12.4 with
+dbt-duckdb 1.11.0, DuckDB 1.5.5. That is the only environment the workflow has been exercised in.
+It is not known to work on macOS or on native Windows, and no claim is made for either; the
+publication design also relies on POSIX `rename` and `O_EXCL` semantics on one filesystem, and the
+recovery path reads `/proc`, so a non-Linux port would need its own verification.
 
 The profiler imports only the Python standard library — `csv`, `zipfile`, `sqlite3`, `decimal` and
 similar. Ingestion and the explorer use `duckdb`, `pyarrow`, `pandas` and `streamlit`; the tariff
-schedule is read with `openpyxl`. `pytest` and `ruff` are development dependencies.
+schedule is read with `openpyxl`; the tariff models are built by `dbt-core` with `dbt-duckdb`.
+`pytest` and `ruff` are development dependencies.
+
+## Continuous integration
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs, on Linux with the locked
+dependencies: `ruff check`, `ruff format --check`, the policy-macro drift check, the full test
+suite (which builds real dbt projects against synthetic warehouses and exercises the publication,
+sealing and replay boundaries), and the synthetic quickstart above.
+
+**What it cannot cover.** The real dataset and the publisher's workbook are not redistributed, so
+real-data equivalence is a **local** gate, not a CI one; the single test that needs them skips
+itself and the run prints every skip by name. The workflow has no retries: the unresolved dbt
+segfault will fail a run rather than be hidden.
 
 ## Documentation
 

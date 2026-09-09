@@ -8,7 +8,7 @@ without a float ever existing.
 """
 
 
-def model(dbt, session):  # noqa: ARG001 - dbt passes the connection; this model does not query
+def model(dbt, session):  # dbt passes the connection; this model does not query it
     dbt.config(materialized="table")
 
     from energy_reconciliation.tariff.dimensions import price_table
