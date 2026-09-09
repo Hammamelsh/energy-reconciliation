@@ -121,6 +121,68 @@ what catches it is content — the output digest at sealing, the seal's whole-fi
 after it. A record whose shape predates the lifecycle, or a seal that predates the current
 fields, is **refused with a rebuild message**; nothing upgrades an older claim.
 
+## OPEN RELEASE BLOCKER — `dbt build` segfaults intermittently (investigated 2026-09-09, unresolved)
+
+**Status: unresolved, not mitigated.** No code, dependency or execution setting was changed
+for it. The lifecycle handles every observed crash correctly, so nothing unsafe reaches a
+publication — but an **unattended** build cannot yet be relied on.
+
+**Rate, with its denominator.** 2 crashes in **294** recorded dbt invocations in ordinary
+use (`grep -c "Running with dbt" dbt/logs/dbt.log*`; 261 succeeded, 32 ended in failures
+the tests intended). Under `tools/dbt-segv-repro.sh`: 1 crash in **66** attempts (one at
+attempt 7 of a backgrounded run, then 0 in 59 attempts run alone). An earlier "one in
+fifteen" figure was wrong — it used the builds in a single test file as the denominator.
+
+**What the evidence says.**
+
+| Observation | Evidence |
+|---|---|
+| Killed by `SIGSEGV`, always the `dbt` child | `dbt_exit_code = -11`; kernel: `dbt[218376]: segfault at 8 … error 4 in python3.12[1600000+8ce000]` and `dbt[240559]: segfault at 100000007 …` |
+| Faulting instruction is inside **CPython itself**, twice within ~4 KB | ip `0x1816c2b` and `0x1815bfb`, both in the `python3.12` mapping |
+| Faulting addresses are a near-NULL and a wild pointer | `at 8`, `at 100000007`, `error 4` (read of an unmapped page) |
+| The crashing thread has **no Python frames** | `PYTHONFAULTHANDLER=1` prints `Current thread …:` and then no frames at all |
+| **Not** confined to one phase | two crashes during data-test execution (nodes 53/54 and 7/54, each at *Began compiling node* just after a pooled connection was closed); the reproducer's crash during **full parse**, before any node ran |
+| DuckDB runs 32 internal threads per process here | `select current_setting('threads')` → 32 (one per CPU) |
+| The leaked-semaphore warning is a **consequence**, not a cause | `resource_tracker: … 2 leaked semaphore objects` appears only on crashed runs, i.e. after the abrupt death |
+
+Taken together: a native thread with no Python frames faulting inside CPython on garbage
+pointers is the signature of a C extension touching interpreter state without holding the
+GIL. It is **not** established which extension, and that guess must not be turned into a fix.
+
+**Safeguards verified to hold on a real crash** (`att-7`): attempt recorded `failed`,
+`dbt_exit_code = -11`, `required_build = incomplete`, no output digest, **not sealed**, and
+`reads.candidate()` refuses the file. A crashed build cannot become promotable.
+
+**What was ruled out.** Memory pressure (12.6 GB free at the second crash). A single dbt
+phase. A single warehouse size (crashes on both the 3 M-row real warehouse and the 12-row
+demo).
+
+**Why it stopped here.** No `gdb`, `lldb` or `py-spy` is installed and core dumps are
+disabled (`ulimit -c` = 0, `core_pattern` = `core`), so the native backtrace that would
+name the faulting library cannot be obtained on this machine. Everything short of that has
+been collected. Note also that this WSL2 instance's clock jumps, so elapsed times measured
+here are unreliable; attempt counts are not.
+
+**Remaining hypotheses, in the order worth testing.**
+
+1. **DuckDB's internal thread pool** (32 threads per process) racing with the interpreter.
+   *Next experiment:* copy `dbt/` and set `settings: {threads: 1}` in the copy's
+   `profiles.yml`, then `PROJECT=<copy> LABEL=threads1 ATTEMPTS=200 bash tools/dbt-segv-repro.sh`
+   against a baseline of the same size **under the same load conditions**. Needs ~200
+   attempts per arm to say anything at a ~1% rate.
+2. **Concurrent load.** The two ordinary crashes and the reproducer's one all occurred while
+   other work ran; 59 attempts alone produced none. *Next experiment:* run the harness with
+   and without a deliberate concurrent load, same attempt count.
+3. **A DuckDB Python-client lifecycle bug.** Compare against upstream reports of SIGSEGV
+   around connection close and reuse ([duckdb#13940](https://github.com/duckdb/duckdb/issues/13940),
+   [duckdb-python#127](https://github.com/duckdb/duckdb-python/issues/127)) — neither is
+   confirmed to be this one. *Next experiment:* reproduce in an isolated environment on a
+   different DuckDB patch version **before** touching `uv.lock`.
+
+**Not done, deliberately:** no automatic retry (it would conceal a failed attempt), no
+dependency downgrade or threading change chosen because one run passed, no change to the
+lockfile.
+
 ## Staging runbook — partly runnable
 
 Rows marked **real** exist and are tested; rows marked *proposed* are names fixed here so
