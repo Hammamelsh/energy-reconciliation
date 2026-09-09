@@ -580,4 +580,18 @@ appears in the dataset's own licence field rather than in the site footer, so th
 this dataset. The publisher supplies no required attribution sentence, so the wording above is this
 project's own. Details in [`docs/source-data-profile.md`](docs/source-data-profile.md) §14.5.
 
-Code in this repository is separate from the dataset and its licence.
+**The tariff workbook is part of the same dataset.** `Tariffs.xlsx` is one of that dataset's three
+published resources — listed on the dataset page as `Tariffs`, 239.63 kB, matching the 245,384
+bytes recorded in `docs/source-data-profile.md` §14 — so the attribution above covers it. That was
+checked on the dataset page rather than assumed from the other files' licence (re-verified
+2026-09-09).
+
+**Neither is redistributed here.** No dataset file and no workbook has ever been committed:
+`data/raw/` is ignored, and the only data in the repository is the invented demo archive. Obtain the
+real inputs yourself from the dataset page above and place them in `data/raw/`; the quickstart needs
+neither.
+
+**Code licence: none yet.** This repository carries no `LICENSE` file and no `license` field in
+`pyproject.toml`, so no permission to use, modify or redistribute the code is currently granted —
+default copyright applies. That is an open decision, not an oversight; choosing a licence is the
+owner's call. Until one is added, treat the code as readable but not reusable.
