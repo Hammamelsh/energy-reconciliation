@@ -105,7 +105,9 @@ from dbt without a second definition:
    ```python
    def distinct_readings_sql(readings: str = "readings") -> str: ...
    def conflicting_labels_sql(readings: str = "readings") -> str: ...
-   DISTINCT_READINGS = distinct_readings_sql()        # existing callers unchanged
+
+
+   DISTINCT_READINGS = distinct_readings_sql()  # existing callers unchanged
    CONFLICTING_LABELS = conflicting_labels_sql()
    ```
 
@@ -174,10 +176,15 @@ and the same installed package:
 # dbt/models/tariff/dim_tariff_band_schedule.py
 def model(dbt, session):
     dbt.config(materialized="table")
-    from energy_reconciliation.tariff.schedule import demo_schedule, read_workbook, loaded_at
-    which = dbt.config.get("schedule", "workbook")       # var: schedule=workbook|demo
+    from energy_reconciliation.tariff.schedule import (
+        demo_schedule,
+        read_workbook,
+        loaded_at,
+    )
+
+    which = dbt.config.get("schedule", "workbook")  # var: schedule=workbook|demo
     schedule = demo_schedule() if which == "demo" else read_workbook()
-    return schedule_arrow_table(schedule, loaded_at())   # pyarrow, typed (below)
+    return schedule_arrow_table(schedule, loaded_at())  # pyarrow, typed (below)
 ```
 
 - **P2 holds unchanged** because `_validate` runs inside `read_workbook`; a duplicated
