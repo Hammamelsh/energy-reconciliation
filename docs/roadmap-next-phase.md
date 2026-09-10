@@ -21,7 +21,9 @@ inspection carried in the URL (`?household=`), and a methods expander. Closed by
 reconcile to `compare-flat-price`; desktop and phone renders inspected in a real browser;
 keyboard reachability checked; the explorer's other views unchanged beneath it.
 
-**A3. Front door (built 2026-09-10; deploy pending).** The public entry point is a static
+**A3. Front door (built and deployed 2026-09-10 at <https://energy-reconciliation.onrender.com/>,
+commit `46ed791`; the deployment as observed is recorded in [`deployment.md`](deployment.md)
+§12).** The public entry point is a static
 React + TypeScript page ([`web/`](../web/)) over a presentation bundle exported deterministically
 from the published version (`export-presentation`, contract `presentation-bundle-1`; 59,550
 bytes; verified by sha256 in the browser before anything is shown; exact decimals as text; no

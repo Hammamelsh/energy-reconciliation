@@ -63,5 +63,6 @@ the page with the committed data.
 ## Deployment
 
 `render.yaml` at the repository root configures a Render static site (root `web`, build
-`npm ci && npm run build`, publish `dist`) with security and cache headers. Owner steps and
-the measured sizes are in `docs/deployment.md`.
+`npm ci && npm run build`, publish `dist`) with security and cache headers. The site is
+deployed at https://energy-reconciliation.onrender.com/ (commit `46ed791`); owner steps, the
+measured sizes and what was observed on the platform are in `docs/deployment.md`.

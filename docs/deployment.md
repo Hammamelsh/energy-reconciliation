@@ -6,7 +6,8 @@ How a published version is carried to a hosting machine without weakening what
 Two things can be hosted. The **front door** (§9–10) is a static page over a small data
 file exported from the published version and checked against its pinned digest in the
 browser; it is the link to give a visitor. The **explorer** (§1–7) is the Streamlit app over the full serving snapshot; it is
-the deep view, and needs the 210 MB snapshot published first. Neither is live yet.
+the deep view, and needs the 210 MB snapshot published first. The front door is deployed at
+<https://energy-reconciliation.onrender.com/> (§12); the explorer is not.
 
 ## 1. The problem a serving snapshot solves
 
@@ -272,8 +273,9 @@ allows only the site's own origin) and cache rules (hashed assets immutable for 
 5. Auto-deploy on push to `main` is Render's default. Either leave it on — every push has run
    the `web` CI job — or turn it off and deploy by hand after each release.
 
-Nothing above has been observed on Render yet. What was verified locally is the artifact and
-the headers (§9); the platform's build and its cold-start behaviour must be observed there.
+When this section was written nothing had been observed on Render; what had been verified
+locally was the artifact and the headers (§9). The owner then carried out steps 1–3; what was
+observed on the platform is recorded in §12.
 
 ## 11. What a deployment must never do
 
@@ -286,3 +288,28 @@ the headers (§9); the platform's build and its cold-start behaviour must be obs
   that does not match it; the page refuses such a pair, and so must the release.
 - Recreate the tariff arithmetic in the browser. The page formats what the export computed
   exactly; a second implementation in floating point would be a second source of truth.
+
+## 12. Observed deployment (2026-09-10)
+
+Public address: **<https://energy-reconciliation.onrender.com/>** — a Render static site built
+from [`render.yaml`](../render.yaml) at commit `46ed791`, with `VITE_SITE_URL` set by the owner.
+Verified anonymously from a UK client with `curl` and headless Chromium (no Render or GitHub
+session), the same day the site went live. Observations of this deployment and environment,
+not guarantees.
+
+| Check | Observed |
+|---|---|
+| Served commit | `/assets/index-DE0KCDeN.js` and the stylesheet are byte-identical to a local build of `46ed791`; `/data/bundle.json` is byte-identical to the committed file (59,550 bytes, sha256 `3296b55f…`) and `/data/manifest.json` pins publication v0001, run `dbtcand-fbd1f2566700@…`. |
+| Transport | `http://` → 301 to `https://`; HSTS (`max-age=315360000; includeSubdomains; preload`); HTTP/2 via Cloudflare. |
+| Headers | Every header `render.yaml` declares is present on `/`, the assets and the data files: the content-security policy, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`. Hashed assets: `public, max-age=31536000, immutable`. Data files: `no-cache` — on a repeat load the browser revalidated both and received 304s (~300 bytes each). `/` itself carries Render's default `public, max-age=0, s-maxage=300` rather than the `/index.html` rule (the rule's path does not match `/`): browsers revalidate every time, the CDN may hold a page for up to five minutes. A page and a bundle from different deploys can therefore meet only briefly; the page refuses the mismatch and a reload resolves it. |
+| MIME types | `text/html`, `application/javascript`, `text/css`, `application/json`, `image/png`, `image/svg+xml`, `text/plain` as expected; `/nonexistent` and `/data/` return 404. |
+| Transfer (compressed) | HTML 1.1 kB, JS 86.8 kB, CSS 4.5 kB, bundle 11.5 kB, manifest 0.5 kB — about 104 kB for a first view. |
+| Timing | Time to first byte 60–90 ms per resource; first uncached load to the first heading 0.8 s, repeat load 0.6 s (JS and CSS from cache, data revalidated). No cold-start delay was observed: a static site on a CDN has no process to wake. |
+| Figures | The page shows £11,675.43, £12,160.26, +£484.83, +4.0% (exact 3.987…%), 27 households, 456,096 readings, 25 lower / 2 higher, the reconciled ladder 3,000,000 − 2,038 = 2,997,962 = 456,096 + 2,541,866, 408 of 788 High-labelled half-hours in labels 17:00–22:59, and 38 of 52 bounded zero-day runs — each matching the committed bundle. |
+| Integrity behaviour | The loading state ("checking its digest") shows no figure; a payload with one flipped byte, injected in the browser, is refused with the digest mismatch named and nothing rendered. |
+| Routing and state | `?household=` selects the named household; an unknown or malformed id falls back to the default household and the URL is rewritten; `?flat=` outside 0–100 or non-numeric falls back to the documented price; state survives a hard refresh; back and forward keep the selection coherent. No URL carries anything but `household` and `flat`. |
+| Browser checks | Desktop 1440×900 and phone 390×844: no horizontal overflow; six tour steps; all sections; keyboard order into the chart and a visible focus halo; reduced motion honoured; no console errors and no failed requests; every footer and provenance link returns 200. axe-core: no violations at either width under the WCAG 2 A/AA and best-practice rules — an automated check, not a screen-reader evaluation. |
+| Metadata | Title, description, canonical, `og:*` and `twitter:*` tags present with absolute `https://` URLs and no placeholder; crawler user agents (Facebook, LinkedIn, Twitter) receive the same HTML. The Open Graph image is served recompressed by the CDN (`cf-polished`, 233,546 → 146,118 bytes, same 1200×630 pixels). LinkedIn's own cached preview was not observed: that needs a post or a signed-in inspector. |
+
+Not observed here: any period of high traffic, Render's behaviour on a failed build, or the
+site under assistive technology.
