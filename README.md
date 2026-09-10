@@ -26,6 +26,10 @@ Coverage varies: 26 households contribute 17,375–17,520 of the year's 17,520 s
 
 **The same readings priced at the flat rate.** Under a second stated assumption — **A2**, the documented flat price of 14.228 p/kWh applied throughout 2013, because its effective dates are not documented — the same 456,096 charged readings carry an energy charge of **£12,160.26**, so the dynamic schedule priced this recorded consumption **£484.83 (4.0%) lower**. The direction is broadly shared: **25 of the 27 households are lower under the dynamic scenario** (by 0.9% to 11.4%) and two are higher (by 0.3% and 1.2%); 16 of 27 sit within two points of the pooled 4.0%, and the largest household contributes 13% of the pooled difference. This is a fixed-consumption comparison of two prices on the usage that was recorded — not what anyone paid or saved, since consumption on a flat tariff might have differed and no standing charge is modelled. [Comparison, household table and assumptions](docs/anl-005-flat-price-comparison.md).
 
+![Dashboard landing view titled "The same electricity, priced two ways": four headline values — dynamic energy charge £11,675.43, flat-price energy charge £12,160.26, flat minus dynamic +£484.83, +4.0% of the flat-price charge — the sentence "25 households are lower, 2 higher and 0 equal", and a sorted horizontal bar chart of each household's difference as a percentage of its flat-price charge, from −1.2% to +11.4%, with one household marked "4.9% coverage".](docs/images/dashboard-landing.png)
+
+*The dashboard's landing view on the published version: the same 456,096 readings priced two ways, with each household's difference. Historical scenario under A1 and A2; not a bill.*
+
 ### Profiling distinguishes missing consumption from recorded zeros
 
 A separate profile of **source file 0—1 million records across 30 households—**found 688 exact duplicate rows, 29 `Null` values and 45,538 zero readings. All 29 `Null` records were off the half-hour grid. No conflicting values were found at shared household/timestamp keys in that file.

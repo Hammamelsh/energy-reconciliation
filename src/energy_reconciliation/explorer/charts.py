@@ -748,7 +748,8 @@ def household_pct_difference_chart(frame: pd.DataFrame) -> alt.Chart | alt.Layer
                 "label:N",
                 title=None,
                 sort=order,
-                axis=alt.Axis(labelFontSize=LABEL_SIZE - 1),
+                # room for "MAC000146 (4.9% coverage)": the default limit clips it
+                axis=alt.Axis(labelFontSize=LABEL_SIZE - 1, labelLimit=240),
             ),
             x=alt.X(
                 "pct:Q",
