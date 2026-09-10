@@ -44,7 +44,9 @@ trial or of London, and no figure should be scaled up.
 ### 1. In the 2013 dynamic tariff, the expensive band is 5% of the energy and 24% of the charge
 
 *Sample: the 27 `ToU` households in source file 135 (of 168), 2013 only — 456,096 charged
-half-hour readings.*
+half-hour readings. The schedule covers all 17,520 half hours of 2013; household coverage does
+not. 26 households are charged for 17,375–17,520 of them, and one for 864 (its readings in the
+loaded files stop on 18 January).*
 
 The trial's **dynamic time-of-use tariff** ("dToU") priced each half hour as `Low` (3.99 p/kWh),
 `Normal` (11.76 p/kWh) or `High` (67.20 p/kWh), announced a day ahead. Joining that schedule to
@@ -66,10 +68,11 @@ The scenario charge over the sample is £11,675.43 (recorded exactly as
 `11675.4339216532500000`). This is an **energy charge under a stated assumption**, not a bill: no
 standing charge, levy or tax treatment is modelled, and the assumption that a reading's timestamp
 label and a schedule label denote the same half hour (`A1`) is stored on every output row rather
-than established. `High` costs about 17 times `Low` and about 5.7 times `Normal`, so the charge
-shares follow from those prices together with how much energy fell in each band; they say nothing
-about whether anyone changed their behaviour. Full measurements, and what each one does not
-show:
+than established. The concentration is measured: `High` costs about 17 times `Low` and about
+5.7 times `Normal`, which fixes the direction, but the size — 4.9% of charged energy producing
+24.1% of the charge — depends on how much of these households' consumption fell in `High` half
+hours, and only the data gives that. It describes where cost concentrates, not whether anyone
+changed their behaviour. Full measurements, and what each one does not show:
 [`docs/anl-002-tariff-scenario.md`](docs/anl-002-tariff-scenario.md#8-three-findings-and-what-each-does-not-show).
 
 ### 2. Missing and zero are different things, and the source mixes them in
