@@ -1,0 +1,282 @@
+import { useEffect, useMemo, useState } from "react";
+import { loadBundle, type Bundle, type Loaded } from "./lib/bundle";
+import { pushState, readState } from "./lib/url";
+import { Hero } from "./components/Hero";
+import { HouseholdChart } from "./components/HouseholdChart";
+import { sortHouseholds, type SortKey } from "./lib/households";
+import { HouseholdDetail } from "./components/HouseholdDetail";
+import { BreakEven } from "./components/BreakEven";
+import { HourRibbon } from "./components/HourRibbon";
+import { Pipeline } from "./components/Pipeline";
+import { Quality } from "./components/Quality";
+import { Provenance } from "./components/Provenance";
+import { Footer } from "./components/Footer";
+import { Tour, type TourStep } from "./components/Tour";
+import { useInView, useScrollProgress } from "./hooks";
+import { Insight } from "./components/Insight";
+import { highRank, highShare } from "./lib/households";
+import { integer, money } from "./lib/format";
+
+type State =
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; loaded: Loaded };
+
+function Logo() {
+  return (
+    <svg viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="2" y="2" width="28" height="28" rx="8" fill="#131824" stroke="#262e40" />
+      <path d="M17.5 5 9 18h6l-1.5 9L23 14h-6z" fill="#c6f43a" />
+    </svg>
+  );
+}
+
+function Reveal({ children, id, title, sub }: { children: React.ReactNode; id: string; title: string; sub?: string }) {
+  const [ref, seen] = useInView<HTMLElement>();
+  return (
+    <section className={`block reveal ${seen ? "in" : ""}`} id={id} ref={ref}>
+      <div className="wrap">
+        <h2>{title}</h2>
+        {sub && <p className="sub">{sub}</p>}
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function Progress() {
+  const p = useScrollProgress();
+  return <div className="progress" aria-hidden="true" style={{ transform: `scaleX(${p})` }} />;
+}
+
+export function Page({ loaded }: { loaded: Loaded }) {
+  const bundle: Bundle = loaded.bundle;
+  const c = bundle.comparison;
+  const initial = useMemo(() => readState(window.location.search), []);
+  const ids = useMemo(() => new Set(c.per_household.map((h) => h.household_id)), [c.per_household]);
+  const defaultId = useMemo(() => sortHouseholds(c.per_household, "pct").at(-1)?.household_id ?? null, [c.per_household]);
+  const [selected, setSelected] = useState<string | null>(
+    initial.household && ids.has(initial.household) ? initial.household : defaultId,
+  );
+  const [sortKey, setSortKey] = useState<SortKey>("pct");
+  const flatDefault = Number(c.flat_price.pence_per_kwh);
+  const [flat, setFlat] = useState<number>(initial.flat ?? flatDefault);
+
+  useEffect(() => {
+    pushState({ household: selected, flat: flat === flatDefault ? null : flat });
+  }, [selected, flat, flatDefault]);
+
+  const household = c.per_household.find((h) => h.household_id === selected) ?? null;
+  const o = c.outcomes_under_dynamic;
+  const [tour, setTour] = useState(false);
+  const [tourRun, setTourRun] = useState(0);
+  const steps: TourStep[] = [
+    { id: "top", title: "The question", text: `${c.households} households, one year of real readings, two prices. The dynamic tariff came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} for the electricity they actually used.` },
+    { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
+    { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price — a comparison, not a recalculation." },
+    { id: "hours", title: "The hours", text: "The expensive band clustered in the evening, and so did the electricity. That is timing, not proof of a response." },
+    { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build — and this page verifying its own data." },
+    { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licence, and what this does not show." },
+  ];
+
+  return (
+    <>
+      <a className="skip" href="#main">Skip to content</a>
+      <div className="top">
+        <Progress />
+        <div className="wrap">
+          <a className="brand" href="#top">
+            <Logo /> Energy Reconciliation
+          </a>
+          <nav className="nav" aria-label="Sections">
+            <a href="#households">Households</a>
+            <a href="#what-if">What if</a>
+            <a href="#hours">Hours</a>
+            <a href="#pipeline">How it's made</a>
+            <a href="#quality">Data quality</a>
+            <a href="#provenance">Provenance</a>
+          </nav>
+        </div>
+      </div>
+      <main id="main">
+        <Hero
+          bundle={bundle}
+          onTour={() => {
+            setTourRun((n) => n + 1);
+            setTour(true);
+          }}
+        />
+
+        <Reveal
+          id="households"
+          title={`${o.lower} lower, ${o.higher} higher — every household, no averaging`}
+          sub={`Each bar is one household's difference between its flat-price charge and its dynamic charge, as a percentage of the flat-price charge. ${o.lower} of ${c.households} sit to the right of zero; the two on the left used more of their electricity in the expensive band. Pick a household to see why.`}
+        >
+          <div className="two-col">
+            <div className="card">
+              <div className="toolbar">
+                <span>Sort</span>
+                <span className="seg" role="group" aria-label="Sort households">
+                  {(["pct", "gbp", "coverage"] as SortKey[]).map((k) => (
+                    <button key={k} type="button" aria-pressed={sortKey === k} onClick={() => setSortKey(k)}>
+                      {k === "pct" ? "by %" : k === "gbp" ? "by £" : "by coverage"}
+                    </button>
+                  ))}
+                </span>
+                <span className="legend" style={{ marginLeft: "auto" }}>
+                  <span><i style={{ background: "var(--volt)" }} />▲ lower under dynamic</span>
+                  <span><i style={{ background: "var(--ember)" }} />▼ higher under dynamic</span>
+                </span>
+              </div>
+              <HouseholdChart households={c.per_household} selected={selected} onSelect={setSelected} sortKey={sortKey} />
+              <details>
+                <summary>Table view of the same figures</summary>
+                <div className="body scroll-x">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Household</th>
+                        <th>Charged readings</th>
+                        <th>Coverage</th>
+                        <th>Dynamic</th>
+                        <th>Flat price</th>
+                        <th>Flat − dynamic</th>
+                        <th>% of flat</th>
+                        <th>High share</th>
+                        <th>Under dynamic</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortHouseholds(c.per_household, sortKey).map((h) => (
+                        <tr key={h.household_id}>
+                          <td>{h.household_id}</td>
+                          <td>{integer(h.charged_readings)}</td>
+                          <td>{h.coverage.display?.toFixed(1)}%</td>
+                          <td>{money(h.dynamic_charge.display)}</td>
+                          <td>{money(h.flat_charge.display)}</td>
+                          <td>{money(h.flat_minus_dynamic.display)}</td>
+                          <td>{h.pct_of_flat.display?.toFixed(1)}%</td>
+                          <td>{highShare(h).toFixed(1)}%</td>
+                          <td>{h.outcome_under_dynamic}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </div>
+            <div>
+              {household ? (
+                <HouseholdDetail
+                  household={household}
+                  flatPence={c.flat_price.pence_per_kwh}
+                  highRank={highRank(c.per_household, household.household_id)}
+                  total={c.households}
+                />
+              ) : (
+                <div className="card">Pick a household.</div>
+              )}
+            </div>
+          </div>
+          <div className="two-col" style={{ marginTop: 22 }}>
+            <Insight households={c.per_household} selected={selected} onSelect={setSelected} />
+            <div className="card flip">
+              <h3>The two that went the other way</h3>
+              {c.per_household
+                .filter((h) => h.outcome_under_dynamic === "higher")
+                .map((h) => (
+                  <button key={h.household_id} type="button" className={`flip-row ${selected === h.household_id ? "on" : ""}`} onClick={() => setSelected(h.household_id)} aria-pressed={selected === h.household_id}>
+                    <span className="id">{h.household_id}</span>
+                    <span>
+                      <b>{money(h.flat_minus_dynamic.display)}</b> · {h.pct_of_flat.display?.toFixed(1)}%
+                    </span>
+                    <span className="hint">
+                      {highShare(h).toFixed(1)}% of its electricity in High — rank {highRank(c.per_household, h.household_id)} of {c.households}
+                    </span>
+                  </button>
+                ))}
+              <p className="hint">
+                Small in pounds, but real: both paid slightly more under the dynamic tariff because more of their
+                electricity fell in the 67.2p half hours. The dynamic tariff was not cheaper for everyone.
+              </p>
+            </div>
+          </div>
+          <div style={{ marginTop: 22 }}>
+            <BreakEven comparison={c} value={flat} onChange={setFlat} />
+          </div>
+        </Reveal>
+
+        <Reveal
+          id="hours"
+          title="Where the expensive half hours were"
+          sub="The dynamic schedule announced each day's bands a day ahead; the High band clustered in the evening. So did the electricity — which is a coincidence of timing in this data, not evidence that anyone responded to the price."
+        >
+          <HourRibbon hourBands={bundle.hour_bands} />
+        </Reveal>
+
+        <Reveal
+          id="pipeline"
+          title="How three million readings become one reproducible number"
+          sub="Every reading is either charged or excluded for a stated reason, the ladder has to add up, the build is sealed only when all of its models and tests pass, and this page verifies the data it was given before showing it."
+        >
+          <Pipeline bundle={bundle} digest={loaded.digest} />
+        </Reveal>
+
+        <Reveal
+          id="quality"
+          title="What was found on the way"
+          sub="Getting a tariff number right meant counting the things that would silently corrupt it — and a few things that turned out to be findings in their own right."
+        >
+          <Quality bundle={bundle} />
+        </Reveal>
+
+        <Reveal id="provenance" title="Assumptions, provenance and limits" sub="Everything the numbers depend on, and what they do not establish.">
+          <Provenance bundle={bundle} digest={loaded.digest} />
+        </Reveal>
+      </main>
+      <Footer notice={bundle.source.attribution.notice} />
+      <Tour key={tourRun} steps={steps} active={tour} onClose={() => setTour(false)} />
+    </>
+  );
+}
+
+export default function App({ base }: { base?: string }) {
+  const [state, setState] = useState<State>({ kind: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    loadBundle(base)
+      .then((loaded) => !cancelled && setState({ kind: "ready", loaded }))
+      .catch((error: unknown) => {
+        if (!cancelled) setState({ kind: "error", message: error instanceof Error ? error.message : String(error) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [base]);
+
+  if (state.kind === "loading") {
+    return (
+      <div className="state wrap" role="status" aria-live="polite">
+        <div>
+          <div className="spinner" aria-hidden="true" />
+          <p>Loading and verifying the data…</p>
+        </div>
+      </div>
+    );
+  }
+  if (state.kind === "error") {
+    return (
+      <div className="state wrap" role="alert">
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>The data could not be verified</h2>
+          <p className="warn">{state.message}</p>
+          <p className="hint">
+            Nothing is shown in its place: a number that failed verification is not a number. The published figures are
+            in the <a href="https://github.com/Hammamelsh/energy-reconciliation">repository</a>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+  return <Page loaded={state.loaded} />;
+}
