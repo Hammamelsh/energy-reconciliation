@@ -1,0 +1,11 @@
+{
+ "bundle": "bundle.json",
+ "content_digest": "3296b55f29eefcdc8d8eb6c012766421d8def6f691b99c7267f0b61e6b0e2d37",
+ "definition": "presentation-bundle-1",
+ "size_bytes": 59550,
+ "source": {
+  "file_sha256": "708a55da4356789ae8f21a3fda8ff783e80d14017cfd9252db94b5974ccbe87d",
+  "run_id": "dbtcand-fbd1f2566700@20260909T093452754963",
+  "version": "v0001"
+ }
+}
