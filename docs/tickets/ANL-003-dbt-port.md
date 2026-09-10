@@ -373,6 +373,18 @@ Not an experiment: the full suite was running after the ANL-005 change, and one
   the rate on this machine is now 4 crashes in the retained history plus one, and it
   remains unmeasured on any other interpreter.
 
+- **A non-crash failure of the same shape (2026-09-10 19:08 BST).** In the next full suite
+  run, `tests/test_candidate.py::test_a_published_version_may_not_be_overwritten` had its
+  `build-candidate` exit 1: node `16 of 54`, the generic `not_null_dim_tariff_price_catalogue_version`
+  test, reported `Compilation Error` **with an empty message**, and dbt finished
+  `PASS=20 ERROR=1 SKIP=34`. Fifteen identical generic tests had compiled a moment earlier and
+  the same test compiles on every other run; the test passed on re-run. The lifecycle
+  recorded the attempt as failed and nothing was sealed. An empty compilation error on a
+  templated test, mid-run, in the same early-test phase as three of the four faults, is
+  consistent with corrupted in-process state that does not always end in a signal. It is
+  recorded as an observation, not a diagnosis, and it is a further reason to run the suite
+  under `PYTHONMALLOC=debug`.
+
 **Revised next step, replacing the "wait under gdb" plan.** Run builds with Python's
 debug allocator, which costs nothing to enable and would produce evidence gdb cannot:
 

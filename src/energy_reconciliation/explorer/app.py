@@ -27,6 +27,7 @@ from energy_reconciliation.explorer import selection as sel
 from energy_reconciliation.ingest.warehouse import DEFAULT_DATABASE
 from energy_reconciliation.tariff import analytics as ta
 from energy_reconciliation.tariff import flat_comparison as fcmp
+from energy_reconciliation.tariff import reads
 from energy_reconciliation.tariff.models import ASSUMPTION_TEXT
 
 WAREHOUSE_DIR = Path("data/warehouse")
@@ -394,6 +395,132 @@ def render_flat_comparison(
         )
 
 
+def render_landing(
+    database: Path, relations: ta.Relations, context: reads.ReadContext
+) -> None:
+    """The first screen: the same electricity priced two ways, for the whole scenario.
+
+    Three questions answerable without opening a document -- what was compared, what
+    varied across households, and what the result does not establish -- with the rest of
+    the explorer below. A household chosen here is carried in the URL (``?household=``)
+    so a view can be shared; only a household that is charged in this run is accepted.
+    """
+    run_id = context.run_id
+    result = fcmp.compare(database, run_id, relations=relations)
+    st.title("The same electricity, priced two ways")
+    if isinstance(result, fcmp.Unavailable):
+        st.info(
+            f"The flat-price comparison is not available for this version "
+            f"(`{result.kind}`): {result.reason}. The explorer below is unaffected."
+        )
+        return
+    t, price = result.totals, result.price
+    o = result.outcomes
+    first = (ta.schedule_bounds(database, relations=relations) or (None, None))[0]
+    st.caption(
+        f"**Historical scenario, {first:%Y} · {t.households} time-of-use households from "
+        f"the Low Carbon London trial · the same {fmt_count(t.readings)} charged half-hour "
+        f"readings priced under the dynamic tariff they were on (A1) and, hypothetically, "
+        f"at the trial's documented flat price of {price.price_pence_per_kwh} p/kWh (A2).** "
+        "Coverage varies by household. Not a bill, a saving or advice."
+        if first
+        else "Historical scenario. Not a bill, a saving or advice."
+    )
+    m = st.columns(4)
+    m[0].metric(
+        "Dynamic energy charge",
+        fmt_gbp(ta.round_money(t.dynamic)),
+        help=f"Exact: £{t.dynamic}. The scenario charge under A1.",
+    )
+    m[1].metric(
+        "Flat-price energy charge",
+        fmt_gbp(ta.round_money(t.flat)),
+        help=f"Exact: £{t.flat}. {t.kwh} kWh × £{price.price_gbp_per_kwh}/kWh under A2.",
+    )
+    m[2].metric(
+        "Flat minus dynamic",
+        fmt_signed_gbp(ta.round_money(t.difference)),
+        help=f"Exact: £{t.difference}. Positive: the dynamic scenario is lower.",
+    )
+    m[3].metric(
+        "As % of flat-price charge",
+        "undefined" if t.pct_of_flat is None else fmt_signed_pct(t.pct_of_flat),
+        help="Denominator: the flat-price energy charge.",
+    )
+    st.markdown(
+        f"**For this recorded consumption the dynamic tariff came out "
+        f"{'lower' if t.difference > 0 else 'higher' if t.difference < 0 else 'equal'}.** "
+        f"Under it, **{o['lower']} households are lower, {o['higher']} higher and "
+        f"{o['equal']} equal** — positive bars below mean the dynamic scenario is lower "
+        "for that household; classified on exact differences."
+    )
+    st.altair_chart(
+        charts.household_pct_difference_chart(result.households_frame), width="stretch"
+    )
+    st.caption(
+        "A household marked *coverage* is charged for far fewer of the schedule's "
+        f"{result.schedule_slots_in_period:,} half-hour labels than the others; its figure "
+        "covers only the days it has readings for and is not scaled up."
+    )
+
+    # ---- inspect one household; the choice travels in the URL
+    ordered = sorted(
+        result.households, key=lambda r: Decimal(r["pct_of_flat_exact"] or 0)
+    )
+    ids = [r["household_id"] for r in ordered]
+    wanted = st.query_params.get("household")
+    default = ids.index(wanted) if wanted in ids else len(ids) - 1
+    cols = st.columns([1.2, 3])
+    pick = cols[0].selectbox(
+        "Look at one household", ids, index=default, key="landing-household"
+    )
+    if st.query_params.get("household") != pick:
+        st.query_params["household"] = pick
+    row = next(r for r in result.households if r["household_id"] == pick)
+    cov = row["coverage_share"]
+    with cols[1]:
+        st.markdown(
+            f"**{pick}** — charged for **{fmt_count(row['charged_readings'])}** of "
+            f"{result.schedule_slots_in_period:,} half-hour labels "
+            f"({fmt_pct(cov) if cov is not None else '—'} observed coverage), "
+            f"{row['first_charged_date']} to {row['last_charged_date']}. Dynamic "
+            f"**{fmt_gbp(ta.round_money(Decimal(row['dynamic_charge_gbp_exact'])))}**, "
+            f"flat-price **{fmt_gbp(ta.round_money(Decimal(row['flat_charge_gbp_exact'])))}**, "
+            f"difference **{fmt_signed_gbp(ta.round_money(Decimal(row['difference_exact'])))}** "
+            + (
+                f"(**{fmt_signed_pct(Decimal(row['pct_of_flat_exact']))}** of its flat-price charge)"
+                if row["pct_of_flat_exact"] is not None
+                else "(percentage undefined)"
+            )
+            + f" — **{row['outcome_under_dynamic']}** under the dynamic scenario."
+        )
+        bands = ta.band_summary(database, run_id, household=pick, relations=relations)
+        if not bands.empty:
+            st.dataframe(fmt_band_table(bands), width="stretch", hide_index=True)
+            st.caption(
+                "Where its consumption fell by price band. A larger share in `High` "
+                "(67.20p) narrows the gap to the flat price; a larger share in `Low` "
+                "(3.99p) widens it."
+            )
+    with st.expander("Methods, assumptions and what this does not show"):
+        st.markdown(
+            f"""
+- **A1** — {ASSUMPTION_TEXT}
+- **A2** — {fcmp.A2_TEXT}
+- **Flat price** — {price.price_pence_per_kwh} p/kWh, catalogue `{price.catalogue_version}`,
+  **{price.evidence_label}**, validity **{price.validity}**; read from this build's own price
+  dimension.
+- **Arithmetic** — per charged reading, `consumption_kwh × price` in exact decimal, summed;
+  rounded only for display. Percentages use the flat-price charge as denominator.
+- **Source** — {context.label}.
+- **Not shown** — what anyone paid or saved (no standing charge, levy or tax; these households
+  were on the dynamic tariff and might have consumed differently on a flat one), any behavioural
+  response, any advice about tariffs today, whether a particular clock time is cheaper (the
+  schedule changed daily), or anything about London beyond this sample.
+"""
+        )
+
+
 # --------------------------------------------------------------- data source
 available = sorted(WAREHOUSE_DIR.glob("*.duckdb")) if WAREHOUSE_DIR.is_dir() else []
 
@@ -402,16 +529,23 @@ st.sidebar.header("Data source")
 # you pick yourself, or whatever is published right now. The publication is resolved
 # ONCE here and the resolved context is threaded through every tab below, so a promotion
 # part-way through a render cannot make one tab disagree with another.
-mode = st.sidebar.radio(
-    "Source",
-    sel.MODES,
-    index=0,
-    key="source-mode",
-    help=(
-        "Warehouse file: a file under data/warehouse, built by build-tariff-scenario. "
-        "Published version: the sealed dbt build the publication manifest names."
-    ),
-)
+snapshot_configured = sel.serving_directory() is not None
+if snapshot_configured and not available:
+    # A deployment: one served snapshot, no warehouse files. Offering "Warehouse file"
+    # would be a control whose only effect is an error, so it is not offered.
+    mode = sel.PUBLISHED_MODE
+    st.sidebar.caption("Serving a published snapshot; no warehouse files on this host.")
+else:
+    mode = st.sidebar.radio(
+        "Source",
+        sel.MODES,
+        index=1 if snapshot_configured else 0,
+        key="source-mode",
+        help=(
+            "Warehouse file: a file under data/warehouse, built by build-tariff-scenario. "
+            "Published version: the sealed dbt build the publication manifest names."
+        ),
+    )
 
 picked: Path | None = None
 hidden_pick: Path | None = None
@@ -497,7 +631,10 @@ database = selected.database
 relations = selected.relations
 if selected.is_published:
     context = selected.context
-    st.sidebar.success(f"Published {context.version}")
+    if context.role == "serving snapshot":
+        st.sidebar.success(f"Published {context.version} · serving snapshot")
+    else:
+        st.sidebar.success(f"Published {context.version}")
     st.sidebar.caption(
         f"File: `{database.name}` · dbt run `{context.run_id[:20]}…`. Tariff figures "
         "come from the sealed dbt build; readings and load history come from the same "
@@ -514,6 +651,11 @@ people = q.households(database)
 if not people:
     st.warning("That database has no readings yet.")
     st.stop()
+
+# ------------------------------------------------------------- landing view
+if selected.is_published:
+    render_landing(database, relations, selected.context)
+    st.divider()
 
 # ------------------------------------------------------- household and period
 st.title("Household energy explorer")

@@ -182,6 +182,20 @@ Its report is written under `data/forecasts/` (git-ignored, because it names rea
 and appears in the dashboard's **Forecast (backtest)** tab whenever the selected dataset's rows
 digest to what the report was run on.
 
+## 3. Carrying a published version to another machine
+
+A published version is bound to the path it was built at. To serve it elsewhere, export a
+**serving snapshot** — the file and its seal copied byte for byte with a pinned manifest —
+and read it through `reads.serving`, which verifies the bytes against the pin and the seal
+and binds the attempt record to the exported origin. Contract, measurements and hosting
+steps: [`deployment.md`](deployment.md).
+
+```bash
+uv run serving-snapshot export --root <publication root> --into data/serving
+uv run serving-snapshot verify --directory data/serving
+ENERGY_RECONCILIATION_SERVING_SNAPSHOT=data/serving uv run streamlit run streamlit_app.py
+```
+
 ## 3. Other `publication` subcommands
 
 | | |

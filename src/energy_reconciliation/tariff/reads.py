@@ -63,6 +63,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Final
 
+import duckdb
 import pandas as pd
 
 from .. import publication
@@ -75,6 +76,9 @@ from . import analytics as ta
 PUBLISHED: Final[str] = "published"
 CANDIDATE: Final[str] = "candidate"
 WAREHOUSE: Final[str] = "warehouse"
+#: A published version carried to another machine under ``serving.py``'s contract. Not
+#: the live manifest: what was published when it was exported.
+SERVING: Final[str] = "serving snapshot"
 
 
 class ReadContextError(RuntimeError):
@@ -170,6 +174,11 @@ class ReadContext:
                 f"published {self.version} ({self.version_file}) · dbt run "
                 f"{self.run_id} · {self.relations.label}"
             )
+        if self.role == SERVING:
+            return (
+                f"published {self.version} · serving snapshot ({self.version_file}) · "
+                f"dbt run {self.run_id} · {self.relations.label}"
+            )
         if self.role == CANDIDATE:
             return (
                 f"CANDIDATE {self.database.name} — sealed, NOT published · dbt run "
@@ -244,20 +253,36 @@ def _identity(
     )
 
 
-def _validated(path: Path, role: str, **version: Any) -> ReadContext:
+def _validated(
+    path: Path,
+    role: str,
+    *,
+    bound_to: str | None = None,
+    verify_output_digest: bool = True,
+    **version: Any,
+) -> ReadContext:
     """Seal, build record and file bytes checked against each other, then bound together.
 
     Every refusal names which two pieces of evidence disagreed. The expensive checks --
     the whole-file hash and the built-table digest -- happen here and only here.
+    ``bound_to`` and ``verify_output_digest`` exist for the serving route only; see
+    :func:`serving` and ``publication.build_record``.
     """
     if not path.is_file():
         raise ReadContextError(f"{path} does not exist.")
     try:
         seal = publication.read_seal(path)
-        record = publication.build_record(path)
+        record = publication.build_record(
+            path, bound_to=bound_to, verify_output_digest=verify_output_digest
+        )
     except publication.PublicationError as error:
         raise ReadContextError(
             f"{path.name} is not a validated dbt build: {error}"
+        ) from error
+    except duckdb.Error as error:
+        raise ReadContextError(
+            f"{path.name} could not be read as a database ({type(error).__name__}: "
+            f"{error}). A damaged or partial file; refusing."
         ) from error
 
     digest = publication._sha256(path)
@@ -338,6 +363,64 @@ def published(root: Path = publication.DEFAULT_ROOT) -> ReadContext:
         raise ReadContextError(
             f"{path.name}: the manifest names run {manifest.get('run_id')} but the file "
             f"was built by {context.run_id}. Refusing."
+        )
+    return context
+
+
+def serving(directory: Path, *, expected_sha256: str | None = None) -> ReadContext:
+    """A serving snapshot, verified: bytes against the pin and the seal, then every
+    attempt-record gate with the record bound to the exported origin, not to this path.
+
+    ``expected_sha256`` lets a deployment pass the digest it pinned in the repository, so
+    the directory's own manifest cannot quietly point at a different file.
+    """
+    from .. import serving as sv  # function-local: serving imports publication
+
+    try:
+        manifest = sv.load_manifest(Path(directory))
+    except sv.ServingError as error:
+        raise ReadContextError(str(error)) from error
+    path = Path(directory) / manifest["file"]
+    if expected_sha256 is not None and manifest["sha256"] != expected_sha256:
+        raise ReadContextError(
+            f"{path.name}: the snapshot manifest pins {manifest['sha256'][:12]}… but the "
+            f"deployment expects {expected_sha256[:12]}…. Refusing."
+        )
+    if not path.is_file():
+        raise ReadContextError(
+            f"{path} is missing: the snapshot was not fetched, or the download did not "
+            "complete. Nothing is shown in its place."
+        )
+    if path.stat().st_size != manifest["size_bytes"]:
+        raise ReadContextError(
+            f"{path.name}: {path.stat().st_size:,} bytes on disk, {manifest['size_bytes']:,} "
+            "pinned. A partial file is not a version; refusing."
+        )
+    digest = publication._sha256(path)
+    if digest != manifest["sha256"]:
+        raise ReadContextError(
+            f"{path.name}: bytes {digest[:12]}… differ from the sealed and pinned "
+            f"{manifest['sha256'][:12]}…. The file is not the one that was validated; "
+            "refusing to open it."
+        )
+    context = _validated(
+        path,
+        SERVING,
+        bound_to=manifest["build_origin_path"],
+        verify_output_digest=False,
+        version=manifest["version"],
+        version_file=manifest["file"],
+        promoted_at_utc=manifest.get("promoted_at_utc"),
+    )
+    if manifest["sha256"] != context.identity.file_sha256:
+        raise ReadContextError(
+            f"{path.name}: the snapshot manifest pins {manifest['sha256'][:12]}… but the "
+            f"seal certifies {context.identity.file_sha256[:12]}…. Refusing."
+        )
+    if manifest["run_id"] != context.run_id:
+        raise ReadContextError(
+            f"{path.name}: the manifest names run {manifest['run_id']} but the file was "
+            f"built by {context.run_id}. Refusing."
         )
     return context
 

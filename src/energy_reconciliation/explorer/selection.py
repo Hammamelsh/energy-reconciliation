@@ -57,6 +57,49 @@ def publication_root() -> Path:
     return Path(os.environ.get(ROOT_ENV) or publication.DEFAULT_ROOT)
 
 
+def serving_directory() -> Path | None:
+    """A serving snapshot directory, when a deployment configured one."""
+    from .. import serving as sv
+
+    value = os.environ.get(sv.SERVING_ENV)
+    return Path(value) if value else None
+
+
+def _serving_key(directory: Path) -> tuple[str, str] | None:
+    from .. import serving as sv
+
+    try:
+        manifest = sv.load_manifest(directory)
+    except (sv.ServingError, OSError, ValueError):
+        return None
+    return (str((directory / manifest["file"]).resolve()), str(manifest["sha256"]))
+
+
+def serving(directory: Path) -> Selection:
+    """Resolve and validate a serving snapshot. Same cache rule as a publication."""
+    from .. import serving as sv
+
+    key = _serving_key(directory)
+    if key is not None and key in _VALIDATED:
+        context = _VALIDATED[key]
+        return Selection(PUBLISHED_MODE, context.database, context.relations, context)
+    failed = os.environ.get(sv.SERVING_ERROR_ENV)
+    if failed:
+        return Selection(
+            PUBLISHED_MODE,
+            None,
+            None,
+            unavailable=f"the snapshot download failed: {failed}",
+        )
+    try:
+        context = reads.serving(directory)
+    except (reads.ReadContextError, publication.PublicationError) as error:
+        return Selection(PUBLISHED_MODE, None, None, unavailable=str(error))
+    if key is not None:
+        _remember(_VALIDATED, key, context)
+    return Selection(PUBLISHED_MODE, context.database, context.relations, context)
+
+
 #: Validated contexts kept for the life of the process, and the applicability verdicts
 #: taken over them.
 #:
@@ -158,6 +201,8 @@ def published(root: Path | None = None) -> Selection:
     nothing is published, the named file is missing, the seal or build record disagrees
     with it, or its build was not a complete one.
     """
+    if root is None and (snapshot := serving_directory()) is not None:
+        return serving(snapshot)
     root = root or publication_root()
     key = _cache_key(root)
     if key is not None and key in _VALIDATED:

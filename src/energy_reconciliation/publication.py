@@ -227,7 +227,12 @@ _RECORD_KEYS: Final[tuple[str, ...]] = (
 )
 
 
-def build_record(candidate: Path) -> dict[str, Any]:
+def build_record(
+    candidate: Path,
+    *,
+    bound_to: Path | str | None = None,
+    verify_output_digest: bool = True,
+) -> dict[str, Any]:
     """The attempt that authorises sealing this candidate, and proof it still describes
     the file, read-only.
 
@@ -254,6 +259,15 @@ def build_record(candidate: Path) -> dict[str, Any]:
     model, so a later attempt can replace some tables and leave the earlier record
     standing over contents it no longer describes. (3) closes the case (7) cannot see --
     a later failure that left the tables identical.
+
+    ``bound_to`` is the path the record must name -- by default this file's own resolved
+    path. A serving snapshot (``serving.py``) passes the **build origin** its manifest
+    declares, so a relocated copy of a validated publication is accepted while a copy of
+    some other build, whose record names some other path, still is not.
+    ``verify_output_digest=False`` skips (7) and is only for a reader that has already
+    verified the whole file's sha256 against a seal: the hash certifies every byte the
+    digest would summarise, and recomputing the digest costs ~900 MB on three million
+    rows. Sealing and promotion never pass either parameter.
     """
     if _wal(candidate).exists():
         raise PromotionRefused(
@@ -320,7 +334,8 @@ def build_record(candidate: Path) -> dict[str, Any]:
                 f"{latest['dbt_command']}`, not `build`. Only a build -- models and tests "
                 "-- can be sealed."
             )
-        if latest["database_path"] != str(candidate.resolve()):
+        expected_path = str(candidate.resolve() if bound_to is None else bound_to)
+        if latest["database_path"] != expected_path:
             raise PromotionRefused(
                 f"{candidate.name}: its attempt record was written in "
                 f"{latest['database_path']}, not this file. A snapshot of a built "
@@ -339,10 +354,10 @@ def build_record(candidate: Path) -> dict[str, Any]:
                 f"{latest['output_digest_version']!r}; this version computes "
                 f"{dbt_run.OUTPUT_DIGEST_VERSION!r}. Not comparable; build a fresh one."
             )
-        current = build_output_digest(con)
+        current = build_output_digest(con) if verify_output_digest else None
     finally:
         con.close()
-    if latest["built_output_sha256"] != current:
+    if current is not None and latest["built_output_sha256"] != current:
         raise PromotionRefused(
             f"{candidate.name}: the built tables digest {current[:12]}… but the build "
             f"record describes {str(latest['built_output_sha256'])[:12]}…. Something "

@@ -700,3 +700,87 @@ def household_difference_chart(frame: pd.DataFrame) -> alt.Chart | alt.LayerChar
         .encode(x="x:Q")
     )
     return (bars + zero).properties(height=height)
+
+
+def household_pct_difference_chart(frame: pd.DataFrame) -> alt.Chart | alt.LayerChart:
+    """The landing chart: each household's difference as a percentage of its flat charge.
+
+    Same sign convention as :func:`household_difference_chart` (positive: dynamic lower),
+    a zero rule, and the household label carries its observed coverage in words when it
+    is below 99%, so a partially covered household is marked by text and not by colour.
+    Pounds are in the tooltip.
+    """
+    if frame.empty:
+        return empty_note("No charged readings — nothing to compare.")
+    rows = []
+    for r in frame.to_dict(orient="records"):
+        cov = r["coverage_share"]
+        cov_f = float(cov) if cov is not None else float("nan")
+        label = r["household_id"] + (
+            f" ({cov_f:.1%} coverage)" if cov is not None and cov_f < 0.99 else ""
+        )
+        pct = r["pct_of_flat_exact"]
+        rows.append(
+            {
+                "label": label,
+                "pct": float(pct) if pct is not None else float("nan"),
+                "outcome": {
+                    "lower": "lower under dynamic",
+                    "higher": "higher under dynamic",
+                }.get(r["outcome_under_dynamic"], "equal"),
+                "difference": float(r["difference_exact"]),
+                "dynamic": float(r["dynamic_charge_gbp_exact"]),
+                "flat": float(r["flat_charge_gbp_exact"]),
+                "charged_readings": r["charged_readings"],
+                "coverage": cov_f,
+            }
+        )
+    data = pd.DataFrame(rows)
+    order = list(data.sort_values("pct")["label"])
+    # 24 px per bar: below ~20 px Altair drops every other category label, and a bar
+    # without its household name cannot be read against the table.
+    height = max(180, 24 * len(order) + 40)
+    bars = (
+        alt.Chart(data)
+        .mark_bar()
+        .encode(
+            y=alt.Y(
+                "label:N",
+                title=None,
+                sort=order,
+                axis=alt.Axis(labelFontSize=LABEL_SIZE - 1),
+            ),
+            x=alt.X(
+                "pct:Q",
+                title="Difference as % of the flat-price charge — positive: dynamic lower",
+                axis=alt.Axis(
+                    format=".1f",
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            color=alt.Color(
+                "outcome:N",
+                scale=alt.Scale(
+                    domain=list(OUTCOME_COLOURS), range=list(OUTCOME_COLOURS.values())
+                ),
+                legend=alt.Legend(title=None, orient="top", labelFontSize=11),
+            ),
+            tooltip=[
+                alt.Tooltip("label:N", title="Household"),
+                alt.Tooltip("outcome:N", title="Outcome"),
+                alt.Tooltip("pct:Q", title="% of flat-price charge", format="+.1f"),
+                alt.Tooltip("difference:Q", title="Flat − dynamic £", format="+,.2f"),
+                alt.Tooltip("dynamic:Q", title="Dynamic £", format=",.2f"),
+                alt.Tooltip("flat:Q", title="Flat-price £", format=",.2f"),
+                alt.Tooltip("charged_readings:Q", title="Charged readings", format=","),
+                alt.Tooltip("coverage:Q", title="Observed coverage", format=".1%"),
+            ],
+        )
+    )
+    zero = (
+        alt.Chart(pd.DataFrame({"x": [0.0]}))
+        .mark_rule(color=TEXT, strokeWidth=1)
+        .encode(x="x:Q")
+    )
+    return (bars + zero).properties(height=height)
