@@ -49,7 +49,7 @@ export function Hero({ bundle, onTour }: { bundle: Bundle; onTour: () => void })
         <strong>{integer(c.charged_readings)}</strong> half-hourly readings in {year}. We priced
         exactly those readings under the tariff they were on and, hypothetically, at the trial's
         documented flat price of <strong>{c.flat_price.pence_per_kwh.replace(/0+$/, "")}p per kWh</strong>.
-        Same electricity, two prices. Not a bill, a saving or advice.
+        A historical fixed-consumption comparison — not a bill, advice or evidence of behavioural savings.
       </p>
 
       <div className="stats" aria-live="off">

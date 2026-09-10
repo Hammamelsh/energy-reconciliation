@@ -74,7 +74,7 @@ export function HouseholdDetail({ household: h, flatPence, highRank, total }: { 
           <span key={b.band} className={`band-${b.band}`} style={{ width: `${b.consumption_share_pct}%` }} title={`${b.band}: ${b.consumption_share_pct}% of kWh`} />
         ))}
       </div>
-      <div style={{ fontSize: 13, color: "var(--muted)" }}>What it paid for, by price band</div>
+      <div style={{ fontSize: 13, color: "var(--muted)" }}>Where its scenario charge fell, by price band</div>
       <div className="stack" role="img" aria-label={`Charge share by band: ${bands.map((b) => `${b.band} ${b.charge_share_pct}%`).join(", ")}`}>
         {bands.map((b) => (
           <span key={b.band} className={`band-${b.band}`} style={{ width: `${b.charge_share_pct}%` }} title={`${b.band}: ${b.charge_share_pct}% of charge`} />
@@ -94,11 +94,11 @@ export function HouseholdDetail({ household: h, flatPence, highRank, total }: { 
           const share = high?.consumption_share_pct ?? 0;
           const chargeShare = high?.charge_share_pct ?? 0;
           const pos = highRank === 1 ? "the largest of any household" : highRank === total ? "the smallest of any household" : `rank ${highRank} of ${total}`;
-          return `${share.toFixed(1)}% of its electricity fell in High-price half hours — ${pos} — and that ${share.toFixed(1)}% became ${chargeShare.toFixed(1)}% of what it paid. ${
+          return `${share.toFixed(1)}% of its electricity fell in High-price half hours — ${pos} — and that ${share.toFixed(1)}% became ${chargeShare.toFixed(1)}% of its scenario charge. ${
             h.outcome_under_dynamic === "higher"
-              ? "Enough to tip it: the flat price would have been cheaper for this household."
+              ? "Enough to tip it: on this recorded consumption the flat price comes out lower."
               : h.outcome_under_dynamic === "lower"
-                ? "Not enough to outweigh the cheap Low and Normal hours, so the dynamic tariff was lower."
+                ? "Not enough to outweigh the cheaper Low and Normal half hours, so the dynamic scenario comes out lower."
                 : "Exactly balanced."
           }`;
         })()}

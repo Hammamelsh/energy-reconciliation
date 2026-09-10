@@ -2,6 +2,7 @@ import type { Comparison } from "../lib/bundle";
 import { countAt } from "../lib/breakeven";
 import { EMBER, LINE, NEUTRAL, VOLT } from "../lib/palette";
 import { pence } from "../lib/format";
+import { useMediaQuery } from "../hooks";
 
 export function BreakEven({
   comparison,
@@ -12,6 +13,7 @@ export function BreakEven({
   value: number;
   onChange: (v: number) => void;
 }) {
+  const compact = useMediaQuery("(max-width: 700px)");
   const hh = comparison.per_household;
   const flat = Number(comparison.flat_price.pence_per_kwh);
   const pooled = comparison.breakeven_flat_price.display ?? flat;
@@ -30,8 +32,8 @@ export function BreakEven({
       </p>
       <label htmlFor="flat-slider" className="big">
         At a flat price of <span className="ember">{value.toFixed(3)}p</span> per kWh,{" "}
-        <span className="volt">{counts.lower}</span> of {hh.length} households would have paid less on the
-        dynamic tariff, {counts.higher} more{counts.equal ? `, ${counts.equal} the same` : ""}.
+        <span className="volt">{counts.lower}</span> of {hh.length} households come out lower under the dynamic
+        scenario, {counts.higher} higher{counts.equal ? `, ${counts.equal} the same` : ""}.
       </label>
       <input
         id="flat-slider"
@@ -45,17 +47,19 @@ export function BreakEven({
         aria-valuetext={`${value.toFixed(3)} pence per kWh: ${counts.lower} lower, ${counts.higher} higher`}
       />
       <div className="ticks" aria-hidden="true">
-        <svg viewBox={`0 0 ${W} 46`}>
+        {/* The value label sits on its own row under the reference circles, so it cannot
+            overlap them when the slider rests exactly on a preset. */}
+        <svg viewBox={`0 0 ${W} 58`}>
           <line x1={10} x2={W - 10} y1={20} y2={20} stroke={LINE} strokeWidth={2} />
           {evens.map((p, i) => (
             <line key={i} x1={x(p)} x2={x(p)} y1={12} y2={28} stroke={p < value ? VOLT : p > value ? EMBER : NEUTRAL} strokeWidth={2} />
           ))}
           <line x1={x(value)} x2={x(value)} y1={4} y2={36} stroke="#fff" strokeWidth={2} />
-          <text x={x(value)} y={45} fontSize={11} fill="#fff" textAnchor="middle">
-            {value.toFixed(3)}p
-          </text>
           <circle cx={x(flat)} cy={34} r={4} fill="none" stroke={EMBER} strokeWidth={2} />
           <circle cx={x(pooled)} cy={34} r={4} fill="none" stroke={NEUTRAL} strokeWidth={2} />
+          <text x={x(value)} y={compact ? 56 : 54} fontSize={compact ? 20 : 11} fill="#fff" textAnchor="middle">
+            {value.toFixed(3)}p
+          </text>
         </svg>
       </div>
       <div className="toolbar">

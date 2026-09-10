@@ -29,8 +29,9 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
       <h2>Four prices on one scale</h2>
       <p>
         The dynamic tariff's High band cost about {ratio}× its Low band. The pooled break-even is the flat price
-        at which this consumption would have cost exactly what it did under the dynamic tariff — the documented
-        flat price sits {flat > even ? "above" : "below"} it, which is the whole 4%.
+        at which this recorded consumption would have cost exactly what it did under the dynamic tariff — the
+        documented flat price sits {flat > even ? "above" : "below"} it, and that gap is the{" "}
+        {bundle.comparison.pct_of_flat.display?.toFixed(1) ?? "—"}%.
       </p>
     </>
   );

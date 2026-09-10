@@ -53,7 +53,7 @@ export function Pipeline({ bundle, digest }: { bundle: Bundle; digest: string })
         <div className="card">
           <h3>Built and sealed</h3>
           <div className="mini">
-            <div className="row"><span>dbt build</span><b>{p.required_nodes_total} of {p.required_nodes_total} nodes</b></div>
+            <div className="row"><span>required build</span><b>{p.required_nodes_total} nodes, all passed</b></div>
             <div className="row"><span>run</span><b className="mono">{String(p.run_id).slice(0, 22)}…</b></div>
             <div className="row"><span>published as</span><b>{String(p.version)}</b></div>
             <div className="row"><span>version file sha256</span><b className="mono">{shortDigest(String(p.file_sha256))}</b></div>
@@ -68,13 +68,17 @@ export function Pipeline({ bundle, digest }: { bundle: Bundle; digest: string })
           </p>
         </div>
         <div className="card">
-          <h3>Verified in your browser</h3>
+          <h3>Checked in your browser</h3>
           <div className="mini">
             <div className="row"><span>this page's data</span><b className="ok">sha256 matched ✓</b></div>
             <div className="row"><span>bundle digest</span><b className="mono">{shortDigest(digest)}</b></div>
             <div className="row"><span>source</span><b>publication {String(p.version)}</b></div>
           </div>
-          <p className="hint">Your browser hashed the data file it received and compared it with the pinned manifest before showing a number.</p>
+          <p className="hint">
+            Your browser hashed the exported data file it received and compared it with the pinned SHA-256 digest before
+            showing a number. That is an integrity check on the payload, with its provenance traceable to the sealed
+            build — it does not rebuild the result from the raw archive or rerun the build.
+          </p>
         </div>
       </div>
     </div>

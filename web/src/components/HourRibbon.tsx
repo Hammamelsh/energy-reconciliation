@@ -21,15 +21,15 @@ export function HourRibbon({ hourBands }: { hourBands: HourBands }) {
   const peakHours = high.map((v, i) => ({ v, i })).filter((x) => x.v === maxHigh).map((x) => x.i);
   return (
     <div className="card ribbon">
-      <h3>When the expensive band fell — and when the electricity was used</h3>
+      <h3>Which label hours the expensive band fell in — and when the electricity was used</h3>
       <p className="sub" style={{ marginBottom: 10 }}>
-        Top: how many of the year's High-price half hours the schedule placed in each hour of the day. Bottom: charged
-        kWh by hour across all 27 households, coloured by the band it was priced in.
+        Top: how many of the schedule's High-price half hours fell in each hour of the timestamp label. Bottom: charged
+        kWh by label hour across all 27 households, coloured by the band it was priced in.
       </p>
       <svg
         viewBox={`0 0 ${W} 250`}
         role="img"
-        aria-label={`Schedule High-band slots by hour of day, peaking at ${maxHigh} in hours ${peakHours.join(", ")}; and charged kWh by hour and band.`}
+        aria-label={`Schedule High-band half hours by hour of the timestamp label, peaking at ${maxHigh} in label hours ${peakHours.join(", ")}; and charged kWh by label hour and band. Label hours as written; no timezone applied.`}
       >
         <text x={compact ? 8 : 0} y={16} fontSize={fs} fill={MUTED}>
           High-price half hours in the schedule

@@ -1,8 +1,8 @@
 # The front door
 
-A static page that presents the flat-price comparison from a small, verified data file. It is
-the public entry point; the Streamlit explorer (`src/energy_reconciliation/explorer/`) remains
-the deep view over the full published database.
+A static page that presents the flat-price comparison from a small data file that the browser
+checks against its pinned digest. It is the public entry point; the Streamlit explorer
+(`src/energy_reconciliation/explorer/`) remains the deep view over the full published database.
 
 ## Where the numbers come from
 
@@ -24,6 +24,8 @@ the slider against each household's precomputed exact break-even price.
 Before a number is shown, the browser hashes the bundle it received (SubtleCrypto SHA-256)
 and checks definition, size, digest and dbt run id against `public/data/manifest.json`.
 A changed byte, a stale manifest or a bundle from another run is refused with a visible error.
+This is an integrity check on the exported payload with provenance traceable to the sealed
+build; the browser does not rebuild the result from the raw archive or rerun the build.
 
 ## Commands
 

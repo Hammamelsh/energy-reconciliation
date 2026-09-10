@@ -74,7 +74,7 @@ describe("the page", () => {
     expect(window.location.search).toMatch(/household=MAC/);
   });
 
-  it("shows a verified error state when the data cannot be trusted", async () => {
+  it("refuses a tampered bundle and shows the integrity-check error state", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -85,7 +85,7 @@ describe("the page", () => {
       }),
     );
     render(<App base="data/" />);
-    expect(await screen.findByRole("alert")).toHaveTextContent(/could not be verified/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/did not match its pinned digest/);
     vi.unstubAllGlobals();
   });
 

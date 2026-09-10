@@ -15,6 +15,7 @@ import { Tour, type TourStep } from "./components/Tour";
 import { useInView, useScrollProgress } from "./hooks";
 import { Insight } from "./components/Insight";
 import { highRank, highShare } from "./lib/households";
+import { highConcentration, labelRange } from "./lib/hours";
 import { integer, money } from "./lib/format";
 
 type State =
@@ -70,12 +71,18 @@ export function Page({ loaded }: { loaded: Loaded }) {
   const o = c.outcomes_under_dynamic;
   const [tour, setTour] = useState(false);
   const [tourRun, setTourRun] = useState(0);
+  // Where the schedule put its High band, by hour of the timestamp label as written. The
+  // sentence is built from the counts, so it can only say what the bundle holds.
+  const hc = highConcentration(bundle.hour_bands);
+  const highHours = hc
+    ? `High-price half hours ${hc.everyHour ? "occurred in every label hour but " : ""}were concentrated in timestamp labels from ${labelRange(hc)}: ${hc.slots} of the schedule's ${hc.total} (${hc.sharePct}%)`
+    : "The schedule's High-price half hours are not summarised here";
   const steps: TourStep[] = [
-    { id: "top", title: "The question", text: `${c.households} households, one year of real readings, two prices. The dynamic tariff came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} for the electricity they actually used.` },
+    { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "—"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price — a comparison, not a recalculation." },
-    { id: "hours", title: "The hours", text: "The expensive band clustered in the evening, and so did the electricity. That is timing, not proof of a response." },
-    { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build — and this page verifying its own data." },
+    { id: "hours", title: "The hours", text: `${highHours} — label hours as written, no timezone applied. The charged electricity was highest in those hours too. That is timing, not proof of a response.` },
+    { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build — and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licence, and what this does not show." },
   ];
 
@@ -196,8 +203,9 @@ export function Page({ loaded }: { loaded: Loaded }) {
                   </button>
                 ))}
               <p className="hint">
-                Small in pounds, but real: both paid slightly more under the dynamic tariff because more of their
-                electricity fell in the 67.2p half hours. The dynamic tariff was not cheaper for everyone.
+                Small in pounds, but real in the comparison: both came out slightly higher under the dynamic scenario
+                because more of their electricity fell in the 67.2p half hours. The dynamic tariff was not lower for
+                every household.
               </p>
             </div>
           </div>
@@ -209,7 +217,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
         <Reveal
           id="hours"
           title="Where the expensive half hours were"
-          sub="The dynamic schedule announced each day's bands a day ahead; the High band clustered in the evening. So did the electricity — which is a coincidence of timing in this data, not evidence that anyone responded to the price."
+          sub={`The dynamic schedule announced each day's bands a day ahead. ${highHours} — hours of the label as written, with no timezone or interval convention applied, so this is not a claim about clock time. The charged electricity was highest in those label hours too, which is a coincidence of timing in this data, not evidence that anyone responded to the price.`}
         >
           <HourRibbon hourBands={bundle.hour_bands} />
         </Reveal>
@@ -217,7 +225,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
         <Reveal
           id="pipeline"
           title="How three million readings become one reproducible number"
-          sub="Every reading is either charged or excluded for a stated reason, the ladder has to add up, the build is sealed only when all of its models and tests pass, and this page verifies the data it was given before showing it."
+          sub="Every reading is either charged or excluded for a stated reason, the ladder has to add up, the build is sealed only when all of its models and tests pass, and this page checks the exported data against its pinned digest before showing it."
         >
           <Pipeline bundle={bundle} digest={loaded.digest} />
         </Reveal>
@@ -225,7 +233,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
         <Reveal
           id="quality"
           title="What was found on the way"
-          sub="Getting a tariff number right meant counting the things that would silently corrupt it — and a few things that turned out to be findings in their own right."
+          sub="Getting a tariff number right meant counting the source-data conditions the calculation handles explicitly — and a few things that turned out to be findings in their own right."
         >
           <Quality bundle={bundle} />
         </Reveal>
@@ -259,7 +267,7 @@ export default function App({ base }: { base?: string }) {
       <div className="state wrap" role="status" aria-live="polite">
         <div>
           <div className="spinner" aria-hidden="true" />
-          <p>Loading and verifying the data…</p>
+          <p>Loading the data and checking its digest…</p>
         </div>
       </div>
     );
@@ -268,11 +276,11 @@ export default function App({ base }: { base?: string }) {
     return (
       <div className="state wrap" role="alert">
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>The data could not be verified</h2>
+          <h2 style={{ marginTop: 0 }}>The data did not match its pinned digest</h2>
           <p className="warn">{state.message}</p>
           <p className="hint">
-            Nothing is shown in its place: a number that failed verification is not a number. The published figures are
-            in the <a href="https://github.com/Hammamelsh/energy-reconciliation">repository</a>.
+            Nothing is shown in its place: a figure whose data failed the integrity check is not shown. The published
+            figures are in the <a href="https://github.com/Hammamelsh/energy-reconciliation">repository</a>.
           </p>
         </div>
       </div>

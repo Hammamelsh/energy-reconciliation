@@ -38,12 +38,15 @@ export function Quality({ bundle }: { bundle: Bundle }) {
             <div className="row"><span>households affected</span><b>{z.households_with_zero_days} of {z.households}</b></div>
             <div className="row"><span>runs of consecutive zero days</span><b>{z.runs}</b></div>
             <div className="row"><span>runs of four weeks or more</span><b>{z.runs_28_days_or_more}</b></div>
-            <div className="row"><span>runs with normal usage on both sides</span><b>{z.runs_bounded_by_nonzero_usable_days} of {z.runs}</b></div>
+            <div className="row"><span>runs bounded on both sides by recorded non-zero usable days</span><b>{z.runs_bounded_by_nonzero_usable_days} of {z.runs}</b></div>
             <div className="row"><span>longest run</span><b>{z.longest_run_days} days</b></div>
           </div>
           <p className="hint">
-            A day of exact zeros costs nothing and raises no error — which is why it is worth finding. Why the days are
-            zero is {z.cause}. These households are on the flat rate; none is in the tariff comparison.
+            A day of recorded zeros contributes zero consumption-based charge in this scenario; whether a billing system
+            would flag the pattern was not investigated. Why the days are zero is {z.cause}.{" "}
+            {z.runs_bounded_by_nonzero_usable_days} of {z.runs} runs were immediately bounded on both sides by recorded
+            non-zero usable days. All {z.households_with_zero_days} households are in the flat-rate group; none is in
+            the tariff comparison.
           </p>
         </div>
       )}
@@ -69,7 +72,8 @@ export function Quality({ bundle }: { bundle: Bundle }) {
             </div>
             <p className="hint">
               {f.holdout.scored_predictions_per_model} scored predictions per model. Every prediction uses only data dated on or
-              before its origin. A retrospective, clean-data cohort — a floor for accuracy, not a forecast product.
+              before its origin. A retrospective benchmark on clean runs — not an operational evaluation, not a forecast
+              product.
             </p>
           </>
         ) : (
