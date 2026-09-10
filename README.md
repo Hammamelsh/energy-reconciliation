@@ -22,7 +22,7 @@ Across **456,096 charged readings from 27 time-of-use households**, the 2013 tar
 
 **A1 assumes that a consumption timestamp and the matching schedule label refer to the same half-hour interval.** Their correspondence is unverified. No standing charges or separate tax adjustments are modelled, and the result does not establish a behavioural response to prices.
 
-Coverage varies: 26 households contribute 17,375–17,520 of the year's 17,520 scheduled labels; one contributes 864. The warehouse's 56 flat-rate (`Std`) households are not costed: the publisher's workbook gives the flat rate no effective dates. [Tariff measurements, coverage and assumptions](docs/anl-002-tariff-scenario.md).
+Coverage varies: 26 households contribute 17,375–17,520 of the year's 17,520 scheduled labels; one contributes 864. The tariff scenario covers the 27 time-of-use households; the 56 flat-rate households remain available for consumption and data-quality analysis. [Tariff measurements, coverage and assumptions](docs/anl-002-tariff-scenario.md).
 
 ### Profiling distinguishes missing consumption from recorded zeros
 
