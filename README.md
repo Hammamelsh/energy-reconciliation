@@ -2,11 +2,15 @@
 
 [![CI](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml/badge.svg)](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml)
 
-Inspect smart-meter data, calculate a historical tariff scenario and reproduce the results from their recorded inputs. Built with **Python, SQL, DuckDB, dbt and Streamlit** using Low Carbon London data.
+Inspect smart-meter data, calculate a historical tariff scenario and reproduce the results from their recorded inputs. Built with **Python, SQL, DuckDB, dbt and Streamlit**, with a **React + TypeScript** front door, using Low Carbon London data.
 
 Meter readings arrive with duplicates, missing values, ambiguous timestamps and household histories split across files. This project preserves the source evidence, applies explicit rules and accounts for every reading included in—or excluded from—a tariff calculation.
 
 The main warehouse contains **3 million source rows from three files, covering 83 households**. The dashboard brings together consumption, data quality, tariff calculations and forecasting baselines. Separate workflows support profiling a source file, publishing a validated build and replaying a recorded result.
+
+![The front door's opening view: the title "The same electricity, priced two ways.", a scope line — 27 households on a dynamic tariff recorded 456,096 half-hourly readings in 2013, priced under that tariff and hypothetically at the trial's documented flat price of 14.228p per kWh — four values (dynamic tariff £11,675.43, flat price £12,160.26, flat minus dynamic +£484.83, +4.0% of the flat-price charge), the sentence "25 households were lower under it, 2 higher", and a price scale placing Low 3.99p, Normal 11.76p, the break-even 13.661p, the flat price 14.228p and High 67.20p on one line.](docs/images/front-door-landing.png)
+
+*The public front door ([`web/`](web/)): a static page over a 60 kB data file exported from the published version and verified in the browser before anything is shown. Built and checked in this repository; deployment is pending.*
 
 ## Findings
 
@@ -117,7 +121,7 @@ uv run pytest -q
 
 The workflow has been exercised on Ubuntu 24.04 under WSL2 and GitHub-hosted Ubuntu, with Python 3.12.14 and 3.12.3 respectively. Other platforms are unverified. Publication recovery uses Linux-specific behaviour. Builds are started manually or by CI; there is no scheduled service.
 
-**Public viewer.** The dashboard can serve a published version from another machine through a verified *serving snapshot*, and opens on the comparison above (both implemented and tested; [deployment guide](docs/deployment.md)). Hosting is **pending**: the snapshot has not been published and no viewer is live yet.
+**Public viewer.** Two parts, neither live yet. The *front door* ([`web/`](web/)) is a static React + TypeScript page over a 59.5 kB bundle exported deterministically from the published version by `export-presentation`: the browser verifies the bundle's sha256 against a pinned manifest before showing a number, exact decimals travel as text, and the tariff is never recalculated in JavaScript. It has its own CI job (lint, typecheck, tests, build) and a Render static-site configuration ([`render.yaml`](render.yaml)); deploying it is an owner action. The Streamlit *explorer* can serve a published version from another machine through a verified *serving snapshot* and opens on the same comparison (implemented and tested); publishing the 210 MB snapshot and hosting the explorer are also pending. [Deployment guide](docs/deployment.md).
 
 [Roadmap](docs/roadmap.md) · [Evidence and claim boundaries](docs/portfolio-evidence.md)
 

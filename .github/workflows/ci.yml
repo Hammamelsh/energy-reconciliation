@@ -33,6 +33,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  web:
+    # The public front door under web/: a static React + TypeScript page over the committed
+    # presentation bundle. Independent of the Python job and much faster, so it runs in
+    # parallel; the Python job's tests separately check that the committed bundle verifies
+    # against its manifest and reconciles to the calculation.
+    name: front door (lint, typecheck, tests, build; Node 22)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.node-version
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked dependencies
+        # npm ci installs exactly what package-lock.json pins and fails on any drift.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Built page carries no unresolved site-URL placeholder
+        # VITE_SITE_URL is unset here, as it may be on a host; the build must then omit the
+        # canonical and Open Graph tags rather than ship the placeholder text.
+        run: |
+          if grep -q "VITE_SITE_URL" dist/index.html; then
+            echo "dist/index.html still contains the VITE_SITE_URL placeholder" >&2
+            exit 1
+          fi
+
   checks:
     name: lint, macro drift and tests (Linux, Python 3.12)
     runs-on: ubuntu-24.04

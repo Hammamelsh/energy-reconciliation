@@ -1,7 +1,12 @@
-# Deploying the dashboard as a public viewer
+# Deploying the public viewer: front door and explorer
 
 How a published version is carried to a hosting machine without weakening what
 "published" means, what was measured, and the exact steps to host it.
+
+Two things can be hosted. The **front door** (§9–10) is a static page over a small data
+file exported from the published version and verified in the browser; it is the link to give
+a visitor. The **explorer** (§1–7) is the Streamlit app over the full serving snapshot; it is
+the deep view, and needs the 210 MB snapshot published first. Neither is live yet.
 
 ## 1. The problem a serving snapshot solves
 
@@ -194,10 +199,87 @@ Neither shows a map. The data contains no coordinates, and no household location
 or invented; a map is reserved for verified regional carbon data in a later phase
 ([`roadmap-next-phase.md`](roadmap-next-phase.md)).
 
-## 8. What a deployment must never do
+A third capture, [`images/front-door-landing.png`](images/front-door-landing.png), is the
+front door's opening view at 1440 px (§9): the same four values, the price ladder and the
+outcome line. It is the launch image once the front door is live, because it is the page the
+link opens.
+
+## 9. The front door: a static page over a verified bundle
+
+The public entry point is a React + TypeScript page under [`web/`](../web/) (its own
+[README](../web/README.md)). It never reads the database. A deterministic export,
+`uv run export-presentation` ([`presentation.py`](../src/energy_reconciliation/presentation.py),
+contract `presentation-bundle-1`), reads a validated publication — a serving snapshot or a
+publication root — and writes two files that are committed beside the page:
+
+| File | Size | Holds |
+|---|---:|---|
+| `web/public/data/bundle.json` | 59,550 bytes (11,358 gzipped) | Pooled totals; all 27 household outcomes with coverage, band shares and exact break-even prices; hour-of-day band distributions; the accounting ladder; data-quality and forecast summaries; both assumptions; the attribution; the publication's identity. Exact decimals as strings with units, beside display values rounded once in Python. |
+| `web/public/data/manifest.json` | 359 bytes | The bundle's sha256, size and definition, and the source publication (version, run id, version-file sha256). |
+
+What the bundle must not contain is enforced by
+[`tests/test_presentation.py`](../tests/test_presentation.py): no individual reading, no
+per-reading timestamp, no file path, no credential, no host name; the only time of day in it
+is the publication's promotion timestamp. The same tests prove the export is byte-for-byte
+deterministic, that its figures reconcile to `compare-flat-price`, `band_summary` and the
+accounting ladder, and that a corrupt, stale, foreign or wrongly-defined bundle is refused.
+
+In the browser, the page hashes the bundle it received (SHA-256) and compares it with the
+manifest before showing a number. The tariff is never recalculated in JavaScript: the page
+formats exact strings and display values. Its one interactive calculation — how many
+households would have come out ahead at another flat price — compares the slider against each
+household's precomputed exact break-even price, a comparison rather than a recalculation.
+
+Measured on 2026-09-10 (production build; headless Chromium; local servers, so not the host's
+figures):
+
+| Measurement | Result |
+|---|---|
+| Page weight | JavaScript 274,554 bytes (84.9 kB gzipped); CSS 15,008 (4.2 kB); HTML 2,862 (1.1 kB); data 59,909 (11.7 kB). Everything a first view fetches: **100.4 kB gzipped**. The Open Graph image (254 kB) is fetched only by link previews. |
+| Time to first heading | 0.56–0.59 s including the data fetch and hash, at 1440 px and at 390 px. |
+| Accessibility | axe-core: 0 violations under the WCAG 2 A, AA and best-practice rules at both widths. Keyboard: bars reachable with Tab, moved with the arrow keys, the selection carried into the URL (`?household=`). `prefers-reduced-motion` disables count-ups, reveals and the flow animation. |
+| Charting dependency | None. A Recharts prototype measured 562 kB (167.8 kB gzipped) against 220 kB (68.6 kB) for the same charts drawn as SVG, before the page was complete. |
+| Headers | `dist/` served locally with exactly the headers `render.yaml` declares (content-security policy allowing only the site's own origin, no sniffing, no framing, cache rules): page rendered, URL state restored, **no content-security-policy violation and no console error**. |
+| Checks | `npm run check`: oxlint, `tsc -b`, 13 vitest tests (bundle verification and refusal of a changed byte, a stale manifest and a foreign definition; formatting; rendering with the committed data; URL state), production build. The CI workflow runs the same steps in a `web` job in parallel with the Python job, and fails if the built page still carries the site-URL placeholder. |
+
+Against the Streamlit landing view (§2): the same figures from the same publication, but the
+front door fetches 100 kB and shows its first heading in about half a second, where the
+explorer needs the 210 MB snapshot per process and 1.6 s to a complete first render before any
+host sleep or cold start is counted. **The front door is the link to publish**; the explorer is
+the deep view, linked from the front door's footer once it is hosted.
+
+## 10. Hosting the front door on Render — owner steps
+
+[`render.yaml`](../render.yaml) describes a static site: root directory `web`, build
+`npm ci && npm run build`, publish `dist`, Node 22.23.2 from `web/.node-version`, headers
+(content-type sniffing off, referrer policy, framing denied, a content-security policy that
+allows only the site's own origin) and cache rules (hashed assets immutable for a year;
+`index.html`, the bundle and the manifest always revalidated). No secret is needed.
+
+1. Sign in to Render with the GitHub account that owns the repository.
+2. *New* → *Blueprint* → connect `Hammamelsh/energy-reconciliation`, branch `main`. Render reads
+   `render.yaml` and proposes the `energy-reconciliation` static site; apply it.
+3. After the first deploy, open the site's *Environment*, set `VITE_SITE_URL` to the site's
+   public address without a trailing slash (the `onrender.com` address, or a custom domain once
+   attached), and trigger a deploy. Until then the canonical link and Open Graph image tags are
+   omitted — by design, so no placeholder ships — and link previews show no image.
+4. Record what you observe: the deployed commit, the build time, the response headers on `/`
+   and `/data/bundle.json`, and a link-preview check (paste the address somewhere that unfurls
+   links) once step 3 is done.
+5. Auto-deploy on push to `main` is Render's default. Either leave it on — every push has run
+   the `web` CI job — or turn it off and deploy by hand after each release.
+
+Nothing above has been observed on Render yet. What was verified locally is the artifact and
+the headers (§9); the platform's build and its cold-start behaviour must be observed there.
+
+## 11. What a deployment must never do
 
 - Weaken validation to make hosting work: no fallback to the copied `main` facts, no skipped
   seal or record checks, no legacy warehouse mode standing in for a published version.
 - Build in the request path. If the snapshot is missing or fails verification, the page says
   so and shows nothing in its place.
 - Serve a snapshot that was not exported from a publication that validated in place.
+- Ship a front-door bundle that was not exported from a validated publication, or a manifest
+  that does not match it; the page refuses such a pair, and so must the release.
+- Recreate the tariff arithmetic in the browser. The page formats what the export computed
+  exactly; a second implementation in floating point would be a second source of truth.

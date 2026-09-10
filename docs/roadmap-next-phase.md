@@ -21,10 +21,25 @@ inspection carried in the URL (`?household=`), and a methods expander. Closed by
 reconcile to `compare-flat-price`; desktop and phone renders inspected in a real browser;
 keyboard reachability checked; the explorer's other views unchanged beneath it.
 
-**A3. Deployment (owner action pending).** Upload the snapshot as a pinned release asset,
+**A3. Front door (built 2026-09-10; deploy pending).** The public entry point is a static
+React + TypeScript page ([`web/`](../web/)) over a presentation bundle exported deterministically
+from the published version (`export-presentation`, contract `presentation-bundle-1`; 59,550
+bytes; verified by sha256 in the browser before anything is shown; exact decimals as text; no
+tariff arithmetic in JavaScript). The Python engine — DuckDB, dbt, the sealed publication, the
+Streamlit explorer — is unchanged; the page is a view over its output, and Phase B's grid will
+be rendered the same way. Closed so far by: the bundle reconciles to `compare-flat-price` and
+the accounting ladder in tests; byte-determinism, refusal of corrupt, stale and foreign bundles,
+and the absence of row-level data are tested; lint, typecheck, tests and build pass; desktop
+and phone renders inspected; axe-core clean at both widths; keyboard navigation checked; the
+built page cannot ship a site-URL placeholder. Remaining: the owner's Render deploy from
+[`render.yaml`](../render.yaml) and the observed link-preview check
+([`deployment.md`](deployment.md) §9–10). Once live this is the primary public link; the
+explorer is the deep view behind it.
+
+**A4. Explorer hosting (owner action pending).** Upload the snapshot as a pinned release asset,
 commit the pin, and deploy `streamlit_app.py` to Streamlit Community Cloud; record cold start,
-memory and the deployed revision as observed on the platform. Fallback if unsuitable: the
-README's screenshots and exported findings. Steps in [`deployment.md`](deployment.md) §5–6.
+memory and the deployed revision as observed on the platform. Fallback if unsuitable: the front
+door alone, with the README's screenshots. Steps in [`deployment.md`](deployment.md) §5–6.
 
 ## Phase B — a current retail-price explorer (separate from the 2013 data)
 

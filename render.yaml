@@ -1,0 +1,55 @@
+# Render Blueprint: the public front door as a static site.
+#
+# What this deploys: the React + TypeScript page under web/, built from the committed
+# presentation bundle (web/public/data/). No database, no server process and no secrets are
+# involved; the page verifies its data file against the pinned manifest in the browser.
+#
+# The deploy itself is an owner action (connect the repository in the Render dashboard and
+# apply this Blueprint). Nothing here has been observed on Render yet; see
+# docs/deployment.md for the owner steps and what to record once it is live.
+services:
+  - type: web
+    name: energy-reconciliation
+    runtime: static
+    rootDir: web
+    # The lock file is authoritative: npm ci refuses to resolve anything the lock does not pin.
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    pullRequestPreviewsEnabled: false
+    envVars:
+      # The site's own public address, used only for the canonical link and the Open Graph
+      # image URL. Set it in the dashboard once the address is known (sync: false means the
+      # Blueprint never overwrites it). Left unset, the build omits those tags rather than
+      # shipping a placeholder.
+      - key: VITE_SITE_URL
+        sync: false
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=()
+      # The page loads nothing from any other origin: one script, one stylesheet, its own
+      # data file and images. Inline style attributes are used for computed widths.
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-ancestors 'none'"
+      # Hashed asset names change with content, so they can be cached for a year.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      # The data file and its manifest keep fixed names: always revalidate them, so a
+      # republished bundle is picked up and never verified against a stale manifest.
+      - path: /data/*
+        name: Cache-Control
+        value: no-cache
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
