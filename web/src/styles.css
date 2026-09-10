@@ -173,11 +173,12 @@ button {
   font-size: 12px;
 }
 h1 {
-  font-size: clamp(2.2rem, 5.2vw, 4rem);
-  line-height: 1.05;
+  font-size: clamp(1.9rem, 4.4vw, 3.5rem);
+  line-height: 1.08;
   letter-spacing: -0.02em;
   margin: 10px 0 14px;
-  max-width: 22ch;
+  max-width: 24ch;
+  overflow-wrap: anywhere;
 }
 .lede {
   max-width: 62ch;
@@ -197,6 +198,220 @@ h1 {
 @media (max-width: 860px) {
   .stats {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 430px) {
+  .stats {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --------------------------------------------------------------- opening */
+/* The first screen: the question, the answer, the two totals, the 27 marks and one action.
+   Mobile first; two columns from 900px. */
+.opening {
+  display: grid;
+  gap: 24px;
+  margin-top: 26px;
+}
+@media (min-width: 900px) {
+  .opening {
+    grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+    gap: 40px;
+    align-items: start;
+  }
+}
+.answer-label {
+  color: var(--muted);
+  font-size: 14px;
+}
+.answer-value {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 2px 0 2px;
+}
+.answer-value .big {
+  font-size: clamp(2.7rem, 10vw, 4.8rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.answer-value .big.volt {
+  color: var(--volt);
+  text-shadow: 0 0 26px rgba(198, 244, 58, 0.35);
+}
+.answer-value .big.ember {
+  color: var(--ember-2);
+  text-shadow: 0 0 26px rgba(255, 138, 61, 0.35);
+}
+.answer-value .word {
+  font-size: clamp(1.25rem, 4vw, 1.8rem);
+  font-weight: 700;
+}
+.answer-sub {
+  color: var(--muted);
+  font-size: 15px;
+}
+.totals {
+  margin-top: 18px;
+  display: grid;
+  gap: 10px;
+}
+.total {
+  display: grid;
+  grid-template-columns: 6.2em minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 14px;
+  color: var(--muted);
+}
+.total .track {
+  position: relative;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.total .fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width var(--dur) var(--ease);
+}
+.total .fill.dyn {
+  background: var(--volt);
+}
+.total .fill.flat {
+  background: var(--ember);
+  opacity: 0.45;
+}
+.total .tail {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--ember);
+  transition: width var(--dur) var(--ease);
+}
+.total b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.outcomes {
+  margin: 0 0 10px;
+  font-size: clamp(1.05rem, 2vw, 1.25rem);
+}
+.marks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.mark {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 150ms var(--ease), filter 150ms;
+}
+.mark.lower {
+  background: var(--volt);
+}
+.mark.higher {
+  background: var(--ember);
+}
+.mark:hover {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
+}
+.mark[aria-pressed="true"] {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.marks-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.marks-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-right: 6px;
+  vertical-align: -1px;
+}
+.marks-legend i.lower {
+  background: var(--volt);
+}
+.marks-legend i.higher {
+  background: var(--ember);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+}
+.actions .cta {
+  margin-top: 0;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+.actions .tour-start {
+  margin: 0;
+}
+.qualifier {
+  margin: 24px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 72ch;
+}
+.exact {
+  margin-top: 18px;
+}
+.detail {
+  scroll-margin-top: 72px;
+}
+.exact .stats {
+  margin: 4px 0 12px;
+}
+.stat .value {
+  /* Sized to fit "£12,160.26" in a four-up card inside the disclosure; digits never wrap. */
+  font-size: clamp(1.4rem, 2.5vw, 2rem);
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .hero {
+    padding-top: 36px;
+  }
+  .mark {
+    width: 32px;
+    height: 32px;
+    font-size: 13px;
+  }
+}
+@media (max-width: 420px) {
+  .total {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
+  .total > span {
+    grid-column: 1 / -1;
   }
 }
 .stat {

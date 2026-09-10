@@ -52,12 +52,38 @@ describe("the page", () => {
   it("renders the hero figures and every household as a keyboard-reachable button", async () => {
     const bundle = await verifyBundle(manifest, bytes);
     render(<Page loaded={{ bundle, manifest, digest: manifest.content_digest }} />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("The same electricity, priced two ways.");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Would the same electricity cost less if its price could change every 30 minutes?",
+    );
     const chart = screen.getByRole("group", { name: /Each household's difference/ });
     const bars = within(chart).getAllByRole("button");
     expect(bars).toHaveLength(27);
     expect(bars.filter((b) => b.getAttribute("tabindex") === "0")).toHaveLength(1);
     expect(bars.some((b) => /MAC000186.*higher under the dynamic tariff/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
+  });
+
+  it("opens with the answer, the two totals and one mark per household, all from the bundle", async () => {
+    const bundle = await verifyBundle(manifest, bytes);
+    const c = bundle.comparison;
+    render(<Page loaded={{ bundle, manifest, digest: manifest.content_digest }} />);
+    const opening = screen.getByRole("heading", { level: 1 }).closest("header")!;
+    expect(within(opening).getByText(`${c.outcomes_under_dynamic.lower} households`)).toBeInTheDocument();
+    expect(within(opening).getByText(`${c.pct_of_flat.display?.toFixed(1)}% of the flat-price charge`)).toBeInTheDocument();
+    expect(
+      within(opening).getByRole("img", { name: `Dynamic tariff ${money(c.dynamic_charge.display)} against flat price ${money(c.flat_charge.display)} for the same recorded electricity.` }),
+    ).toBeInTheDocument();
+    const marks = within(opening).getByRole("group", { name: /27 households: 25 lower/ });
+    const buttons = within(marks).getAllByRole("button");
+    expect(buttons).toHaveLength(27);
+    expect(buttons.filter((b) => b.className.includes("lower"))).toHaveLength(25);
+    expect(buttons.filter((b) => b.className.includes("higher"))).toHaveLength(2);
+    expect(buttons.filter((b) => b.getAttribute("tabindex") === "0")).toHaveLength(1);
+    // the last mark is an exception; choosing it selects that household on the page
+    await userEvent.click(buttons[26]);
+    expect(buttons[26]).toHaveAttribute("aria-pressed", "true");
+    expect(window.location.search).toMatch(/household=MAC000186/);
+    await userEvent.click(within(opening).getByRole("button", { name: /Why did 2 go the other way/ }));
+    expect(await screen.findByText("MAC000186", { selector: ".detail .id" })).toBeInTheDocument();
   });
 
   it("selects a household from the url and moves the selection with the keyboard", async () => {

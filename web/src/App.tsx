@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadBundle, type Bundle, type Loaded } from "./lib/bundle";
-import { pushState, readState } from "./lib/url";
+import { prefersReducedMotion, pushState, readState } from "./lib/url";
 import { Hero } from "./components/Hero";
 import { HouseholdChart } from "./components/HouseholdChart";
 import { sortHouseholds, type SortKey } from "./lib/households";
@@ -109,6 +109,15 @@ export function Page({ loaded }: { loaded: Loaded }) {
       <main id="main">
         <Hero
           bundle={bundle}
+          selected={selected}
+          onPick={(id) => {
+            setSelected(id);
+            // On one column the detail card (which holds the "why") sits below the 27-row
+            // chart, so go straight to it; on two columns the section shows both.
+            const oneColumn = typeof window !== "undefined" && window.matchMedia?.("(max-width: 899px)").matches;
+            const target = (oneColumn && document.querySelector(".detail")) || document.getElementById("households");
+            target?.scrollIntoView?.({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
+          }}
           onTour={() => {
             setTourRun((n) => n + 1);
             setTour(true);
