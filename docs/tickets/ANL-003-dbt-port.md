@@ -342,6 +342,54 @@ interpreter build. Either way the counting is free from here on.
   retry is added: with no reproduction, a retry could not be shown to work, and it would hide
   exactly the signal the workflow and CI are designed to surface.
 
+### Fourth occurrence — natural, during the local test suite (2026-09-10 19:02:29 BST)
+
+Not an experiment: the full suite was running after the ANL-005 change, and one
+`build-candidate` on a synthetic warehouse died by signal.
+
+- **Attempt** `dbtcand-6843c8b238c1@20260910T180226721089`, in
+  `tests/test_candidate.py::test_the_recorded_identity_covers_what_produces_the_tables`.
+  The lifecycle behaved as designed: the attempt is recorded as failed, nothing was sealed,
+  and the new message named it — *dbt was terminated by SIGSEGV (signal 11) — the known
+  intermittent crash (…)*. The test passed on re-run; the code under test is unchanged.
+- **Phase.** Execution had begun: nodes 1–7 of 54 completed, `8 of 54 START test
+  not_null_dim_tariff_band_schedule_source_sha256` was the last line before the signal.
+  dbt compiles each node just before running it, so this is the same early-test phase as
+  the earlier "7/54" fault. Two leaked semaphores were reported, as before.
+- **Kernel record** (`journalctl -k`): `traps: dbt[305195] general protection fault
+  ip:18022de sp:7b8569ef0530 error:0 in python3.12[1600000+8ce000]`, followed by
+  `potentially unexpected fatal signal 11`. Same binary as the three earlier faults
+  (sha256 `f7c6210e…`, uv-managed CPython 3.12.14).
+- **Where it faulted — this is new.** `addr2line -f` on that binary resolves `0x18022de`
+  to **`_PyObject_Malloc`**, the interpreter's small-object allocator. The earlier three
+  resolved to `_PyEval_EvalFrameDefault`. A general protection fault *inside the
+  allocator* — rather than a null-ish dereference in the eval loop — is the classic
+  symptom of **heap corruption**: something native has written past a block or freed one
+  twice, and the allocator trips over its damaged bookkeeping later, in unrelated code.
+  That is consistent with all four sites being different and none being in dbt's own
+  Python: the corruption happens earlier than the crash and elsewhere.
+- **Timing.** 25 hours after the 2026-09-09 window, on the same machine, with 4 clean
+  hosted runs and every local build in between clean. The "one window" pattern is gone;
+  the rate on this machine is now 4 crashes in the retained history plus one, and it
+  remains unmeasured on any other interpreter.
+
+**Revised next step, replacing the "wait under gdb" plan.** Run builds with Python's
+debug allocator, which costs nothing to enable and would produce evidence gdb cannot:
+
+```bash
+PYTHONMALLOC=debug uv run build-candidate --source <warehouse> --root <scratch root> --schedule demo
+```
+
+`PYTHONMALLOC=debug` surrounds every block with guard bytes and checks them on free. A
+native overrun is then caught **at the free that follows it**, with `Fatal Python error:
+bad trailing pad byte` (or `bad leading pad byte` / double free), the allocator API and
+block address, and a Python traceback of the call that freed it — which identifies the
+extension responsible, exactly what the four crash sites cannot. It is slower (roughly
+2–3×) and changes nothing about the build's outputs. The gdb harness stays useful for a
+native backtrace, but it can only show *where the damage was noticed*; the debug allocator
+can show *who did it*. Run it as the ordinary suite and quickstart (both build many
+candidates), not as a bespoke loop, and stop at the first fatal error.
+
 ### Precise next step
 
 The validated harness is ready but the fault is not reproducing on demand. The
