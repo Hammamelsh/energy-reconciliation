@@ -13,6 +13,8 @@ data/baselines/
 data/comparisons/
 # Forecast experiment reports name real household ids: kept local.
 data/forecasts/
+# ANL-004 zero-day reports name real household ids: kept local.
+data/quality/
 # The demo fixture itself is tracked; profiler output over it is not.
 data/demo/*-profile.json
 *.duckdb

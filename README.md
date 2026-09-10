@@ -30,7 +30,9 @@ A separate profile of **source file 0—1 million records across 30 households�
 
 The pipeline preserves these distinctions. Missing values are not replaced with zero; equivalent numeric representations count once; conflicting readings remain visible and cause the affected explorer total to be withheld.
 
-[Profile report](data/profiles/lcl-june2015v2-0-profile.json) · [Source investigation](docs/source-data-profile.md)
+Across the three loaded files, **963 of 61,799 usable days total exactly zero** — every one of the day's 48 readings is `0`. They belong to 5 of 83 households and fall in 52 runs, 13 of them four weeks or longer; 50 of the 52 runs are bounded on both sides by non-zero days within the loaded data, so they are not artefacts of where a file was cut. One household accounts for 780 of the 963; another consumes 38 kWh on a typical day and reads zero for a month at a time. Why a day reads zero is not established from readings and is not inferred.
+
+[Profile report](data/profiles/lcl-june2015v2-0-profile.json) · [Source investigation](docs/source-data-profile.md) · [Zero-day runs](docs/anl-004-zero-days.md)
 
 ### A four-week weekday mean has the lowest error in the baseline comparison
 
