@@ -62,13 +62,22 @@ summed over runs equals the total. Any mismatch is a defect, not a finding.
 reported beside this one. If they differ, the difference is explained by population or
 definition, not reconciled by adjustment.
 
-## Before building — one understanding question for Hammam
+## Why runs and neighbours, not a count
 
-A household whose zero days form one run of forty dates ending on its last loaded date
-looks, in the summary, very like a household with forty scattered single zero days. Both
-have forty zero days. Why does the report keep runs and edges rather than only the count,
-and what would each of those two households mean for a monthly charge computed over the
-same period?
+Forty zero days in one run ending on the last loaded date and forty scattered single zero
+days are the same count and different observations. The first may continue outside what
+was loaded; the second is forty separate events each followed by recorded usage. A monthly
+charge computed over the same period would be silently zero for the first household's
+final weeks and barely affected for the second. The report therefore keeps runs, and
+measures what lies on each side of a run, rather than reporting a bare count.
+
+**Edges and neighbours are distinct measurements.** A run *touches the usable span* when
+it starts on the household's first usable date or ends on its last. Separately, the date
+immediately before and after each run is classified: a non-zero usable day, an unusable
+day with its reason, absent (no row), or beyond the household's recorded span. A run is
+*bounded* only when both neighbours are non-zero usable days. Whether a household continues
+into a source file that was not loaded cannot be known from the warehouse and is not
+claimed.
 
 ## Acceptance
 

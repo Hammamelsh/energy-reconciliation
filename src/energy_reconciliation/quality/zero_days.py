@@ -4,8 +4,12 @@ A *zero day* is a **usable** day -- 48 distinct on-grid finite readings, no miss
 token, no conflicting label, exactly the FORE-001 rule -- whose recorded total is exactly
 ``0``. An unusable day is not evidence of zero, so it can neither be a zero day nor bridge
 two of them. Runs are maximal stretches of consecutive calendar dates that are all zero
-days; a run *touches an edge* when it starts on the household's first usable date or ends
-on its last, because a run at the edge of what was loaded may continue outside it.
+days. What lies immediately before and after each run is **measured, not assumed**: the
+neighbouring date is a non-zero usable day, an unusable day (with its reason), absent (no
+row for that date), or beyond the household's recorded span. Only a run whose two
+neighbours are both non-zero usable days is *bounded*; a run at the recorded-span edge may
+continue outside what was loaded, and whether a household continues into an unloaded
+source file cannot be known from the warehouse.
 
 Contract: ``docs/tickets/ANL-004-zero-days.md``. Results: ``docs/anl-004-zero-days.md``.
 The cause of a zero day is not established from readings and is not inferred here.
@@ -34,6 +38,26 @@ BUCKETS: Final[tuple[tuple[str, int, int | None], ...]] = (
 
 ZERO: Final[Decimal] = Decimal(0)
 
+NONZERO_USABLE: Final[str] = "nonzero_usable"
+ABSENT: Final[str] = "absent"
+SPAN_EDGE: Final[str] = "recorded_span_edge"
+
+
+def neighbour_state(
+    day: date, by_date: dict[date, DayRecord], first: date, last: date
+) -> str:
+    """What the date next to a run is. A zero usable day is impossible here: it would be
+    part of the run."""
+    if day < first or day > last:
+        return SPAN_EDGE
+    record = by_date.get(day)
+    if record is None:
+        return ABSENT
+    if record.usable:
+        assert record.kwh != ZERO, "a usable zero neighbour would extend the run"
+        return NONZERO_USABLE
+    return f"unusable:{record.unusable_reason}"
+
 
 @dataclass(frozen=True, slots=True)
 class ZeroRun:
@@ -45,10 +69,20 @@ class ZeroRun:
     days: int
     touches_first_usable: bool
     touches_last_usable: bool
+    #: State of the date immediately before ``start`` / after ``end``. One of
+    #: ``nonzero_usable``, ``unusable:<reason>``, ``absent`` (no row on that date, inside
+    #: the recorded span) or ``recorded_span_edge`` (no recorded date on that side at all).
+    before: str
+    after: str
 
     @property
     def touches_edge(self) -> bool:
         return self.touches_first_usable or self.touches_last_usable
+
+    @property
+    def bounded(self) -> bool:
+        """Both neighbours are non-zero usable days: the run ends because usage resumed."""
+        return self.before == NONZERO_USABLE and self.after == NONZERO_USABLE
 
     @property
     def bucket(self) -> str:
@@ -79,7 +113,9 @@ def zero_runs(records: dict[str, list[DayRecord]]) -> list[ZeroRun]:
         usable = sorted((d for d in days if d.usable), key=lambda d: d.source_date)
         if not usable:
             continue
-        first, last = usable[0].source_date, usable[-1].source_date
+        by_date = {d.source_date: d for d in days}
+        span = (min(by_date), max(by_date))
+        usable_span = (usable[0].source_date, usable[-1].source_date)
         zero_dates = [d.source_date for d in usable if d.kwh == ZERO]
         run_start: date | None = None
         previous: date | None = None
@@ -87,22 +123,34 @@ def zero_runs(records: dict[str, list[DayRecord]]) -> list[ZeroRun]:
             if run_start is None:
                 run_start = day
             elif previous is not None and day != previous + timedelta(days=1):
-                out.append(_run(household, run_start, previous, first, last))
+                out.append(
+                    _run(household, run_start, previous, usable_span, span, by_date)
+                )
                 run_start = day
             previous = day
         if run_start is not None and previous is not None:
-            out.append(_run(household, run_start, previous, first, last))
+            out.append(_run(household, run_start, previous, usable_span, span, by_date))
     return out
 
 
-def _run(household: str, start: date, end: date, first: date, last: date) -> ZeroRun:
+def _run(
+    household: str,
+    start: date,
+    end: date,
+    usable_span: tuple[date, date],
+    span: tuple[date, date],
+    by_date: dict[date, DayRecord],
+) -> ZeroRun:
+    one = timedelta(days=1)
     return ZeroRun(
         household_id=household,
         start=start,
         end=end,
         days=(end - start).days + 1,
-        touches_first_usable=start == first,
-        touches_last_usable=end == last,
+        touches_first_usable=start == usable_span[0],
+        touches_last_usable=end == usable_span[1],
+        before=neighbour_state(start - one, by_date, *span),
+        after=neighbour_state(end + one, by_date, *span),
     )
 
 
@@ -146,9 +194,14 @@ def summarise(records: dict[str, list[DayRecord]]) -> dict:
         buckets[r.bucket] += 1
         bucket_days[r.bucket] += r.days
     edge = [r for r in runs if r.touches_edge]
+    bounded = [r for r in runs if r.bounded]
+    neighbours: dict[str, int] = {}
+    for r in runs:
+        for state in (r.before, r.after):
+            neighbours[state] = neighbours.get(state, 0) + 1
     longest = max(runs, key=lambda r: (r.days, r.household_id), default=None)
     return {
-        "definition": "anl-004-zero-days-1",
+        "definition": "anl-004-zero-days-2",
         "usable_days_digest": usable_days_digest(records),
         "households": len(records),
         "households_with_zero_days": sum(1 for h in households if h.zero_days),
@@ -161,6 +214,19 @@ def summarise(records: dict[str, list[DayRecord]]) -> dict:
         "zero_days_in_edge_runs": sum(r.days for r in edge),
         "runs_touching_first_usable": sum(1 for r in runs if r.touches_first_usable),
         "runs_touching_last_usable": sum(1 for r in runs if r.touches_last_usable),
+        "runs_bounded_by_nonzero_usable_days": len(bounded),
+        "zero_days_in_bounded_runs": sum(r.days for r in bounded),
+        "runs_at_recorded_span_edge": sum(
+            1 for r in runs if SPAN_EDGE in (r.before, r.after)
+        ),
+        "runs_with_an_unusable_or_absent_neighbour": sum(
+            1
+            for r in runs
+            if any(
+                x == ABSENT or x.startswith("unusable:") for x in (r.before, r.after)
+            )
+        ),
+        "neighbour_states": dict(sorted(neighbours.items())),
         "longest_run": _json_run(longest) if longest else None,
         "runs_of_28_days_or_more": [_json_run(r) for r in runs if r.days >= 28],
         "per_household": [asdict(h) for h in households],
@@ -190,10 +256,15 @@ def render(report: dict) -> str:
             for k, v in report["runs_by_length"].items()
         ),
         (
-            f"  at an edge    : {report['runs_touching_an_edge']} runs "
-            f"({report['zero_days_in_edge_runs']} days) start on a household's first "
-            f"usable date or end on its last; the rest are bounded by non-zero usable days"
+            f"  bounded       : {report['runs_bounded_by_nonzero_usable_days']} runs "
+            f"({report['zero_days_in_bounded_runs']} days) have a non-zero usable day "
+            f"immediately before and after; "
+            f"{report['runs_with_an_unusable_or_absent_neighbour']} have an unusable or "
+            f"absent neighbour; {report['runs_at_recorded_span_edge']} touch the "
+            f"household's recorded span"
         ),
+        "  neighbours    : "
+        + ", ".join(f"{k} {v}" for k, v in report["neighbour_states"].items()),
     ]
     if report["longest_run"]:
         r = report["longest_run"]
