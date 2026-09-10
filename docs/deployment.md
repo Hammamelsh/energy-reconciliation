@@ -86,8 +86,10 @@ published under CC BY 4.0. Redistribution is permitted with attribution and an i
 changes; the attribution is the notice in the README and in the release notes below. Changes
 made: three source files parsed into one table (values kept as written and as decimals; no rows
 removed; exact duplicates retained in `readings` and collapsed only in derived tables), the
-workbook schedule parsed into a table, and derived tariff tables added. The project's code
-licence is a separate, unchosen matter.
+workbook schedule parsed into a table, and derived tariff tables added. The project's original
+code is licensed under MIT ([`LICENSE`](../LICENSE), chosen 2026-09-10); that licence does not
+extend to the dataset or to these derived tables, which stay under CC BY 4.0 with this
+attribution.
 
 **Machine-specific metadata that remains, and why.** Three strings name a directory on the
 build machine: `dbt_build_run.database_path`, the `--target-path` inside `dbt_command`, and

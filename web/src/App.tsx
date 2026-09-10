@@ -84,7 +84,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price — a comparison, not a recalculation." },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build — and this page checking its exported data against a pinned digest before showing it." },
-    { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licence, and what this does not show." },
+    { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
   ];
 
   return (

@@ -80,7 +80,7 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
         </div>
       </details>
       <details>
-        <summary>The data, its licence, and what is and is not here</summary>
+        <summary>The data, the licences, and what is and is not here</summary>
         <div className="body">
           <p>
             {a.notice} Accessed {a.accessed}.{" "}
@@ -93,8 +93,10 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
             data contains no coordinates.
           </p>
           <p>
-            The project's code has no licence yet: readable, not reusable. The <a href={REPO}>repository</a> holds the
-            calculation, the tests and the full write-ups.
+            The project's original code is licensed under the <a href={`${REPO}/blob/main/LICENSE`}>MIT License</a>.
+            The source data remains subject to its publisher's CC BY 4.0 terms and is attributed above; this page's
+            figures are derived from that data and carry the same attribution. Third-party dependencies retain their
+            own licences. The <a href={REPO}>repository</a> holds the calculation, the tests and the full write-ups.
           </p>
         </div>
       </details>

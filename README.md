@@ -1,6 +1,6 @@
 # Energy Reconciliation
 
-[![CI](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml/badge.svg)](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml)
+[![CI](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml/badge.svg)](https://github.com/Hammamelsh/energy-reconciliation/actions/workflows/ci.yml) [![Licence: MIT](https://img.shields.io/badge/licence-MIT-2ea44f.svg)](LICENSE)
 
 Inspect smart-meter data, calculate a historical tariff scenario and reproduce the results from their recorded inputs. Built with **Python, SQL, DuckDB, dbt and Streamlit**, with a **React + TypeScript** front door, using Low Carbon London data.
 
@@ -135,4 +135,6 @@ Download **Partitioned LCL Data.zip** (about 796 MB) and **Tariffs.xlsx** from t
 
 The tariff workbook is a resource of the same dataset. [Attribution evidence](docs/source-data-profile.md) is recorded in §14.5. **This repository** contains no meter readings and not the workbook: an invented demo archive, and a derived profile of one source file holding summary statistics and the dataset's own household identifiers. **The public viewer's data** is different: when the serving snapshot is published as a GitHub release asset, it will redistribute the 3,000,000 half-hourly readings loaded from three of the dataset's 168 files — with their household identifiers and timestamps, restructured into a DuckDB database — together with the tariff schedule derived from the workbook and the derived tariff tables, under CC BY 4.0 with this attribution. The identifiers are the publisher's `MAC…` codes, which stand in for households and are linked here to no person, address or location; whether they count as anonymous is not assessed in this project. Exactly what the asset contains: [deployment guide §3](docs/deployment.md#3-what-the-published-snapshot-contains).
 
-**Code licence:** not yet selected; default copyright applies. Dataset attribution is separate from permission to reuse the project code.
+## Licence
+
+Original project code is licensed under the [MIT License](LICENSE). Source data from *SmartMeter Energy Consumption Data in London Households* remains subject to its publisher's [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) terms and is attributed separately, above. The data-derived artefacts kept in this repository — the source-file profile, the exported presentation bundle and manifest, the raw-file manifest and the result screenshots — are derived from that dataset and carry its attribution rather than the MIT licence. Third-party dependencies and assets retain their respective licences.

@@ -115,4 +115,6 @@ a different matter and stays visible: retrying it would change the evidence.
 - The intermittent `dbt build` crash remains open; see the ANL-003 ticket for the evidence and
   the next diagnostic step. Build-time containment and serving stability are different claims.
 - I-20 (the unselected conflict model) is recorded and unscheduled.
-- The code licence is unchosen; public visibility and reuse rights are separate.
+- The code licence was chosen on 2026-09-10: MIT for the original code ([`LICENSE`](../LICENSE)).
+  The dataset and the data-derived artefacts in the repository stay under the publisher's
+  CC BY 4.0 terms; third-party dependencies keep their own licences.

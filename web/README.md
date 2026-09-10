@@ -60,6 +60,14 @@ the page with the committed data.
   public origin: set `VITE_SITE_URL` (no trailing slash) when building. Without it the build
   omits those tags rather than shipping a placeholder.
 
+## Licence
+
+Original project code is licensed under the [MIT License](../LICENSE). The figures this page
+shows are derived from *SmartMeter Energy Consumption Data in London Households*, which remains
+subject to its publisher's [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) terms and
+is attributed on the page and in the root README; the exported bundle carries that attribution,
+not the MIT licence. Third-party dependencies retain their respective licences.
+
 ## Deployment
 
 `render.yaml` at the repository root configures a Render static site (root `web`, build
