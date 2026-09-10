@@ -17,17 +17,17 @@ twice. "Move the SELECTs" would break at least four things the current build gua
 (one policy definition, atomic publish, run identity, replayable baselines). The design
 decides where each piece goes so that none of them breaks.
 
-## Before building — one understanding question for Hammam
+## The design question the port had to answer
 
 > When dbt rebuilds the fact tables and fails halfway, what should someone reading the
 > dashboard see a minute later — and which of the two options gives that: building the
 > tables in place, or building into the `scenario_build` schema and publishing in one
 > transaction?
 
-Answer in your own words before step 5 starts. The reason this matters is design D5.
+The answer is design D5.
 
-**A measurement that arrived after the question was written, and that the answer now has
-to account for:** DuckDB locks the *file*, not the schema. While one process holds a
+**A measurement that arrived after the question was written, and that the answer has to
+account for:** DuckDB locks the *file*, not the schema. While one process holds a
 warehouse read-write, another process cannot open it **even read-only** (measured, design
 D5). So neither option on its own gives a reader anything during the build — the choice
 decides what a reader sees *afterwards*, and availability *during* is a third decision
@@ -388,66 +388,8 @@ than a grace window, because a render opens a fresh connection per query to the 
 resolved at its start. `inventory` is the dry run. A deleting command (I-17) needs its own
 confirmation step and is deliberately not written yet.
 
-## A guided local exercise for Hammam — steps 1, 2, 4, 5 and 6 are runnable now; step 3 waits for the dashboard switch
+## Running the workflow yourself
 
-Work on a copy, never on `data/warehouse/energy.duckdb`. Predict the outcome of each step
-before running it; write the prediction down.
-
-1. **Look at what is published.** `cat data/published/published.json`. *Expected:* one
-   version, its file name, its sha256, its run_id, and `previous`. Open the dashboard;
-   the sidebar should name the same version. Note the tariff tab's total.
-2. **Build a candidate.** `uv run build-candidate --source data/warehouse/energy.duckdb`.
-   *Expected:* `PASS=55` and a new file under `versions/`; `published.json` unchanged
-   (check its modification time); the dashboard, refreshed, still shows the same version
-   and total. Nothing you did has reached a reader.
-3. **Inspect it.** Open the candidate in the dashboard's candidate picker. *Expected:*
-   the same total as step 1 — the same inputs and the same rules produce the same
-   figures — and a banner saying it is a candidate. Compare the run_id: different from
-   the published one, because a candidate is a new build even when its figures match.
-4. **Deliberately fail one.** Copy `data/raw/Tariffs.xlsx` to a scratch path, duplicate
-   one schedule row with a different band, and build with `--workbook <that copy>`.
-   *Expected:* the build fails with `ScheduleError: duplicated schedule label …`; the
-   exit code is non-zero; no `validated` record is written; the failed file remains under
-   `versions/` for you to inspect and has a `.wal` beside it if the writer died
-   mid-transaction. **Refresh the dashboard: identical version, identical total.** Try
-   `promote` on the failed file. *Expected:* refused, naming the reason; `published.json`
-   unchanged.
-5. **Promote the good candidate.** `uv run promote --candidate <file from step 2>
-   --expect-published <version from step 1>`. *Expected:* `published v0002`; refresh the
-   dashboard; the sidebar shows v0002 and the total is unchanged, because the inputs were.
-   Now run the same promote command again. *Expected:* refused as **stale** — it expected
-   v0001 and found v0002. That refusal is the protection against two people promoting at
-   once.
-6. **Roll back.** `uv run promote --candidate data/published/versions/<step-1 file>
-   --expect-published v0002`. *Expected:* `published v0003` naming the old file; the
-   dashboard shows the step-1 run_id again within one refresh. Nothing was rebuilt.
-7. **Say, in your own words,** why step 4's failure could not have changed what step 1's
-   dashboard showed, and which single file the answer depends on.
-
-## Learning checkpoints (Hammam's, never marked automatically)
-
-- Explain why a generated macro with a drift test is one definition and two hand-written
-  copies with a comparison test are not.
-- Explain why a pandas column of `Decimal` objects is a risk here and what a typed pyarrow
-  table changes.
-- Explain what a reader sees during a failed build under D5, and why a **separate file per
-  attempt** — not `run_id` scoping inside one file — is what makes that safe.
-- Explain the difference between the rename (atomic visibility) and the fsyncs (power-loss
-  durability), and why the proof establishes the first and only *calls* the second.
-- Explain why "the tables are unchanged" and "the latest attempt succeeded" are two
-  different facts, and give the measured case where the first was true and the second
-  false.
-- Explain why summing or XOR-ing row hashes can make two different tables look the same,
-  and what sorting the row hashes changes.
-- Explain what a bare `FROM fact_interval_charge_scenario` resolves to inside a sealed
-  candidate, and why that would have been wrong without anything failing.
-- Explain why `dbt build` exiting 0 is not evidence that the project was built, and which
-  file the answer is read from.
-- Explain what "resolved once per rerun" protects against, and what would go wrong if the
-  dashboard re-read the manifest for each tab instead.
-- Explain why a *published version* may be cached between reruns and a *warehouse file*
-  may not, in terms of what each one's identity is.
-- Explain why a format-2 replay compares `run_id` for neither fact, and what would be
-  wrong with a contract that did require it to match.
-- Explain the difference between "the dbt build reproduces ANL-002's figures" and "the dbt
-  build has ANL-002's identity", and which one the evidence supports.
+The current step-by-step commands — build, seal, promote, read, roll back, record and
+replay, on synthetic or real data — are in
+[`../publication-workflow.md`](../publication-workflow.md).
