@@ -379,11 +379,11 @@ Not an experiment: the full suite was running after the ANL-005 change, and one
   test, reported `Compilation Error` **with an empty message**, and dbt finished
   `PASS=20 ERROR=1 SKIP=34`. Fifteen identical generic tests had compiled a moment earlier and
   the same test compiles on every other run; the test passed on re-run. The lifecycle
-  recorded the attempt as failed and nothing was sealed. An empty compilation error on a
-  templated test, mid-run, in the same early-test phase as three of the four faults, is
-  consistent with corrupted in-process state that does not always end in a signal. It is
-  recorded as an observation, not a diagnosis, and it is a further reason to run the suite
-  under `PYTHONMALLOC=debug`.
+  recorded the attempt as failed and nothing was sealed. It is recorded here because it is
+  an intermittent dbt failure in the same early-test phase; **no connection to the faults
+  is established**, and it is kept as a separate observation. If the debug-allocator run
+  ever reports a bad block on a run that then fails this way, that would be the first
+  evidence linking them.
 
 **Revised next step, replacing the "wait under gdb" plan.** Run builds with Python's
 debug allocator, which costs nothing to enable and would produce evidence gdb cannot:

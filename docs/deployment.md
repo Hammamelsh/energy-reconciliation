@@ -47,7 +47,72 @@ These are local measurements of the artifact a host would run. They are not the 
 cold-start time, which includes downloading 210 MB once per process and the platform's own
 startup; that must be observed on the platform.
 
-## 3. Publishing the snapshot (one-time, per version)
+## 3. What the published snapshot contains
+
+Inspected relation by relation on 2026-09-10 (`serving.json` pins the file: v0001,
+210,251,776 bytes, sha256 `708a55da…`).
+
+| Relation | Rows | What it holds |
+|---|---:|---|
+| `main.readings` | 3,000,000 | **Row-level meter readings** from three of the dataset's 168 files: household identifier, tariff group, the timestamp exactly as written, the value as written and as a decimal, and the profiler's classification of each row. This is the dataset's content, restructured. |
+| `main.load_registry` | 3 | Which archive members were loaded, their content digests and counts. Archive *name* only; no path. |
+| `main.rejected_records` | 0 | Empty: no source row was rejected. |
+| `main.dim_tariff_band_schedule`, `scenario_build.dim_tariff_band_schedule` | 17,520 each | The dynamic tariff's half-hour band schedule, **derived from the publisher's workbook** (the workbook file itself is not included). |
+| `main.dim_tariff_price`, `scenario_build.dim_tariff_price` | 4 each | The publisher-documented prices with citations. |
+| `main.fact_interval_charge_scenario`, `scenario_build.…` | 456,096 each | **Derived rows, one per charged reading**: household, timestamp, band, kWh, exact charge, assumption id. The Python scenario and the dbt build; identical figures. |
+| `main.fact_interval_charge_exclusion`, `scenario_build.…` | 2,541,866 each | Derived rows, one per excluded distinct reading, with its reason. |
+| `main.scenario_run`, `scenario_build.dbt_build_run` | 1 each | The Python run record and the dbt attempt record: identities, versions, digests. |
+| `main.v_*` views, `scenario_build.stg_readings` | — | Views over the tables above; no additional data. |
+
+**So, precisely:** the asset redistributes row-level meter readings (3,000,000 rows), derived
+per-reading rows (about 3,000,000 more, across two copies of each fact), the dataset's household
+identifiers for 83 households, and per-reading timestamps. The README's statement that the
+*repository* redistributes no readings remains true; the statement is now made about the
+repository and the viewer separately.
+
+**Identifiers.** `MAC…` codes are the publisher's own household identifiers. In this project
+they are linked to no person, address, coordinate or other attribute; the dataset carries none.
+They are pseudonymous in the plain sense that each stands in for one household; whether they
+are anonymous in any legal sense is not assessed here.
+
+**Licence and attribution.** The readings, the schedule and the prices are content of a dataset
+published under CC BY 4.0. Redistribution is permitted with attribution and an indication of
+changes; the attribution is the notice in the README and in the release notes below. Changes
+made: three source files parsed into one table (values kept as written and as decimals; no rows
+removed; exact duplicates retained in `readings` and collapsed only in derived tables), the
+workbook schedule parsed into a table, and derived tariff tables added. The project's code
+licence is a separate, unchosen matter.
+
+**Machine-specific metadata that remains, and why.** Three strings name a directory on the
+build machine: `dbt_build_run.database_path`, the `--target-path` inside `dbt_command`, and
+`project_dir` inside `dbt_vars`, all under `/home/hammam/projects/energy-reconciliation/…`.
+They are the attempt record the seal certifies — `database_path` is the very value the serving
+reader binds the record to — so editing them would change the file's bytes, break the seal's
+whole-file hash, and remove the origin the contract depends on. They are disclosed rather than
+removed. Nothing else machine-specific was found: no credentials, no user names beyond that
+directory, no archive paths (the registry stores names only). The scan covered every text column
+of every table.
+
+## 4. Full snapshot or an extract — measured, and decided
+
+| Candidate | Size | What it can drive |
+|---|---:|---|
+| Full snapshot (chosen) | 210 MB | Everything: landing comparison, household inspection, tariff bands and exclusions, the accounting ladder, and the Overview / Data quality / Source records tabs that read `readings`. |
+| Tariff-tab extract | 75 MB | Landing, bands, exclusions; **not** the accounting ladder or the three readings-based tabs. |
+| Landing-only extract | 15 MB | Landing, household inspection, bands; nothing else. |
+
+The 15 MB extract is attractive on paper: fourteen times smaller and a faster first download.
+Two facts decide against it. First, it does not change what is redistributed in kind — its
+456,096 charged rows are still per-reading consumption with household identifiers and
+timestamps — so the README's claim has to be corrected either way. Second, it would need its own
+provenance contract (the seal certifies the whole original file, not a derived one) and a
+degraded dashboard mode with most tabs hidden, for a viewer whose purpose includes the evidence
+behind the comparison: the accounting ladder and the data-quality views are what the readings
+make possible. The full snapshot costs a one-time 210 MB download per process (memory measured
+at 265 MB peak) and keeps one contract, already tested. That is the better trade for a first
+public viewer; an extract remains the fallback if the platform's cold start proves unacceptable.
+
+## 5. Publishing the snapshot (one-time, per version)
 
 ```bash
 # 1. export from a validated publication root
@@ -59,7 +124,8 @@ strings -n 12 data/serving/*.duckdb | grep -E "/home/|password|token" | sort -u
 
 # 3. upload the two files as assets of a GitHub release tagged for the version
 gh release create serving-v0001 data/serving/<file>.duckdb data/serving/<file>.duckdb.validated.json \
-   --title "Serving snapshot v0001" --notes "Published version v0001, run <run id>, sha256 <digest>."
+   --title "Serving snapshot v0001" \
+   --notes "<version, run id, sha256; the contents table above in brief; the CC BY 4.0 attribution; the changes made>"
 
 # 4. pin the download URLs and commit the pin
 uv run serving-snapshot pin --manifest data/serving/serving.json \
@@ -77,7 +143,7 @@ trusts, so a replaced asset fails verification rather than being served.
 **Data terms.** The readings are the CC BY 4.0 dataset; sharing is permitted with attribution,
 which the dashboard and README carry. The release notes should repeat the attribution.
 
-## 4. Hosting on Streamlit Community Cloud (free tier) — owner steps
+## 6. Hosting on Streamlit Community Cloud (free tier) — owner steps
 
 The entrypoint is [`streamlit_app.py`](../streamlit_app.py) at the repository root. It puts
 `src` on the path, fetches and verifies the pinned snapshot once per process if absent, and
@@ -103,14 +169,32 @@ Local rehearsal of exactly what the host runs:
 ENERGY_RECONCILIATION_SERVING_SNAPSHOT=data/serving uv run streamlit run streamlit_app.py
 ```
 
-## 5. If the free tier is unsuitable
+## 7. If the free tier is unsuitable
 
 Document the measured reason (memory, cold start, or sleep behaviour), then fall back to the
 lowest-complexity option: the README's screenshots and the exported findings already stand
 without a runtime. A container host (Cloud Run or similar) would run the same entrypoint but
 adds billing and operations that this project has not taken on.
 
-## 6. What a deployment must never do
+## 8. Launch images
+
+Two captures of the real render, unretouched, are committed for launch use:
+
+- [`images/dashboard-landing.png`](images/dashboard-landing.png) — the landing view at
+  1440 px, sidebar collapsed: every household bar labelled, the partially covered household
+  marked. Right for the README and for a desktop reader; in a phone feed its chart labels are
+  too small to read, so it should not be the only image in a post.
+- [`images/social-landing.png`](images/social-landing.png) — the same page rendered at
+  760 px and cropped (a rectangular crop only) from the title to the first bars: the scope
+  line, the four values, the outcome sentence and the two households that went the other way,
+  at a size that reads on a phone. This is the one to attach to a social post; the desktop
+  image can follow in a comment or the README link.
+
+Neither shows a map. The data contains no coordinates, and no household location is known
+or invented; a map is reserved for verified regional carbon data in a later phase
+([`roadmap-next-phase.md`](roadmap-next-phase.md)).
+
+## 8. What a deployment must never do
 
 - Weaken validation to make hosting work: no fallback to the copied `main` facts, no skipped
   seal or record checks, no legacy warehouse mode standing in for a published version.

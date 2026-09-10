@@ -71,7 +71,7 @@ def test_the_comparison_renders_for_the_loaded_sample(site):
         assert metrics["Dynamic energy charge"] == "£0.80"
         assert metrics["Flat-price energy charge"] == "£0.30"
         assert metrics["Flat minus dynamic"] == "-£0.49", "dynamic higher for the demo"
-        assert metrics["As % of flat-price charge"] == "-163.2%"
+        assert metrics["As % of flat price"] == "-163.2%"
         text = "\n".join(m.value for m in at.markdown)
         assert "0 household(s) are lower, 1 higher and 0 equal" in text
         captions = "\n".join(c.value for c in at.caption)

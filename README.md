@@ -111,11 +111,13 @@ Forecast reports are also checked against the selected dataset's content and dis
 uv run pytest -q
 ```
 
-[Hosted CI run 34503994982](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34503994982), for commit `4a7fcdb`, passed lint, formatting, macro-drift checks, **568 tests**, and the synthetic quickstart. One check skipped by name: it needs the real warehouse and its forecast reports, which are local. Real-data equivalence remains a separate local check.
+[Hosted CI run 34520354774](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34520354774), for commit `6ebceb1`, passed lint, formatting, macro-drift checks, **602 tests**, and the synthetic quickstart. One check skipped by name: it needs the real warehouse and its forecast reports, which are local. Real-data equivalence remains a separate local check.
 
-**An intermittent `dbt build` segmentation fault remains unresolved.** Observed crashes were recorded as failed attempts and refused sealing. The workflow is not ready for unattended operation; [the incident record](docs/tickets/ANL-003-dbt-port.md) documents the evidence and investigation.
+**An intermittent `dbt build` segmentation fault remains unresolved.** Observed crashes were recorded as failed attempts and refused sealing. Separately, one build failed once with an empty dbt compilation error and passed on re-run; it is recorded but not established as related. The workflow is not ready for unattended operation; [the incident record](docs/tickets/ANL-003-dbt-port.md) documents the evidence and investigation.
 
 The workflow has been exercised on Ubuntu 24.04 under WSL2 and GitHub-hosted Ubuntu, with Python 3.12.14 and 3.12.3 respectively. Other platforms are unverified. Publication recovery uses Linux-specific behaviour. Builds are started manually or by CI; there is no scheduled service.
+
+**Public viewer.** The dashboard can serve a published version from another machine through a verified *serving snapshot*, and opens on the comparison above (both implemented and tested; [deployment guide](docs/deployment.md)). Hosting is **pending**: the snapshot has not been published and no viewer is live yet.
 
 [Roadmap](docs/roadmap.md) · [Evidence and claim boundaries](docs/portfolio-evidence.md)
 
@@ -125,6 +127,6 @@ Download **Partitioned LCL Data.zip** (about 796 MB) and **Tariffs.xlsx** from t
 
 > Contains data from [*SmartMeter Energy Consumption Data in London Households*](https://data.london.gov.uk/dataset/smartmeter-energy-consumption-data-in-london-households-vqm0d), published by UK Power Networks via the London Datastore under the [Creative Commons Attribution 4.0 International licence (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/). Accessed 2026-09-06.
 
-The tariff workbook is a resource of the same dataset. [Attribution evidence](docs/source-data-profile.md) is recorded in §14.5. Raw meter records and the workbook are not redistributed. The repository includes an invented demo archive and a derived real-data profile containing summary statistics and pseudonymous household identifiers.
+The tariff workbook is a resource of the same dataset. [Attribution evidence](docs/source-data-profile.md) is recorded in §14.5. **This repository** contains no meter readings and not the workbook: an invented demo archive, and a derived profile of one source file holding summary statistics and the dataset's own household identifiers. **The public viewer's data** is different: when the serving snapshot is published as a GitHub release asset, it will redistribute the 3,000,000 half-hourly readings loaded from three of the dataset's 168 files — with their household identifiers and timestamps, restructured into a DuckDB database — together with the tariff schedule derived from the workbook and the derived tariff tables, under CC BY 4.0 with this attribution. The identifiers are the publisher's `MAC…` codes, which stand in for households and are linked here to no person, address or location; whether they count as anonymous is not assessed in this project. Exactly what the asset contains: [deployment guide §3](docs/deployment.md#3-what-the-published-snapshot-contains).
 
 **Code licence:** not yet selected; default copyright applies. Dataset attribution is separate from permission to reuse the project code.

@@ -24,7 +24,7 @@ keyboard reachability checked; the explorer's other views unchanged beneath it.
 **A3. Deployment (owner action pending).** Upload the snapshot as a pinned release asset,
 commit the pin, and deploy `streamlit_app.py` to Streamlit Community Cloud; record cold start,
 memory and the deployed revision as observed on the platform. Fallback if unsuitable: the
-README's screenshots and exported findings. Steps in [`deployment.md`](deployment.md) §3–4.
+README's screenshots and exported findings. Steps in [`deployment.md`](deployment.md) §5–6.
 
 ## Phase B — a current retail-price explorer (separate from the 2013 data)
 
@@ -50,6 +50,13 @@ tariff at run time; never hard-code a product from an example.
 - Freshness: a bounded cached fetch with a visible *retrieved at*; a stale last-known
   response may be shown as stale context but must never drive a "cheapest now" statement.
 
+**Visual design for this phase.** A live **48-half-hour price grid** — one cell per
+published half hour, price as number and shade, the current interval marked, unpublished
+intervals left visibly empty — and, on top of it, the **cheapest complete time-window**
+view: the chosen duration drawn as a band over the grid with its cost, greyed out wherever
+the horizon cannot cover it. Both show *retrieved at* and the horizon end. No map: retail
+prices are regional, not geographic points, and the data holds no coordinates.
+
 **Optional second step.** The lowest-cost contiguous window of a chosen duration within the
 published horizon, under an explicitly stated consumption profile (a labelled constant-power
 illustration is acceptable). Interval-overlap energy × unit price; keep negative rates; reject
@@ -63,6 +70,11 @@ component under one tariff, not a bill or an appliance's actual consumption.
 **Source.** NESO's Carbon Intensity API (national and regional). Implement against the horizon
 the API actually returns, not the website's description. The series starts after the 2013
 trial, so it never describes the historical households.
+
+**Visual design for this phase.** This is where a **geographic map** earns its place: NESO
+publishes carbon intensity by DNO region, so a regional choropleth of the forecast is a
+truthful view of real regional data. It is reserved for this phase and this data only —
+the 2013 households have no coordinates and must never be placed on it.
 
 **Requirements.** Forecast, estimate and measured values labelled as such; freshness shown
 (an HTTP 200 for an interval that has already ended is not "now"); region mapping verified

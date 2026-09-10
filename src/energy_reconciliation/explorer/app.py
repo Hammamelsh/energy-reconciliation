@@ -324,7 +324,7 @@ def render_flat_comparison(
         help=f"Exact, unrounded: £{t.difference}. Positive: dynamic scenario lower.",
     )
     m[3].metric(
-        "As % of flat-price charge",
+        "As % of flat price",
         "undefined" if t.pct_of_flat is None else fmt_signed_pct(t.pct_of_flat),
         help=(
             "Denominator: the flat-price energy charge. "
@@ -443,7 +443,7 @@ def render_landing(
         help=f"Exact: £{t.difference}. Positive: the dynamic scenario is lower.",
     )
     m[3].metric(
-        "As % of flat-price charge",
+        "As % of flat price",
         "undefined" if t.pct_of_flat is None else fmt_signed_pct(t.pct_of_flat),
         help="Denominator: the flat-price energy charge.",
     )
