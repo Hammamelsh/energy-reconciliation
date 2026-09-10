@@ -105,7 +105,7 @@ Forecast reports are also checked against the selected dataset's content and dis
 uv run pytest -q
 ```
 
-[Hosted CI run 34414582428](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34414582428), for commit `db90a66`, passed lint, formatting, macro-drift checks, **561 tests**, and the synthetic quickstart. Two local-data checks skipped: one needs the real warehouse and forecast reports, the other a loaded demo warehouse. Real-data equivalence remains a separate local check.
+[Hosted CI run 34503994982](https://github.com/Hammamelsh/energy-reconciliation/actions/runs/34503994982), for commit `4a7fcdb`, passed lint, formatting, macro-drift checks, **568 tests**, and the synthetic quickstart. One check skipped by name: it needs the real warehouse and its forecast reports, which are local. Real-data equivalence remains a separate local check.
 
 **An intermittent `dbt build` segmentation fault remains unresolved.** Observed crashes were recorded as failed attempts and refused sealing. The workflow is not ready for unattended operation; [the incident record](docs/tickets/ANL-003-dbt-port.md) documents the evidence and investigation.
 
