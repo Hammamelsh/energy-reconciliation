@@ -256,8 +256,9 @@ def build_candidate(
     if code != 0:
         raise CandidateError(
             BUILD,
-            f"dbt exited {code}; the attempt is recorded as failed and the candidate "
-            f"is unsealed. Inspect it, then build a fresh one -- this file is not reused.",
+            f"{dbt_run.exit_description(code)}; the attempt is recorded as failed and "
+            f"the candidate is unsealed. Inspect it, then build a fresh one -- this file "
+            f"is not reused.",
             candidate,
         )
     models, tests = _run_results(target)

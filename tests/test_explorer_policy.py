@@ -121,13 +121,18 @@ def test_detail_flags_conflicting_points_and_breaks_the_line(conflict_day):
     }
 
 
-def test_demo_household_expected_results():
-    """The committed synthetic demo, exact numbers the app must show for DEMO0001."""
-    from pathlib import Path
+def test_demo_household_expected_results(tmp_path):
+    """The committed synthetic demo, exact numbers the app must show for DEMO0001.
 
-    db = Path("data/warehouse/demo.duckdb")
-    if not db.exists():
-        pytest.skip("demo warehouse not loaded")
+    Built here from the same bytes as ``data/demo/demo-lcl-sample.zip`` (``demo_fixture``
+    is what writes that file), so the check runs on every machine and in CI rather than
+    skipping wherever nobody has run ``ingest-member --demo`` first.
+    """
+    from demo_fixture import DEMO_MEMBER, write
+
+    archive = write(tmp_path / "demo-lcl-sample.zip")
+    db = tmp_path / "demo.duckdb"
+    assert load_member(archive, DEMO_MEMBER, db).complete
     d = date(2013, 1, 1)
     p = q.period_summary(db, "DEMO0001", d, d)
     s = q.quality_summary(db, "DEMO0001", d, d)

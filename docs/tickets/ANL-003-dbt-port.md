@@ -321,6 +321,27 @@ wheels. If the fault is specific to the uv/Clang build, hosted runs should stay 
 local ones crash; if it appears on a runner, that is the first evidence pointing away from the
 interpreter build. Either way the counting is free from here on.
 
+### Since the crash window (recorded 2026-09-10)
+
+- **Hosted runners.** Four green GitHub Actions runs since the window — 34405294825,
+  34406642130, 34414582428 and 34500227848 — each executed the quickstart's two dbt builds
+  (candidate and replay, both logged) plus the test suite's builds, on `ubuntu-24.04` with
+  `/usr/bin/python3.12` 3.12.3. No crash. This is a second interpreter and a second machine,
+  and it is still a non-reproduction, not an exoneration of anything.
+- **This machine.** Every retained `run_results.json` written after 11:37 on 2026-09-09
+  records all nodes passed (3 of 3).
+- **Decision: no new experiment.** Repeating the crash loop unchanged could only add another
+  non-reproduction to the 206 already recorded; nothing in the evidence has changed that would
+  make a rerun informative. The next evidence-producing event is the next natural occurrence
+  under the debugger harness, so the *Precise next step* below stands.
+- **Mitigation made: name the signal, add no retry.** `run-dbt` and `build-candidate` now
+  report a signal death as, for example, *dbt was terminated by SIGSEGV (signal 11) — the
+  known intermittent crash (docs/tickets/ANL-003-dbt-port.md). Nothing was sealed; rerun the
+  build*, instead of `dbt exited -11`, which an operator could mistake for a fault in their
+  own project (`dbt_run.exit_description`, tested in `tests/test_candidate.py`). No automatic
+  retry is added: with no reproduction, a retry could not be shown to work, and it would hide
+  exactly the signal the workflow and CI are designed to surface.
+
 ### Precise next step
 
 The validated harness is ready but the fault is not reproducing on demand. The

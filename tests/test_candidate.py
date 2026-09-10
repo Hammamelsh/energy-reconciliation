@@ -759,3 +759,17 @@ def test_the_supported_command_refuses_a_rebuild_before_touching_the_file(work):
     )
     assert _digest_of_outputs(built.candidate) == before_digest
     assert pub.read_seal(built.candidate).run_id == built.seal.run_id
+
+
+def test_a_signal_death_is_named_and_the_known_one_points_at_its_record():
+    """-11 is how subprocess reports SIGSEGV. A reader should not have to know that."""
+    from energy_reconciliation.dbt_run import exit_description
+
+    assert exit_description(1) == "dbt exited 1"
+    assert exit_description(0) == "dbt exited 0"
+    segv = exit_description(-11)
+    assert segv.startswith("dbt was terminated by SIGSEGV (signal 11)")
+    assert "docs/tickets/ANL-003-dbt-port.md" in segv and "rerun" in segv
+    killed = exit_description(-9)
+    assert killed.startswith("dbt was terminated by SIGKILL (signal 9)")
+    assert "ANL-003" not in killed, "only the known crash gets the pointer"

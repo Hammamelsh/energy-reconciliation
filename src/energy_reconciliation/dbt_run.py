@@ -68,6 +68,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -774,6 +775,29 @@ def record_build(
     return finish_attempt(database, run_id, exit_code, when, coverage)
 
 
+def exit_description(code: int) -> str:
+    """How dbt ended, in words a reader can act on.
+
+    A positive code is dbt's own exit status. A negative one means the process was
+    terminated by a signal, which ``subprocess`` reports as ``-<signal>``: ``-11`` is a
+    segmentation fault, not a dbt error. The known intermittent crash is named so that
+    whoever hits it does not spend an afternoon looking for a fault in their build.
+    """
+    if code >= 0:
+        return f"dbt exited {code}"
+    try:
+        name = signal.Signals(-code).name
+    except ValueError:
+        name = f"signal {-code}"
+    text = f"dbt was terminated by {name} (signal {-code})"
+    if -code == signal.SIGSEGV:
+        text += (
+            " -- the known intermittent crash (docs/tickets/ANL-003-dbt-port.md). "
+            "Nothing was sealed; rerun the build"
+        )
+    return text
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="run-dbt",
@@ -868,8 +892,8 @@ def main(argv: list[str] | None = None) -> int:
     record = finish_attempt(database, run_id, completed.returncode, finished, coverage)
     if completed.returncode != 0:
         print(
-            f"run-dbt: dbt exited {completed.returncode}; attempt {run_id} is recorded "
-            f"as {record['status']} in {BUILD_RUN_TABLE}. No success was recorded.",
+            f"run-dbt: {exit_description(completed.returncode)}; attempt {run_id} is "
+            f"recorded as {record['status']} in {BUILD_RUN_TABLE}. No success was recorded.",
             file=sys.stderr,
         )
         return completed.returncode
