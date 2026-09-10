@@ -136,7 +136,7 @@ export function HouseholdChart({
           role="presentation"
           style={{ left: `min(calc(100% - 270px), ${hover.x + 14}px)`, top: hover.y + 14, position: "fixed" }}
         >
-          <b>{hovered.household_id}</b> — {outcomeWord(hovered.outcome_under_dynamic)}
+          <b>{hovered.household_id}</b>: {outcomeWord(hovered.outcome_under_dynamic)}
           <br />
           dynamic {money(hovered.dynamic_charge.display)} · flat {money(hovered.flat_charge.display)}
           <br />

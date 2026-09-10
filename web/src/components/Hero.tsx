@@ -193,7 +193,7 @@ export function Hero({
             label="As % of the flat-price charge"
             value={signedPct(c.pct_of_flat.display === null ? null : pctStat)}
             tone={c.flat_minus_dynamic.display > 0 ? "volt" : "ember"}
-            note={`denominator: flat-price charge · exact ${c.pct_of_flat.exact ? c.pct_of_flat.exact.slice(0, c.pct_of_flat.exact.indexOf(".") + 4) + "…" : "—"}%`}
+            note={`denominator: flat-price charge · exact ${c.pct_of_flat.exact ? c.pct_of_flat.exact.slice(0, c.pct_of_flat.exact.indexOf(".") + 4) + "…" : "n/a"}%`}
           />
         </div>
         <p className="hint">

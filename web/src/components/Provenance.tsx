@@ -11,7 +11,7 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
     ["published version", `${p.version} (${p.version_file})`],
     ["promoted (UTC)", String(p.promoted_at_utc)],
     ["dbt build run", String(p.run_id)],
-    ["required build", `${p.required_build} — ${p.required_nodes_total} required nodes`],
+    ["required build", `${p.required_build}, ${p.required_nodes_total} required nodes`],
     ["dbt", `dbt-core ${p.dbt_core_version}, dbt-duckdb ${p.dbt_duckdb_version}`],
     ["schedule", `${p.schedule_source} (${p.schedule_variant}), sha256 ${p.schedule_sha256}`],
     ["price catalogue", String(p.price_catalogue_version)],
@@ -24,7 +24,7 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
   return (
     <div>
       <details open>
-        <summary>Assumptions — the two things this scenario takes as given</summary>
+        <summary>Assumptions: the two things this scenario takes as given</summary>
         <div className="body">
           <p>
             <b>A1.</b> {bundle.assumptions.A1}
@@ -47,17 +47,17 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
           </ul>
           <p>
             Variation, stated only as measured: the largest single household difference is{" "}
-            {c.variation.largest_difference ? signedMoney(c.variation.largest_difference.display) : "—"}
+            {c.variation.largest_difference ? signedMoney(c.variation.largest_difference.display) : "n/a"}
             {c.variation.largest_share_of_pooled_pct?.display != null
               ? ` (${pct(c.variation.largest_share_of_pooled_pct.display)} of the pooled difference)`
               : ""}
             ; the median household difference is{" "}
-            {c.variation.median_household_difference ? signedMoney(c.variation.median_household_difference.display) : "—"}.
+            {c.variation.median_household_difference ? signedMoney(c.variation.median_household_difference.display) : "n/a"}.
           </p>
         </div>
       </details>
       <details>
-        <summary>Where the numbers come from — identity of the sealed build</summary>
+        <summary>Where the numbers come from: identity of the sealed build</summary>
         <div className="body">
           <table className="idtable">
             <tbody>
@@ -87,7 +87,7 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
             <a href={a.dataset_url}>Dataset</a> · <a href={a.licence_url}>{a.licence}</a>.
           </p>
           <p>
-            This page holds summaries only: {integer(c.households)} household totals, band shares, counts and identities —
+            This page holds summaries only: {integer(c.households)} household totals, band shares, counts and identities, with
             no individual reading and no per-reading timestamp. Household codes are the publisher's own pseudonymous
             identifiers; nothing here links them to a person, an address or a location, and no map is drawn because the
             data contains no coordinates.

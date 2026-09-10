@@ -27,7 +27,7 @@ export function BreakEven({
     <div className="card" id="what-if">
       <h3>What if the flat price had been different?</h3>
       <p className="sub" style={{ marginBottom: 8 }}>
-        Each household has a break-even flat price — the price at which its recorded consumption would have
+        Each household has a break-even flat price: the price at which its recorded consumption would have
         cost exactly what it did on the dynamic tariff. Slide to compare a flat price with all 27 of them.
       </p>
       <label htmlFor="flat-slider" className="big">

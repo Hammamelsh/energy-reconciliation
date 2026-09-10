@@ -29,7 +29,7 @@ export function signedPct(display: number | null): string {
 }
 
 export function pct(display: number | null, digits = 1): string {
-  return display === null ? "—" : `${display.toFixed(digits)}%`;
+  return display === null ? "n/a" : `${display.toFixed(digits)}%`;
 }
 
 export function integer(value: number): string {
@@ -41,7 +41,7 @@ export function energy(display: number): string {
 }
 
 export function pence(display: number | null): string {
-  return display === null ? "—" : `${display.toFixed(3)}p`;
+  return display === null ? "n/a" : `${display.toFixed(3)}p`;
 }
 
 export function outcomeWord(outcome: "lower" | "higher" | "equal"): string {
@@ -57,7 +57,7 @@ export function outcomeGlyph(outcome: "lower" | "higher" | "equal"): string {
 }
 
 export function shortDigest(hex: string | null | undefined, n = 12): string {
-  return hex ? `${hex.slice(0, n)}…` : "—";
+  return hex ? `${hex.slice(0, n)}…` : "n/a";
 }
 
 export function reasonLabel(reason: string): string {

@@ -15,7 +15,7 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
   const flat = Number(bundle.comparison.flat_price.pence_per_kwh);
   const even = bundle.comparison.breakeven_flat_price.display ?? 0;
   const max = Math.ceil(Math.max(high, flat) / 10) * 10;
-  const ratio = low > 0 ? (high / low).toFixed(0) : "—";
+  const ratio = low > 0 ? (high / low).toFixed(0) : "n/a";
   const marks: Mark[] = [
     { key: "low", p: low, label: `Low ${low.toFixed(2)}p`, tone: CURRENT, tier: "down", anchor: "start" },
     // Ends at its own marker so the break-even guide line, a few pixels to the right, never crosses it.
@@ -29,9 +29,9 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
       <h2>Four prices on one scale</h2>
       <p>
         The dynamic tariff's High band cost about {ratio}× its Low band. The pooled break-even is the flat price
-        at which this recorded consumption would have cost exactly what it did under the dynamic tariff — the
+        at which this recorded consumption would have cost exactly what it did under the dynamic tariff. The
         documented flat price sits {flat > even ? "above" : "below"} it, and that gap is the{" "}
-        {bundle.comparison.pct_of_flat.display?.toFixed(1) ?? "—"}%.
+        {bundle.comparison.pct_of_flat.display?.toFixed(1) ?? "n/a"}%.
       </p>
     </>
   );

@@ -38,8 +38,8 @@ export function Insight({ households, selected, onSelect }: { households: Househ
       <h3>Why did two go the other way?</h3>
       <p className="sub" style={{ marginBottom: 6 }}>
         Each dot is a household: how much of its electricity fell in High-price half hours, against how it came out.
-        The two ember dots used the largest High shares of all {households.length} —{" "}
-        {flippers.map((h) => `${h.household_id} (${highShare(h).toFixed(1)}%)`).join(" and ")} — and the household
+        The two ember dots used the largest High shares of all {households.length}:{" "}
+        {flippers.map((h) => `${h.household_id} (${highShare(h).toFixed(1)}%)`).join(" and ")}. The household
         that gained most, {highest.at(-1)?.household_id}, used the least ({highShare(highest.at(-1)!).toFixed(1)}%).
         Same prices for everyone; the timing of their electricity decided the outcome.
       </p>

@@ -8,7 +8,7 @@ export function Footer({ notice }: { notice: string }) {
           <h3>Energy Reconciliation</h3>
           <p style={{ margin: 0 }}>
             Half-hourly smart-meter readings from the Low Carbon London trial, taken from the raw archive to a tested,
-            versioned tariff calculation — with every figure traceable to the rows and the assumption it rests on.
+            versioned tariff calculation, with every figure traceable to the rows and the assumption it rests on.
           </p>
           <p style={{ marginBottom: 0 }}>{notice}</p>
         </div>
@@ -25,7 +25,7 @@ export function Footer({ notice }: { notice: string }) {
           <h3>Deep explorer</h3>
           <p style={{ margin: 0 }}>
             The Streamlit explorer walks every household's readings, data quality and forecast; it runs on the full
-            sealed database. Hosting it is pending — the <a href={`${REPO}/blob/main/docs/publication-workflow.md`}>guide</a>{" "}
+            sealed database. Hosting it is pending; the <a href={`${REPO}/blob/main/docs/publication-workflow.md`}>guide</a>{" "}
             shows how to run it locally in one command.
           </p>
         </div>

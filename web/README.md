@@ -8,7 +8,7 @@ checks against its pinned digest. It is the public entry point; the Streamlit ex
 
 Every figure on the page comes from `public/data/bundle.json`, written by
 `uv run export-presentation` (`src/energy_reconciliation/presentation.py`, contract
-`presentation-bundle-1`) from a validated publication — a serving snapshot or a publication
+`presentation-bundle-1`) from a validated publication: a serving snapshot or a publication
 root. The export is deterministic: the same publication produces the same bytes. The bundle
 carries the pooled totals, all 27 household outcomes with coverage and band shares, the
 hour-of-day band distributions, the accounting ladder, data-quality and forecast summaries,
@@ -18,7 +18,7 @@ row-level: no reading, no per-reading timestamp, no path, no credential
 
 Money and energy travel as exact decimal strings with a unit, beside a display value rounded
 once in Python. The page formats; it never recalculates the tariff. Its one interactive
-calculation — how many households would have come out ahead at another flat price — compares
+calculation (how many households would have come out ahead at another flat price) compares
 the slider against each household's precomputed exact break-even price.
 
 Before a number is shown, the browser hashes the bundle it received (SubtleCrypto SHA-256)

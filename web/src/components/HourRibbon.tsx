@@ -6,7 +6,7 @@ const BANDS = ["Low", "Normal", "High"] as const;
 const FILL = BAND;
 
 /** Two 24-hour strips: when the schedule placed its High band, and when the charged
- * electricity was used — aggregates only, hour of the label as written. */
+ * electricity was used: aggregates only, hour of the label as written. */
 export function HourRibbon({ hourBands }: { hourBands: HourBands }) {
   const compact = useMediaQuery("(max-width: 700px)");
   const high = hourBands.schedule_slots_by_band_and_hour.High ?? new Array(24).fill(0);
@@ -21,7 +21,7 @@ export function HourRibbon({ hourBands }: { hourBands: HourBands }) {
   const peakHours = high.map((v, i) => ({ v, i })).filter((x) => x.v === maxHigh).map((x) => x.i);
   return (
     <div className="card ribbon">
-      <h3>Which label hours the expensive band fell in — and when the electricity was used</h3>
+      <h3>Which label hours the expensive band fell in, and when the electricity was used</h3>
       <p className="sub" style={{ marginBottom: 10 }}>
         Top: how many of the schedule's High-price half hours fell in each hour of the timestamp label. Bottom: charged
         kWh by label hour across all 27 households, coloured by the band it was priced in.

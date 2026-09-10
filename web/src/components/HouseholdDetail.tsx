@@ -94,7 +94,7 @@ export function HouseholdDetail({ household: h, flatPence, highRank, total }: { 
           const share = high?.consumption_share_pct ?? 0;
           const chargeShare = high?.charge_share_pct ?? 0;
           const pos = highRank === 1 ? "the largest of any household" : highRank === total ? "the smallest of any household" : `rank ${highRank} of ${total}`;
-          return `${share.toFixed(1)}% of its electricity fell in High-price half hours — ${pos} — and that ${share.toFixed(1)}% became ${chargeShare.toFixed(1)}% of its scenario charge. ${
+          return `${share.toFixed(1)}% of its electricity fell in High-price half hours (${pos}), and that ${share.toFixed(1)}% became ${chargeShare.toFixed(1)}% of its scenario charge. ${
             h.outcome_under_dynamic === "higher"
               ? "Enough to tip it: on this recorded consumption the flat price comes out lower."
               : h.outcome_under_dynamic === "lower"

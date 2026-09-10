@@ -79,11 +79,11 @@ export function Page({ loaded }: { loaded: Loaded }) {
     ? `Across ${year}, High-labelled half-hours ${hc.everyHour ? "appeared in every clock-hour label" : "did not appear in every clock-hour label"}. Of the schedule's ${hc.total} High-labelled half-hours, ${hc.slots} (${hc.sharePct}%) were labelled from ${labelRange(hc)}.`
     : "The schedule's High-labelled half-hours are not summarised here.";
   const steps: TourStep[] = [
-    { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "—"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
+    { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
-    { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price — a comparison, not a recalculation." },
+    { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
-    { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build — and this page checking its exported data against a pinned digest before showing it." },
+    { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
   ];
 
@@ -126,7 +126,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
 
         <Reveal
           id="households"
-          title={`${o.lower} lower, ${o.higher} higher — every household, no averaging`}
+          title={`${o.lower} lower, ${o.higher} higher: every household, no averaging`}
           sub={`Each bar is one household's difference between its flat-price charge and its dynamic charge, as a percentage of the flat-price charge. ${o.lower} of ${c.households} sit to the right of zero; the two on the left used more of their electricity in the expensive band. Pick a household to see why.`}
         >
           <div className="two-col">
@@ -208,7 +208,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
                       <b>{money(h.flat_minus_dynamic.display)}</b> · {h.pct_of_flat.display?.toFixed(1)}%
                     </span>
                     <span className="hint">
-                      {highShare(h).toFixed(1)}% of its electricity in High — rank {highRank(c.per_household, h.household_id)} of {c.households}
+                      {highShare(h).toFixed(1)}% of its electricity in High, rank {highRank(c.per_household, h.household_id)} of {c.households}
                     </span>
                   </button>
                 ))}
@@ -227,7 +227,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
         <Reveal
           id="hours"
           title="Where the expensive half hours were"
-          sub={`The dynamic schedule announced each day's bands a day ahead. ${highHours} No timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours — a coincidence of timing in this data, not evidence that anyone responded to the price.`}
+          sub={`The dynamic schedule announced each day's bands a day ahead. ${highHours} No timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours: a coincidence of timing in this data. No behavioural response is measured.`}
         >
           <HourRibbon hourBands={bundle.hour_bands} />
         </Reveal>
@@ -243,7 +243,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
         <Reveal
           id="quality"
           title="What was found on the way"
-          sub="Getting a tariff number right meant counting the source-data conditions the calculation handles explicitly — and a few things that turned out to be findings in their own right."
+          sub="Getting a tariff number right meant counting the source-data conditions the calculation handles explicitly, and a few things that turned out to be findings in their own right."
         >
           <Quality bundle={bundle} />
         </Reveal>

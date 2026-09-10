@@ -19,7 +19,7 @@ export function Quality({ bundle }: { bundle: Bundle }) {
           <div className="row"><span>readings off the half-hour grid</span><b>{integer(q.off_grid_rows)}</b></div>
           <div className="row"><span>readings of exactly zero</span><b>{integer(q.zero_readings)}</b></div>
         </div>
-        <p className="hint">Missing is recorded as missing — nothing is filled with zero. A zero is a reading. Conflicts withhold a total rather than pick a side.</p>
+        <p className="hint">Missing is recorded as missing; nothing is filled with zero. A zero is a reading. Conflicts withhold a total rather than pick a side.</p>
         {prof && (
           <p className="hint">
             One file profiled in full ({String(prof.source_file)}): {integer(Number(prof.records))} records, {integer(Number(prof.exact_duplicate_extra_rows))} duplicate rows, {integer(Number(prof.null_tokens))} Null tokens (all {integer(Number(prof.off_grid_rows))} off the grid), {integer(Number(prof.zero_values))} zeros, {integer(Number(prof.households))} households.
@@ -57,7 +57,7 @@ export function Quality({ bundle }: { bundle: Bundle }) {
           <>
             <p className="hint" style={{ marginTop: 0 }}>
               Simple daily baselines, scored on the final {f.cohort.holdout_days} days of {f.cohort.households} households'
-              clean runs — mean absolute error per day, lower is better.
+              clean runs: mean absolute error per day, lower is better.
             </p>
             <div className="bars">
               {f.holdout.models.map((m) => (
@@ -72,7 +72,7 @@ export function Quality({ bundle }: { bundle: Bundle }) {
             </div>
             <p className="hint">
               {f.holdout.scored_predictions_per_model} scored predictions per model. Every prediction uses only data dated on or
-              before its origin. A retrospective benchmark on clean runs — not an operational evaluation, not a forecast
+              before its origin. A retrospective benchmark on clean runs, not an operational evaluation and not a forecast
               product.
             </p>
           </>

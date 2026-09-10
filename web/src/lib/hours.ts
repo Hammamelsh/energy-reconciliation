@@ -40,7 +40,7 @@ export function highConcentration(hourBands: HourBands): HighConcentration | nul
 
 const two = (n: number) => String(n).padStart(2, "0");
 
-/** "17:00 to 22:59" — the label-hour range, stated as labels. */
+/** "17:00 to 22:59": the label-hour range, stated as labels. */
 export function labelRange(c: HighConcentration): string {
   return `${two(c.from)}:00 to ${two(c.to)}:59`;
 }

@@ -32,7 +32,7 @@ export function Pipeline({ bundle, digest }: { bundle: Bundle; digest: string })
         <Step n={a.excluded_readings} t="excluded, each with one reason" s="flat-rate households, other years…" run={seen} amber />
         <Step n={c.dynamic_charge.display} t="the dynamic-tariff charge" s={`exact £${c.dynamic_charge.exact}`} run={seen} format={money} />
       </div>
-      <div className="reasons" aria-label="Why readings were excluded">
+      <div className="reasons" role="group" aria-label="Why readings were excluded">
         {reasons.map(([reason, n]) => (
           <div className="reason" key={reason}>
             <span>{reasonLabel(reason)}</span>
@@ -77,7 +77,7 @@ export function Pipeline({ bundle, digest }: { bundle: Bundle; digest: string })
           <p className="hint">
             Your browser hashed the exported data file it received and compared it with the pinned SHA-256 digest before
             showing a number. That is an integrity check on the payload, with its provenance traceable to the sealed
-            build — it does not rebuild the result from the raw archive or rerun the build.
+            build; it does not rebuild the result from the raw archive or rerun the build.
           </p>
         </div>
       </div>
