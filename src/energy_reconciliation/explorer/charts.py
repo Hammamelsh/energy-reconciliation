@@ -610,3 +610,93 @@ def horizon_error_chart(frame: pd.DataFrame) -> alt.Chart:
         )
         .properties(height=300)
     )
+
+
+# ------------------------------------------------- ANL-005 flat-price comparison
+OUTCOME_COLOURS = {
+    "lower under dynamic": TEAL,
+    "higher under dynamic": AMBER,
+    "equal": GREY,
+}
+
+
+def household_difference_chart(frame: pd.DataFrame) -> alt.Chart | alt.LayerChart:
+    """One horizontal bar per household: flat-price charge minus dynamic charge, in £.
+
+    Positive bars (right of the zero rule) mean the dynamic scenario is lower for that
+    household. Colour repeats the sign as words in the legend and the tooltip, so it never
+    carries the outcome alone. Bars are sorted by difference so the spread reads top to
+    bottom; the tooltip carries the household's observed coverage, because a small bar
+    on a household charged for few readings is a coverage fact before it is a price one.
+    """
+    if frame.empty:
+        return empty_note("No charged readings in this selection — nothing to compare.")
+    data = pd.DataFrame(
+        {
+            "household_id": frame["household_id"],
+            "difference": [float(v) for v in frame["difference_exact"]],
+            "outcome": [
+                {"lower": "lower under dynamic", "higher": "higher under dynamic"}.get(
+                    o, "equal"
+                )
+                for o in frame["outcome_under_dynamic"]
+            ],
+            "charged_readings": frame["charged_readings"],
+            "coverage": [
+                float(v) if v is not None else float("nan")
+                for v in frame["coverage_share"]
+            ],
+            "dynamic": [float(v) for v in frame["dynamic_charge_gbp_exact"]],
+            "flat": [float(v) for v in frame["flat_charge_gbp_exact"]],
+            "pct": [
+                float(v) if v is not None else float("nan")
+                for v in frame["pct_of_flat_exact"]
+            ],
+        }
+    )
+    order = list(data.sort_values("difference")["household_id"])
+    height = max(160, 18 * len(order) + 40)
+    bars = (
+        alt.Chart(data)
+        .mark_bar()
+        .encode(
+            y=alt.Y(
+                "household_id:N",
+                title=None,
+                sort=order,
+                axis=alt.Axis(labelFontSize=LABEL_SIZE - 1),
+            ),
+            x=alt.X(
+                "difference:Q",
+                title="Flat-price charge minus dynamic charge (£) — positive: dynamic lower",
+                axis=alt.Axis(
+                    format=",.2f",
+                    labelFontSize=LABEL_SIZE,
+                    titleFontSize=AXIS_TITLE_SIZE,
+                ),
+            ),
+            color=alt.Color(
+                "outcome:N",
+                scale=alt.Scale(
+                    domain=list(OUTCOME_COLOURS), range=list(OUTCOME_COLOURS.values())
+                ),
+                legend=alt.Legend(title=None, orient="top", labelFontSize=11),
+            ),
+            tooltip=[
+                alt.Tooltip("household_id:N", title="Household"),
+                alt.Tooltip("outcome:N", title="Outcome"),
+                alt.Tooltip("difference:Q", title="Flat − dynamic £", format=",.2f"),
+                alt.Tooltip("pct:Q", title="% of flat-price charge", format=".1f"),
+                alt.Tooltip("dynamic:Q", title="Dynamic £", format=",.2f"),
+                alt.Tooltip("flat:Q", title="Flat-price £", format=",.2f"),
+                alt.Tooltip("charged_readings:Q", title="Charged readings", format=","),
+                alt.Tooltip("coverage:Q", title="Observed coverage", format=".1%"),
+            ],
+        )
+    )
+    zero = (
+        alt.Chart(pd.DataFrame({"x": [0.0]}))
+        .mark_rule(color=TEXT, strokeWidth=1)
+        .encode(x="x:Q")
+    )
+    return (bars + zero).properties(height=height)

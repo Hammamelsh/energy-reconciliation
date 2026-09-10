@@ -498,3 +498,30 @@ def test_a_candidate_is_never_labelled_as_the_active_publication(work):
     legacy = reads.warehouse(source)
     assert legacy.is_active_publication is False and legacy.role == reads.WAREHOUSE
     assert legacy.version is None and legacy.identity is None
+
+
+def test_the_flat_comparison_is_routed_like_every_other_tariff_query(doctored):
+    """ANL-005 must price the dbt facts with the dbt build's own price row.
+
+    The doctored source's ``main`` price catalogue is 42p everywhere and its charges are
+    the marker; the dbt build in ``scenario_build`` carries the real catalogue. A fallback
+    to ``main`` for either the price or the rows would show up in the figures.
+    """
+    from energy_reconciliation.tariff import flat_comparison as fc
+
+    context = reads.candidate(doctored["built"].candidate)
+    result = fc.compare(context.database, context.run_id, relations=context.relations)
+    assert isinstance(result, fc.FlatComparison)
+    assert result.route == context.relations.label
+    assert result.price.price_gbp_per_kwh == Decimal("0.14228"), (
+        "the flat price is the build's, not the doctored main catalogue's 0.42"
+    )
+    assert MARKER_HOUSEHOLD not in {r["household_id"] for r in result.households}
+    assert result.totals.dynamic < MARKER_CHARGE
+    assert result.totals.flat == result.totals.kwh * Decimal("0.14228")
+
+    # the same function on the legacy route reads the doctored main tables -- visibly
+    legacy = fc.flat_price(doctored["source"], relations=ta.WAREHOUSE_RELATIONS)
+    assert isinstance(legacy, fc.FlatPrice) and legacy.price_gbp_per_kwh == Decimal(
+        "0.42"
+    )

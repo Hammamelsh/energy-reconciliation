@@ -26,6 +26,7 @@ from energy_reconciliation.explorer import queries as q
 from energy_reconciliation.explorer import selection as sel
 from energy_reconciliation.ingest.warehouse import DEFAULT_DATABASE
 from energy_reconciliation.tariff import analytics as ta
+from energy_reconciliation.tariff import flat_comparison as fcmp
 from energy_reconciliation.tariff.models import ASSUMPTION_TEXT
 
 WAREHOUSE_DIR = Path("data/warehouse")
@@ -226,6 +227,171 @@ def render_band_view(
                     "  \n".join(f"`{k}`: {v}" for k, v in insight.supporting.items())
                 )
     return readings, str(kwh), str(charge)
+
+
+def fmt_signed_gbp(value) -> str:
+    v = float(value)
+    return f"{'+' if v > 0 else '-' if v < 0 else ''}£{abs(v):,.2f}"
+
+
+def fmt_signed_pct(value) -> str:
+    v = float(value)
+    return f"{'+' if v > 0 else ''}{v:.1f}%"
+
+
+def fmt_comparison_table(frame: pd.DataFrame) -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "Household": frame["household_id"],
+            "Charged readings": [fmt_count(v) for v in frame["charged_readings"]],
+            "Observed coverage": [
+                "—" if v is None else fmt_pct(v) for v in frame["coverage_share"]
+            ],
+            "First charged": frame["first_charged_date"],
+            "Last charged": frame["last_charged_date"],
+            "Dynamic charge": [
+                fmt_gbp(ta.round_money(Decimal(v)))
+                for v in frame["dynamic_charge_gbp_exact"]
+            ],
+            "Flat-price charge": [
+                fmt_gbp(ta.round_money(Decimal(v)))
+                for v in frame["flat_charge_gbp_exact"]
+            ],
+            "Flat − dynamic": [
+                fmt_signed_gbp(ta.round_money(Decimal(v)))
+                for v in frame["difference_exact"]
+            ],
+            "% of flat": [
+                "undefined" if v is None else fmt_signed_pct(Decimal(v))
+                for v in frame["pct_of_flat_exact"]
+            ],
+            "Under dynamic": frame["outcome_under_dynamic"],
+        }
+    )
+
+
+def render_flat_comparison(
+    database: Path,
+    run_id: str,
+    relations: ta.Relations,
+    household: str | None,
+    s_start: date,
+    s_end: date,
+) -> None:
+    """ANL-005: the same charged readings priced two ways, for the selection on screen.
+
+    An unavailable comparison renders one statement and leaves everything above it
+    untouched: the dynamic-tariff figures never depend on the flat price existing.
+    """
+    st.markdown("#### The same readings priced at the flat rate")
+    result = fcmp.compare(
+        database, run_id, household, s_start, s_end, relations=relations
+    )
+    if isinstance(result, fcmp.Unavailable):
+        st.info(
+            f"**Flat-price comparison not available** (`{result.kind}`): "
+            f"{result.reason}. The dynamic-tariff figures above are unaffected."
+        )
+        return
+    t, price = result.totals, result.price
+    scope = household or f"all {t.households:,} charged households"
+    st.caption(
+        f"**Fixed-consumption historical comparison** — {scope}, "
+        f"{fmt_period(s_start, s_end)}: the same **{fmt_count(t.readings)} charged "
+        f"readings** priced under the dynamic scenario (A1) and, under assumption "
+        f"**A2**, at the documented flat price of **{price.price_pence_per_kwh} p/kWh**. "
+        "**Positive means the dynamic scenario is lower.** It is not a bill, a saving, "
+        "a behavioural finding or advice."
+    )
+    m = st.columns(4)
+    m[0].metric(
+        "Dynamic energy charge",
+        fmt_gbp(ta.round_money(t.dynamic)),
+        help=f"Exact, unrounded: £{t.dynamic}. The scenario charge under A1.",
+    )
+    m[1].metric(
+        "Flat-price energy charge",
+        fmt_gbp(ta.round_money(t.flat)),
+        help=(
+            f"Exact, unrounded: £{t.flat}. {t.kwh} kWh × £{price.price_gbp_per_kwh}/kWh "
+            "under A2."
+        ),
+    )
+    m[2].metric(
+        "Flat minus dynamic",
+        fmt_signed_gbp(ta.round_money(t.difference)),
+        help=f"Exact, unrounded: £{t.difference}. Positive: dynamic scenario lower.",
+    )
+    m[3].metric(
+        "As % of flat-price charge",
+        "undefined" if t.pct_of_flat is None else fmt_signed_pct(t.pct_of_flat),
+        help=(
+            "Denominator: the flat-price energy charge. "
+            + (
+                "Undefined because that charge is exactly zero."
+                if t.pct_of_flat is None
+                else f"Exact: {t.pct_of_flat}%."
+            )
+        ),
+    )
+    if household is None:
+        o = result.outcomes
+        st.markdown(
+            f"**Under the dynamic scenario, {o['lower']} household(s) are lower, "
+            f"{o['higher']} higher and {o['equal']} equal** — classified on exact "
+            "differences, not rounded display values."
+        )
+        v = result.variation
+        if v:
+            share = v["largest_share_of_pooled_pct"]
+            st.caption(
+                f"Largest single household difference: "
+                f"{fmt_signed_gbp(ta.round_money(Decimal(v['largest_difference_exact'])))} "
+                f"({v['largest_household']})"
+                + (
+                    f", {float(Decimal(share)):.1f}% of the pooled difference"
+                    if share is not None
+                    else ""
+                )
+                + f"; median household difference "
+                f"{fmt_signed_gbp(ta.round_money(Decimal(v['median_household_difference_exact'])))}. "
+                "Households contribute different periods — read each bar beside its "
+                "observed coverage."
+            )
+        st.altair_chart(
+            charts.household_difference_chart(result.households_frame), width="stretch"
+        )
+        with st.expander(
+            f"Per household ({t.households:,} rows) — difference beside observed coverage"
+        ):
+            st.dataframe(
+                fmt_comparison_table(result.households_frame),
+                width="stretch",
+                hide_index=True,
+            )
+            st.caption(
+                f"Observed coverage is charged readings against the {result.schedule_slots_in_period:,} "
+                "schedule labels in this period — label coverage, never annualised, and not "
+                "proof that every physical interval was metered."
+            )
+    with st.expander("Assumptions, price provenance and what this does not show"):
+        st.markdown(
+            f"""
+- **A1** — {ASSUMPTION_TEXT}
+- **A2** — {fcmp.A2_TEXT}
+- **Flat price** — `{price.tariff_group}` / `{price.band_label}`: {price.price_pence_per_kwh} p/kWh
+  (£{price.price_gbp_per_kwh}/kWh), catalogue `{price.catalogue_version}`, evidence
+  **{price.evidence_label}**, validity **{price.validity}**. Read from this build's own price
+  dimension (`{relations.dim_price}`), not from the current catalogue file.
+- **Arithmetic** — per charged reading, `consumption_kwh × price` in exact decimal, summed;
+  rounded only here for display. The per-row sum equals the kWh total × price because nothing
+  is rounded, and the code asserts it.
+- **Run** — `{run_id}` on the {relations.label} route; definition `{result.definition}`.
+- **Not shown** — what anyone paid (no standing charge, levy or tax; these households were on
+  the dynamic tariff and may have consumed differently on a flat one), any behavioural
+  response, any advice about tariffs today, and anything about London beyond this sample.
+"""
+        )
 
 
 # --------------------------------------------------------------- data source
@@ -1113,6 +1279,9 @@ and the workbook. The other three tabs are unaffected and work normally.
                     "timestamp. The hour is read from the label as recorded; no "
                     "timezone is applied, because none is established."
                 )
+                render_flat_comparison(
+                    database, run_id, relations, household, s_start, s_end
+                )
 
         # ======================================= VIEW 2 — the loaded ToU sample
         elif view == SCENARIO_VIEWS[1]:
@@ -1179,6 +1348,9 @@ and the workbook. The other three tabs are unaffected and work normally.
                         "nothing about how much electricity it used. Why readings are "
                         "absent is not established."
                     )
+                render_flat_comparison(
+                    database, run_id, relations, None, s_start, s_end
+                )
 
         # ========================================= VIEW 3 — the schedule itself
         else:

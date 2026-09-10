@@ -24,6 +24,8 @@ Across **456,096 charged readings from 27 time-of-use households**, the 2013 tar
 
 Coverage varies: 26 households contribute 17,375–17,520 of the year's 17,520 scheduled labels; one contributes 864. The tariff scenario covers the 27 time-of-use households; the 56 flat-rate households remain available for consumption and data-quality analysis. [Tariff measurements, coverage and assumptions](docs/anl-002-tariff-scenario.md).
 
+**The same readings priced at the flat rate.** Under a second stated assumption — **A2**, the documented flat price of 14.228 p/kWh applied throughout 2013, because its effective dates are not documented — the same 456,096 charged readings carry an energy charge of **£12,160.26**, so the dynamic schedule priced this recorded consumption **£484.83 (4.0%) lower**. The direction is broadly shared: **25 of the 27 households are lower under the dynamic scenario** (by 0.9% to 11.4%) and two are higher (by 0.3% and 1.2%); 16 of 27 sit within two points of the pooled 4.0%, and the largest household contributes 13% of the pooled difference. This is a fixed-consumption comparison of two prices on the usage that was recorded — not what anyone paid or saved, since consumption on a flat tariff might have differed and no standing charge is modelled. [Comparison, household table and assumptions](docs/anl-005-flat-price-comparison.md).
+
 ### Profiling distinguishes missing consumption from recorded zeros
 
 A separate profile of **source file 0—1 million records across 30 households—**found 688 exact duplicate rows, 29 `Null` values and 45,538 zero readings. All 29 `Null` records were off the half-hour grid. No conflicting values were found at shared household/timestamp keys in that file.

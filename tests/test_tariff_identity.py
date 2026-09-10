@@ -93,6 +93,8 @@ def test_reporting_and_replay_code_is_deliberately_not_covered():
         # whenever the reporting wording changed.
         "tariff/published_baseline.py",
         "tariff/reads.py",
+        # ANL-005 prices the certified facts a second way and stores nothing.
+        "tariff/flat_comparison.py",
     ):
         assert reporting not in covered
 
@@ -231,6 +233,9 @@ def test_the_published_identity_is_a_subset_and_untouched_by_the_candidate_one()
     )
     assert "tariff/candidate_identity.py" not in candidate, (
         "the identity code is not the calculation; over-inclusion is the failure here"
+    )
+    assert "tariff/flat_comparison.py" not in candidate, (
+        "a comparison read over the facts cannot change a stored figure"
     )
 
 
