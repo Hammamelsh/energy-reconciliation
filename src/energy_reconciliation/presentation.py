@@ -10,8 +10,15 @@ module produces that summary **from a validated read context only** (a publicati
 serving snapshot that passed every gate), so a figure on the page can be traced to the sealed
 build it came from.
 
-The contract (``presentation-bundle-1``)
+The contract (``presentation-bundle-2``)
 ----------------------------------------
+
+Version 2 adds one section, ``terrain``: a summary of the year-of-half-hours terrain
+(:mod:`energy_reconciliation.terrain`, contract ``energy-terrain-1``) and the name of the
+file that carries its cells. That file is written beside the bundle and pinned by the
+manifest under ``terrain`` (digest, size, definition), so the browser verifies it the same
+way before drawing a cell. Nothing else changed between versions 1 and 2: every earlier key
+is produced by the same code from the same relations.
 
 - **Exact values are strings with units.** Money is the unrounded decimal the fact stores,
   energy likewise; each carries ``unit``. A ``display`` value rounded once here (money to
@@ -40,6 +47,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from . import publication
+from . import terrain as tr
 from .forecast import applicability
 from .forecast.dataset import daily_records
 from .quality import zero_days as zd
@@ -48,9 +56,10 @@ from .tariff import flat_comparison as fc
 from .tariff import reads
 from .tariff.models import ASSUMPTION_TEXT
 
-DEFINITION: Final[str] = "presentation-bundle-1"
+DEFINITION: Final[str] = "presentation-bundle-2"
 BUNDLE_NAME: Final[str] = "bundle.json"
 MANIFEST_NAME: Final[str] = "manifest.json"
+TERRAIN_NAME: Final[str] = tr.TERRAIN_NAME
 
 ATTRIBUTION: Final[dict[str, str]] = {
     "dataset": "SmartMeter Energy Consumption Data in London Households",
@@ -557,12 +566,25 @@ def build_payload(
     profile: dict[str, Any] | None = None,
     forecast_report: dict[str, Any] | None = None,
     with_zero_days: bool = True,
+    terrain: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Everything the public page shows, from one validated context. No timestamps of ours."""
+    """Everything the public page shows, from one validated context. No timestamps of ours.
+
+    ``terrain`` is the payload :func:`terrain.build_terrain` produced from the **same**
+    context; when omitted it is built here. Only its summary enters the bundle; the cells
+    are written to their own file by :func:`write_bundle`.
+    """
     source = _source(context)
     schedule = ta.schedule_bounds(context.database, relations=context.relations)
     quality = _data_quality(context, with_zero_days=with_zero_days)
     quality["readings_loaded"] = source["warehouse"]["readings_loaded"]
+    if terrain is None:
+        terrain = tr.build_terrain(context)
+    if terrain["source"]["run_id"] != context.run_id:
+        raise BundleError(
+            f"the terrain describes run {terrain['source']['run_id']}, not this "
+            f"context's {context.run_id}"
+        )
     return {
         "definition": DEFINITION,
         "title": "The same electricity, priced two ways",
@@ -590,6 +612,7 @@ def build_payload(
         "source_file_profile": _profile_summary(profile),
         "forecast": _forecast(context, forecast_report),
         "limitations": list(LIMITATIONS),
+        "terrain": tr.summary(terrain),
     }
 
 
@@ -607,11 +630,26 @@ def canonical_bytes(payload: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def write_bundle(payload: dict[str, Any], directory: Path) -> dict[str, Any]:
+def write_bundle(
+    payload: dict[str, Any], directory: Path, terrain: dict[str, Any]
+) -> dict[str, Any]:
+    """Write the bundle, the terrain file and the manifest that pins both.
+
+    The terrain must be the payload whose summary the bundle carries: same definition,
+    same run. A bundle that names a terrain file the manifest does not pin would leave the
+    browser nothing to verify, so the pair is written together or not at all.
+    """
+    if terrain.get("definition") != payload["terrain"]["definition"]:
+        raise BundleError("the terrain file and the bundle's terrain summary differ")
+    if terrain["source"]["run_id"] != payload["source"]["publication"]["run_id"]:
+        raise BundleError("the terrain file and the bundle name different runs")
     directory.mkdir(parents=True, exist_ok=True)
     body = canonical_bytes(payload)
     digest = hashlib.sha256(body).hexdigest()
+    terrain_body = canonical_bytes(terrain)
+    terrain_digest = hashlib.sha256(terrain_body).hexdigest()
     (directory / BUNDLE_NAME).write_bytes(body)
+    (directory / TERRAIN_NAME).write_bytes(terrain_body)
     manifest = {
         "definition": DEFINITION,
         "bundle": BUNDLE_NAME,
@@ -622,11 +660,56 @@ def write_bundle(payload: dict[str, Any], directory: Path) -> dict[str, Any]:
             "run_id": payload["source"]["publication"]["run_id"],
             "file_sha256": payload["source"]["publication"]["file_sha256"],
         },
+        "terrain": {
+            "file": TERRAIN_NAME,
+            "definition": terrain["definition"],
+            "content_digest": terrain_digest,
+            "size_bytes": len(terrain_body),
+        },
     }
     (directory / MANIFEST_NAME).write_text(
         json.dumps(manifest, indent=1, sort_keys=True) + "\n"
     )
     return manifest
+
+
+def load_terrain(directory: Path) -> dict[str, Any]:
+    """The terrain file, or a refusal naming what does not match the manifest."""
+    manifest_path = directory / MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise BundleError(f"no manifest under {directory}")
+    manifest = json.loads(manifest_path.read_text())
+    pin = manifest.get("terrain")
+    if not isinstance(pin, dict):
+        raise BundleError("the manifest pins no terrain file")
+    if pin.get("definition") != tr.DEFINITION:
+        raise BundleError(
+            f"terrain definition {pin.get('definition')!r} is not {tr.DEFINITION!r}"
+        )
+    path = directory / str(pin.get("file"))
+    if not path.is_file():
+        raise BundleError(f"the manifest names {pin.get('file')} but it is missing")
+    body = path.read_bytes()
+    if len(body) != pin.get("size_bytes"):
+        raise BundleError("terrain size differs from the manifest")
+    digest = hashlib.sha256(body).hexdigest()
+    if digest != pin.get("content_digest"):
+        raise BundleError(
+            f"{path.name} digests {digest[:12]}…, manifest pins "
+            f"{str(pin.get('content_digest'))[:12]}…; the terrain changed after it was "
+            "written"
+        )
+    try:
+        payload = json.loads(body)
+    except ValueError as error:
+        raise BundleError(f"{path.name} is not JSON: {error}") from error
+    if not isinstance(payload, dict) or payload.get("definition") != tr.DEFINITION:
+        raise BundleError("terrain definition does not match")
+    if payload["source"]["run_id"] != manifest["source"]["run_id"]:
+        raise BundleError("the terrain and its manifest name different runs")
+    if not payload.get("reconciliation", {}).get("all_hold"):
+        raise BundleError("the terrain does not record a reconciliation that holds")
+    return payload
 
 
 def load_bundle(
@@ -695,15 +778,18 @@ def main(argv: list[str] | None = None) -> int:
             if args.forecast_report
             else None
         )
+        terrain = tr.build_terrain(context)
         payload = build_payload(
             context,
             profile=profile,
             forecast_report=report,
             with_zero_days=not args.no_zero_days,
+            terrain=terrain,
         )
-        manifest = write_bundle(payload, args.into)
+        manifest = write_bundle(payload, args.into, terrain)
     except (
         BundleError,
+        tr.TerrainError,
         reads.ReadContextError,
         publication.PublicationError,
         OSError,
@@ -713,7 +799,10 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"wrote {args.into / BUNDLE_NAME}: {manifest['size_bytes']:,} bytes, sha256 "
         f"{manifest['content_digest'][:12]}… from {context.label}; forecast "
-        f"{payload['forecast']['status']}"
+        f"{payload['forecast']['status']}; {TERRAIN_NAME}: "
+        f"{manifest['terrain']['size_bytes']:,} bytes, sha256 "
+        f"{manifest['terrain']['content_digest'][:12]}…, "
+        f"{terrain['grid']['cells']:,} cells, reconciled"
     )
     return 0
 

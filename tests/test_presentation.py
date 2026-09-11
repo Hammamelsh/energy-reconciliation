@@ -23,6 +23,7 @@ from conftest import HEADER, row
 from energy_reconciliation import candidate as cand
 from energy_reconciliation import presentation as pres
 from energy_reconciliation import publication
+from energy_reconciliation import terrain as tr
 from energy_reconciliation.ingest.loader import load_member
 from energy_reconciliation.tariff import analytics as ta
 from energy_reconciliation.tariff import flat_comparison as fc
@@ -94,13 +95,15 @@ def built(tmp_path_factory):
     candidate = cand.build_candidate(source, root=root, schedule="demo")
     publication.publish(candidate.candidate, expected_previous=None, root=root)
     context = reads.published(root)
-    payload = pres.build_payload(context)
+    terrain = tr.build_terrain(context)
+    payload = pres.build_payload(context, terrain=terrain)
     out = area / "bundle"
-    manifest = pres.write_bundle(payload, out)
+    manifest = pres.write_bundle(payload, out, terrain)
     yield {
         "area": area,
         "context": context,
         "payload": payload,
+        "terrain": terrain,
         "dir": out,
         "manifest": manifest,
     }
@@ -212,7 +215,7 @@ def test_generation_is_byte_deterministic(built):
     again = pres.build_payload(ctx)
     assert pres.canonical_bytes(again) == pres.canonical_bytes(built["payload"])
     other = built["area"] / "bundle-again"
-    manifest = pres.write_bundle(again, other)
+    manifest = pres.write_bundle(again, other, built["terrain"])
     assert manifest["content_digest"] == built["manifest"]["content_digest"]
     assert (other / pres.BUNDLE_NAME).read_bytes() == (
         built["dir"] / pres.BUNDLE_NAME

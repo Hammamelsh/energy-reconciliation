@@ -1,11 +1,17 @@
 {
  "bundle": "bundle.json",
- "content_digest": "3296b55f29eefcdc8d8eb6c012766421d8def6f691b99c7267f0b61e6b0e2d37",
- "definition": "presentation-bundle-1",
- "size_bytes": 59550,
+ "content_digest": "b8fb54dc5e93e3997eaa3eb84b0279e39ac3b737af5c8af52f88b30b9792b2d7",
+ "definition": "presentation-bundle-2",
+ "size_bytes": 60978,
  "source": {
   "file_sha256": "708a55da4356789ae8f21a3fda8ff783e80d14017cfd9252db94b5974ccbe87d",
   "run_id": "dbtcand-fbd1f2566700@20260909T093452754963",
   "version": "v0001"
+ },
+ "terrain": {
+  "content_digest": "36183f7398bbcfe128cc3955e60da68ab4fde81f4e07840e3c301c67dfc21715",
+  "definition": "energy-terrain-1",
+  "file": "terrain.json",
+  "size_bytes": 330881
  }
 }
