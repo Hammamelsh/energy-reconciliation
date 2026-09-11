@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { loadBundle, type Bundle, type Loaded } from "./lib/bundle";
 import { prefersReducedMotion, pushState, readState } from "./lib/url";
 import { Hero } from "./components/Hero";
@@ -14,6 +14,37 @@ import { Footer } from "./components/Footer";
 import { Tour, type TourStep } from "./components/Tour";
 import { useInView, useScrollProgress } from "./hooks";
 import { Insight } from "./components/Insight";
+// The year section's body (the flat map, the terrain file's verification and the 3D
+// scene's loader) is its own chunk, fetched when the section comes near; the initial
+// page carries only this introduction.
+const YearSection = lazy(() => import("./components/terrain/YearSection").then((m) => ({ default: m.YearSection })));
+
+function YearLoading({ bundle }: { bundle: Bundle }) {
+  const t = bundle.terrain;
+  return (
+    <div className="instrument year">
+      <p className="hint" role="status">
+        Loading the terrain: {integer(t.grid.cells)} half-hour cells of {t.grid.first_date.slice(0, 4)}, pooled across {t.totals.households} households,
+        together holding exactly £{t.totals.charge.exact} ({money(t.totals.charge.display)}), the comparison's dynamic total.
+      </p>
+    </div>
+  );
+}
+
+function Year({ bundle, loaded }: { bundle: Bundle; loaded: Loaded }) {
+  const [ref, near] = useInView<HTMLDivElement>("800px 0px");
+  return (
+    <div ref={ref}>
+      {near ? (
+        <Suspense fallback={<YearLoading bundle={bundle} />}>
+          <YearSection bundle={bundle} manifest={loaded.manifest} />
+        </Suspense>
+      ) : (
+        <YearLoading bundle={bundle} />
+      )}
+    </div>
+  );
+}
 import { highRank, highShare } from "./lib/households";
 import { highConcentration, labelRange } from "./lib/hours";
 import { integer, money } from "./lib/format";
@@ -82,6 +113,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
     { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
+    { id: "year", title: "One year", text: `Every half hour of ${year} as one surface, pooled across the ${c.households} households. Switch the height from kWh to pounds and the High-price half hours stand up: a small share of the electricity, a large share of the charge.` },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
@@ -99,6 +131,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
           <nav className="nav" aria-label="Sections">
             <a href="#households">Households</a>
             <a href="#what-if">What if</a>
+            <a href="#year">One year</a>
             <a href="#hours">Hours</a>
             <a href="#pipeline">How it's made</a>
             <a href="#quality">Data quality</a>
@@ -222,6 +255,14 @@ export function Page({ loaded }: { loaded: Loaded }) {
           <div style={{ marginTop: 22 }}>
             <BreakEven comparison={c} value={flat} onChange={setFlat} />
           </div>
+        </Reveal>
+
+        <Reveal
+          id="year"
+          title={bundle.terrain.title}
+          sub="Timestamp labels as written, one cell per half hour, nothing smoothed between them. Hover, tap or use the arrow keys to read any cell."
+        >
+          <Year bundle={bundle} loaded={loaded} />
         </Reveal>
 
         <Reveal

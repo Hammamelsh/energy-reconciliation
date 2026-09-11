@@ -1,6 +1,6 @@
 import type { Bundle } from "../lib/bundle";
 import { useMediaQuery } from "../hooks";
-import { BAND, CURRENT, EMBER, INK, LINE, MUTED, NEUTRAL, SURFACE, TEXT, VOLT_DEEP } from "../lib/palette";
+import { BAND, CURRENT, EMBER, INK, LINE, MUTED, NEUTRAL, SLATE, SURFACE, TEXT } from "../lib/palette";
 
 type Mark = { key: string; p: number; label: string; tone: string; tier: "up" | "up2" | "down" | "down2"; anchor: "start" | "middle" | "end" };
 
@@ -19,7 +19,7 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
   const marks: Mark[] = [
     { key: "low", p: low, label: `Low ${low.toFixed(2)}p`, tone: CURRENT, tier: "down", anchor: "start" },
     // Ends at its own marker so the break-even guide line, a few pixels to the right, never crosses it.
-    { key: "normal", p: normal, label: `Normal ${normal.toFixed(2)}p`, tone: VOLT_DEEP, tier: "up", anchor: "end" },
+    { key: "normal", p: normal, label: `Normal ${normal.toFixed(2)}p`, tone: SLATE, tier: "up", anchor: "end" },
     { key: "even", p: even, label: `Break-even ${even.toFixed(3)}p`, tone: NEUTRAL, tier: "up2", anchor: "middle" },
     { key: "flat", p: flat, label: `Flat ${flat.toFixed(3)}p`, tone: EMBER, tier: "down2", anchor: "middle" },
     { key: "high", p: high, label: `High ${high.toFixed(2)}p`, tone: EMBER, tier: "up", anchor: "end" },

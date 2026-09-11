@@ -6,6 +6,8 @@
  * difference or a percentage; the page formats what it was given.
  */
 
+import type { TerrainSummary } from "./terrain";
+
 export type Money = { exact: string; unit: "GBP"; display: number };
 export type Energy = { exact: string; unit: "kWh"; display: number };
 export type Pct = {
@@ -177,6 +179,7 @@ export type Bundle = {
   source_file_profile: Record<string, number | string | null> | null;
   forecast: Forecast;
   limitations: string[];
+  terrain: TerrainSummary;
 };
 
 export type Manifest = {
@@ -185,9 +188,11 @@ export type Manifest = {
   content_digest: string;
   size_bytes: number;
   source: { version: string; run_id: string; file_sha256: string };
+  /** The terrain file's pin: verified the same way before a cell is drawn. */
+  terrain?: { file: string; definition: string; content_digest: string; size_bytes: number };
 };
 
-export const DEFINITION = "presentation-bundle-1";
+export const DEFINITION = "presentation-bundle-2";
 
 export class BundleError extends Error {}
 

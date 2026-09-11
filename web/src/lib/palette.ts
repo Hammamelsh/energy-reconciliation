@@ -13,10 +13,12 @@ export const EMBER = "#ff8a3d";
 export const EMBER_SOFT = "#ffb27a";
 export const CURRENT = "#4c8bf5";
 export const NEUTRAL = "#8a94a8";
+/** The Normal band: slate, so that lime means only "lower under the dynamic tariff". */
+export const SLATE = "#8fa0be";
 
 export const OUTCOME: Record<"lower" | "higher" | "equal", string> = {
   lower: VOLT,
   higher: EMBER,
   equal: NEUTRAL,
 };
-export const BAND: Record<string, string> = { Low: CURRENT, Normal: VOLT_DEEP, High: EMBER };
+export const BAND: Record<string, string> = { Low: CURRENT, Normal: SLATE, High: EMBER };

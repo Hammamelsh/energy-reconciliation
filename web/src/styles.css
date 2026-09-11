@@ -740,7 +740,7 @@ section.block h2 {
   background: var(--current);
 }
 .band-Normal {
-  background: var(--volt-deep);
+  background: var(--slate);
 }
 .band-High {
   background: var(--ember);
@@ -1279,4 +1279,297 @@ footer ul {
   margin-right: auto;
   border: 0;
   color: var(--muted);
+}
+
+/* ---------------------------------------------------------- instrument */
+/* The year-of-half-hours section: an instrument panel, not a card. Square corners, one
+   thin line, no shadow, no gradient; labels in small capitals; the readout in monospace. */
+:root {
+  --slate: #8fa0be;
+}
+.instrument {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  padding: 16px 18px 14px;
+  box-shadow: none;
+}
+.instrument-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+.instrument-bar .lbl,
+.instrument .lbl-check {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+  color: var(--dim);
+}
+.instrument .lbl-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.instrument .seg {
+  border-radius: 3px;
+}
+.instrument .seg button {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.instrument .seg button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.readout {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+  margin: 12px 0 10px;
+  min-height: 3.6em;
+}
+.refusal {
+  border: 1px solid var(--ember);
+  padding: 12px 14px;
+  color: var(--text);
+  font-size: 14.5px;
+}
+.band-legend {
+  display: flex;
+  gap: 8px 18px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--muted);
+  align-items: center;
+}
+.band-legend i.sw {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  border-radius: 0;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+}
+.band-legend i.high {
+  background-image: repeating-linear-gradient(45deg, #ff8a3d 0 3px, #6a3211 3px 5px) !important;
+}
+.band-legend .dimtext {
+  color: var(--dim);
+}
+.caveats {
+  margin: 12px 0 8px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  display: grid;
+  gap: 4px;
+}
+.instrument details {
+  border-radius: 0;
+  background: transparent;
+  margin-top: 8px;
+}
+
+/* the flat map */
+.carpets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 18px;
+  outline: none;
+}
+.carpets:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 4px;
+}
+.carpet {
+  margin: 0;
+  min-width: 0;
+}
+.carpet figcaption {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.carpet-body {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-rows: auto 18px;
+}
+.month-gutter {
+  position: relative;
+  grid-row: 1;
+}
+.month-gutter span {
+  position: absolute;
+  right: 6px;
+  font-size: 10.5px;
+  color: var(--dim);
+  font-family: var(--mono);
+  line-height: 1;
+}
+.carpet-frame {
+  position: relative;
+  height: 548px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  grid-row: 1;
+}
+.carpet-frame canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  cursor: crosshair;
+  touch-action: pan-y;
+}
+.cell-marker {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  min-width: 3px;
+  min-height: 3px;
+}
+.cell-marker.cursor {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+.cell-marker.hover {
+  outline: 1px solid rgba(255, 255, 255, 0.7);
+}
+.slot-axis {
+  position: relative;
+  grid-column: 2;
+  grid-row: 2;
+  font-size: 10px;
+  color: var(--dim);
+  font-family: var(--mono);
+}
+.slot-axis span {
+  position: absolute;
+  top: 3px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.carpet-scale {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+@media (max-width: 520px) {
+  .carpets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .carpet-frame {
+    height: 420px;
+  }
+}
+
+/* the 3D terrain */
+.terrain-3d {
+  position: relative;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.terrain-3d:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.terrain-3d canvas {
+  display: block;
+  width: 100%;
+  height: clamp(320px, 44vw, 560px);
+  touch-action: pan-y pinch-zoom;
+  outline: none;
+  cursor: crosshair;
+}
+.terrain-3d canvas.dragging {
+  cursor: grabbing;
+}
+.terrain-3d .overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  font-family: var(--mono);
+}
+.terrain-3d .overlay text {
+  fill: var(--dim);
+  font-size: 11px;
+}
+.terrain-3d .overlay text.unit {
+  fill: var(--text);
+  font-weight: 700;
+}
+.terrain-3d .overlay line {
+  stroke: var(--dim);
+  stroke-width: 1;
+}
+.terrain-3d .views {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  display: flex;
+  gap: 6px;
+}
+.terrain-3d .views button {
+  background: rgba(11, 14, 20, 0.8);
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.terrain-3d .views button[aria-pressed="true"] {
+  color: var(--text);
+  border-color: var(--dim);
+}
+.terrain-3d .views button:hover {
+  color: var(--text);
+}
+.terrain-3d .overlay .peak line {
+  stroke: var(--text);
+  stroke-width: 1;
+}
+.terrain-3d .overlay .peak text {
+  fill: var(--text);
+}
+.terrain-3d .overlay .peak text.peak-value {
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.terrain-3d canvas {
+  height: clamp(300px, 34vw, 470px);
+}
+.peak-marker {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  min-width: 3px;
+  min-height: 3px;
+  outline: 1px solid var(--text);
+  outline-offset: 1px;
+}
+.peak-marker span {
+  position: absolute;
+  top: -0.7em;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: rgba(11, 14, 20, 0.85);
+  padding: 1px 4px;
 }
