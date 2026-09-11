@@ -212,13 +212,15 @@ link opens.
 The public entry point is a React + TypeScript page under [`web/`](../web/) (its own
 [README](../web/README.md)). It never reads the database. A deterministic export,
 `uv run export-presentation` ([`presentation.py`](../src/energy_reconciliation/presentation.py),
-contract `presentation-bundle-1`), reads a validated publication — a serving snapshot or a
-publication root — and writes two files that are committed beside the page:
+contract `presentation-bundle-2` on the prototype branch, `presentation-bundle-1` on
+`main`), reads a validated publication — a serving snapshot or a publication root — and
+writes the files that are committed beside the page:
 
 | File | Size | Holds |
 |---|---:|---|
 | `web/public/data/bundle.json` | 59,550 bytes (11,358 gzipped) | Pooled totals; all 27 household outcomes with coverage, band shares and exact break-even prices; hour-of-day band distributions; the accounting ladder; data-quality and forecast summaries; both assumptions; the attribution; the publication's identity. Exact decimals as strings with units, beside display values rounded once in Python. |
-| `web/public/data/manifest.json` | 359 bytes | The bundle's sha256, size and definition, and the source publication (version, run id, version-file sha256). |
+| `web/public/data/manifest.json` | 550 bytes | The bundle's sha256, size and definition, the source publication (version, run id, version-file sha256), and the terrain file's pin. |
+| `web/public/data/terrain.json` | 330,881 bytes (64,970 gzipped) | Prototype branch only (`docs/prototypes/energy-terrain.md`): every half hour of the year as one cell, pooled across the comparison's households, reconciled to the exact totals before it is written; fetched only when the section comes near. Contract `energy-terrain-1`; the bundle is `presentation-bundle-2`. |
 
 What the bundle must not contain is enforced by
 [`tests/test_presentation.py`](../tests/test_presentation.py): no individual reading, no

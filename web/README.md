@@ -8,8 +8,11 @@ checks against its pinned digest. It is the public entry point; the Streamlit ex
 
 Every figure on the page comes from `public/data/bundle.json`, written by
 `uv run export-presentation` (`src/energy_reconciliation/presentation.py`, contract
-`presentation-bundle-1`) from a validated publication: a serving snapshot or a publication
-root. The export is deterministic: the same publication produces the same bytes. The bundle
+`presentation-bundle-2`) from a validated publication: a serving snapshot or a publication
+root. The same export writes `public/data/terrain.json` (contract `energy-terrain-1`,
+`src/energy_reconciliation/terrain.py`): every half hour of the year as one cell, pooled
+across the households in the comparison, reconciled to the comparison's exact totals before
+it is written and pinned by the manifest like the bundle. The export is deterministic: the same publication produces the same bytes. The bundle
 carries the pooled totals, all 27 household outcomes with coverage and band shares, the
 hour-of-day band distributions, the accounting ladder, data-quality and forecast summaries,
 both assumptions, the attribution and the publication's identity. It carries nothing
@@ -22,7 +25,9 @@ calculation (how many households would have come out ahead at another flat price
 the slider against each household's precomputed exact break-even price.
 
 Before a number is shown, the browser hashes the bundle it received (SubtleCrypto SHA-256)
-and checks definition, size, digest and dbt run id against `public/data/manifest.json`.
+and checks definition, size, digest and dbt run id against `public/data/manifest.json`. The
+terrain file is checked the same way before a cell is drawn, and refused with a visible
+message otherwise.
 A changed byte, a stale manifest or a bundle from another run is refused with a visible error.
 This is an integrity check on the exported payload with provenance traceable to the sealed
 build; the browser does not rebuild the result from the raw archive or rerun the build.
@@ -48,8 +53,13 @@ the page with the committed data.
 
 - **No charting library.** A Recharts prototype built to 562 kB (167.8 kB gzipped) against
   220 kB (68.6 kB) for the same charts drawn as React SVG. Drawing the SVG directly also made
-  keyboard navigation, text labels and the table view straightforward. The finished page is
-  274.6 kB (84.9 kB gzipped) of JavaScript and 15.0 kB (4.2 kB) of CSS.
+  keyboard navigation, text labels and the table view straightforward. The first view is
+  283.3 kB (86.6 kB gzipped) of JavaScript and 22.3 kB (5.6 kB) of CSS.
+- **The year section loads in stages.** Its body (`src/components/terrain/`) is a 5.5 kB
+  (gzipped) chunk fetched when the section comes near, with the 65 kB terrain file; the 3D
+  view and Three.js (135 kB gzipped) load only when a visitor asks for them. The flat map is
+  the view on every device; the 3D terrain is an option. See
+  `docs/prototypes/energy-terrain.md` for the design record and measurements.
 - **Accessibility.** Bars are focusable and moved with the arrow, Home and End keys; the
   household chart has a table view; outcomes are marked with ▲/▼ as well as colour;
   `prefers-reduced-motion` turns off count-ups, reveals and the flow animation. axe-core

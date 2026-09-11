@@ -25,7 +25,7 @@ keyboard reachability checked; the explorer's other views unchanged beneath it.
 commit `46ed791`; the deployment as observed is recorded in [`deployment.md`](deployment.md)
 §12).** The public entry point is a static
 React + TypeScript page ([`web/`](../web/)) over a presentation bundle exported deterministically
-from the published version (`export-presentation`, contract `presentation-bundle-1`; 59,550
+from the published version (`export-presentation`, contract `presentation-bundle-1`, `-2` on the `prototype/energy-terrain` branch; 59,550
 bytes; verified by sha256 in the browser before anything is shown; exact decimals as text; no
 tariff arithmetic in JavaScript). The Python engine — DuckDB, dbt, the sealed publication, the
 Streamlit explorer — is unchanged; the page is a view over its output, and Phase B's grid will
