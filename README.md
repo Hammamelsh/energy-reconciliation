@@ -22,9 +22,9 @@ These results describe the loaded samples, which were not selected to represent 
 
 Across **456,096 charged readings from 27 time-of-use households**, the 2013 tariff scenario totals **£11,675.43**. High-price periods account for a disproportionate share of that charge, reflecting both the higher price and the consumption recorded during those periods.
 
-![Tariff dashboard for the loaded ToU sample: 27 charged households and 456,096 charged readings, with a chart comparing each band's share of consumption with its share of charge (Low 10.5% against 3.1%, Normal 84.6% against 72.9%, High 4.9% against 24.1%) above the per-band table.](docs/images/dashboard-tariff-bands.png)
+![Tariff dashboard for the loaded ToU sample: 27 charged households and 456,096 charged readings, with a chart comparing each band's share of consumption with its share of charge (Low 10.5% against 3.1%, Normal 84.6% against 72.8%, High 4.9% against 24.1%) above the per-band table.](docs/images/dashboard-tariff-bands.png)
 
-*Historical energy-charge scenario for the loaded sample, 2013. Calculated under assumption A1; this is not a bill.*
+*Historical energy-charge scenario for the loaded sample, 2013. Calculated under assumption A1; this is not a bill. Capture retaken on 2026-09-12 after a display-rounding correction: the Normal band's charge share reads 72.8%, where earlier captures showed 72.9% from rounding a four-place share a second time.*
 
 **A1 assumes that a consumption timestamp and the matching schedule label refer to the same half-hour interval.** Their correspondence is unverified. No standing charges or separate tax adjustments are modelled, and the result does not establish a behavioural response to prices.
 
