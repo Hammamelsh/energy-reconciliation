@@ -1303,7 +1303,7 @@ footer ul {
 .takeaway {
   display: grid;
   gap: 6px;
-  margin: 0 0 12px;
+  margin: 0 0 8px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-s);
@@ -1387,7 +1387,7 @@ footer ul {
   transition: left 200ms ease-out, top 200ms ease-out;
 }
 .instrument details.year-how {
-  margin: 0 0 14px;
+  margin: 0 0 10px;
 }
 .instrument .lbl-checks {
   display: inline-flex;

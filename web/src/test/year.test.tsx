@@ -53,20 +53,24 @@ describe("the year section", () => {
   it("introduces the terrain from the verified bundle and, without WebGL, shows the flat map with every cell readable by keyboard", async () => {
     stubFetch(terrainBytes);
     const bundle = await renderPage();
-    expect(screen.getByRole("heading", { name: "When did the calculated energy charge peak?" })).toBeInTheDocument();
-    // the answer is the export's charge peak, stated as a timestamp label; the maps are under A1 alone
+    expect(screen.getByRole("heading", { name: "The year, priced half-hour by half-hour" })).toBeInTheDocument();
+    // the takeaway leads, the peak follows as a timestamp label, and the visible copy names A1 alone
     const sub = document.querySelector("#year .sub")!;
+    expect(sub).toHaveTextContent("High-price half-hours accounted for 4.9% of included electricity and 24.1% of the calculated energy charge.");
     expect(sub).toHaveTextContent("The highest single timestamp label was 17 March at 19:30: £7.43 across 26 of the 27 households.");
-    expect(sub).toHaveTextContent("under assumption A1, not a bill");
-    expect(sub.textContent).not.toMatch(/A2/);
+    expect(sub.textContent).not.toMatch(/A2|—|–/);
     const map = await screen.findByRole("application", { name: /Flat map of 365 date labels by 48 half-hour labels/ }, { timeout: 8000 });
     // the takeaway names both denominators; the coverage range stays visible; totals move into the disclosure
     expect(screen.getByRole("img", { name: "High-price half-hours: 4.9% of included electricity, 24.1% of calculated energy charge." })).toBeInTheDocument();
     const lead = document.querySelector(".year-lead")!;
+    expect(lead).toHaveTextContent("Each cell represents one half-hour timestamp label in 2013. Brightness shows the amount. Colour shows its tariff band.");
     expect(lead).toHaveTextContent(`${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} of the ${bundle.terrain.totals.households} households`);
-    expect(lead.textContent).not.toMatch(/exactly/);
+    expect(lead).toHaveTextContent("Historical scenario under assumption A1, not a bill.");
+    expect(lead.textContent).not.toMatch(/exactly|A2|—|–/);
     const how = screen.getByText("How to read this map").closest("details")!;
     expect(how).toHaveTextContent("Assumption A2, the documented flat price, belongs only to the dynamic-versus-flat comparison");
+    // the £7.43 is a display value; the unrounded pooled charge sits in the evidence
+    expect(how).toHaveTextContent(`unrounded pooled charge for it is £${bundle.terrain.peaks.charge!.charge.exact}`);
     expect(how).toHaveTextContent(`${bundle.terrain.totals.kwh.display.toLocaleString("en-GB", { minimumFractionDigits: 3 })} kWh`);
     expect(how).toHaveTextContent("differ from the lime and ember");
     expect(screen.getByText("Brightness shows amount. Colour shows tariff band.")).toBeInTheDocument();

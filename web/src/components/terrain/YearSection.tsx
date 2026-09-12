@@ -175,8 +175,9 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
         </div>
       )}
       <p className="year-lead">
-        Cells pool the charged readings of {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of the{" "}
-        {s.totals.households} households on the dynamic tariff.
+        Each cell represents one half-hour timestamp label in {year}. Brightness shows the amount. Colour shows its tariff band.
+        Cells pool {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of the {s.totals.households} households
+        on the dynamic tariff. Historical scenario under assumption A1, not a bill.
       </p>
       <details className="year-how">
         <summary>How to read this map</summary>
@@ -203,9 +204,11 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
           </p>
           <p>
             <b>Rounding and totals.</b> Cell values are rounded once in the export, kWh to three decimal places and charge to two,
-            and are never added in the browser. Together the cells hold {energy(s.totals.kwh.display)} and{" "}
-            {money(s.totals.charge.display)} as display totals; the export's full-precision totals, reconciled against the comparison
-            before the file was written, appear under the month table.
+            and are never added in the browser. The {s.peaks.charge ? money(s.peaks.charge.charge.display) : "peak"} shown for the
+            highest label is that display value; the export's unrounded pooled charge for it is £{s.peaks.charge?.charge.exact ?? "n/a"}.
+            Together the cells hold {energy(s.totals.kwh.display)} and {money(s.totals.charge.display)} as display totals; the
+            export's full-precision totals, reconciled against the comparison before the file was written, appear under the month
+            table.
           </p>
           <p>
             <b>Reading a cell.</b> Hover, tap or use the arrow keys; the readout beneath the map states the cell's label, kWh,

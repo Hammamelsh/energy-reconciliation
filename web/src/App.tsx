@@ -34,7 +34,7 @@ function peakSentence(bundle: Bundle): string {
 /** The High band's two shares, with their denominators named. */
 function highBand(bundle: Bundle): string {
   const h = bundle.bands.find((b) => b.band === "High");
-  return h ? `${h.consumption_share_pct}% of the included electricity, ${h.charge_share_pct}% of the calculated energy charge` : "the High band's shares are not available";
+  return h ? `${h.consumption_share_pct}% of included electricity and ${h.charge_share_pct}% of the calculated energy charge` : "shares that are not available";
 }
 
 function YearLoading({ bundle }: { bundle: Bundle }) {
@@ -131,7 +131,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
     { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
-    { id: "year", title: "One year", text: `When did the calculated energy charge peak? ${peakSentence(bundle)} Compare the electricity map with the charge map and the High-price half hours light up: ${highBand(bundle)}.` },
+    { id: "year", title: "One year", text: `The year, priced half-hour by half-hour. High-price half-hours accounted for ${highBand(bundle)}. ${peakSentence(bundle)}` },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
@@ -277,8 +277,8 @@ export function Page({ loaded }: { loaded: Loaded }) {
 
         <Reveal
           id="year"
-          title="When did the calculated energy charge peak?"
-          sub={`${peakSentence(bundle)} Each cell represents one half-hour label in ${bundle.terrain.grid.first_date.slice(0, 4)}. Brightness shows the amount; colour shows its tariff band. A historical scenario under assumption A1, not a bill.`}
+          title="The year, priced half-hour by half-hour"
+          sub={`High-price half-hours accounted for ${highBand(bundle)}. ${peakSentence(bundle)}`}
         >
           <Year bundle={bundle} loaded={loaded} />
         </Reveal>
