@@ -450,3 +450,62 @@ def test_the_committed_terrain_verifies_and_reconciles_with_the_committed_bundle
     assert sum(t["cells"]["readings"]) == c["charged_readings"]
     size = (where / pres.TERRAIN_NAME).stat().st_size
     assert size < 600_000, f"the terrain file is {size:,} bytes; it should stay small"
+
+
+# ------------------------------------------------------- assumption metadata
+def test_the_terrain_names_the_assumption_its_cells_carry_not_the_comparisons(full):
+    """The cells pool the dynamic scenario's charged rows, which carry A1. The flat-price
+    comparison the file reconciles with also assumes A2; that list stays with the
+    reconciliation record and never becomes the terrain's own."""
+    ctx, t = full["context"], full["terrain"]
+    stamped = ta.assumption_ids(ctx.database, ctx.run_id, relations=ctx.relations)
+    assert stamped == ("A1",)
+    assert t["assumption_ids"] == ["A1"]
+    comparison = fc.compare(ctx.database, ctx.run_id, relations=ctx.relations)
+    assert "A2" in comparison.assumption_ids
+    assert t["reconciliation"]["compared_with_assumption_ids"] == list(
+        comparison.assumption_ids
+    )
+    payload = pres.build_payload(ctx, terrain=t, with_zero_days=False)
+    assert payload["comparison"]["assumption_ids"] == ["A1", "A2"]
+    assert payload["terrain"]["reconciliation"]["compared_with_assumption_ids"] == [
+        "A1",
+        "A2",
+    ]
+    assert "A2" not in t["assumption_ids"]
+
+
+def test_edited_assumption_metadata_is_refused_like_any_other_change(full):
+    """Missing, additional, foreign or mismatched assumption metadata changes the bytes,
+    so the pinned size or digest refuses the file: the contract has one rule."""
+    edits = {
+        "extra": lambda t: t["assumption_ids"].append("A2"),
+        "missing": lambda t: t.pop("assumption_ids"),
+        "foreign": lambda t: t.__setitem__("assumption_ids", ["A9"]),
+        "mismatched": lambda t: t.__setitem__("assumption_ids", ["A2"]),
+    }
+    for name, edit in edits.items():
+        where = _copy(full, f"assumption-{name}")
+        path = where / pres.TERRAIN_NAME
+        edited = json.loads(path.read_text())
+        edit(edited)
+        path.write_text(pres.canonical_bytes(edited).decode("utf-8"))
+        with pytest.raises(
+            pres.BundleError, match="size differs|changed after it was written"
+        ):
+            pres.load_terrain(where)
+
+
+def test_the_committed_terrain_names_a1_and_the_committed_comparison_names_a2():
+    where = REPO / "web" / "public" / "data"
+    if not (where / pres.TERRAIN_NAME).exists():
+        pytest.skip("no committed terrain yet")
+    t = pres.load_terrain(where)
+    bundle = pres.load_bundle(where)
+    assert t["assumption_ids"] == ["A1"]
+    assert "A2" in t["reconciliation"]["compared_with_assumption_ids"]
+    assert bundle["comparison"]["assumption_ids"] == ["A1", "A2"]
+    assert bundle["terrain"]["reconciliation"]["compared_with_assumption_ids"] == [
+        "A1",
+        "A2",
+    ]

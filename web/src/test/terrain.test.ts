@@ -64,6 +64,26 @@ describe("terrain verification", () => {
   });
 });
 
+describe("assumption metadata", () => {
+  it("names A1 as the assumption its cells carry, leaves A2 with the comparison, and refuses an edited list", async () => {
+    const terrain = await verifyTerrain(manifest, bytes);
+    expect(terrain.assumption_ids).toEqual(["A1"]);
+    expect(terrain.reconciliation.compared_with_assumption_ids).toContain("A2");
+    expect(bundle.comparison.assumption_ids).toEqual(["A1", "A2"]);
+    expect(bundle.terrain.reconciliation.compared_with_assumption_ids).toEqual(["A1", "A2"]);
+    for (const edit of [
+      (t: { assumption_ids: string[] }) => t.assumption_ids.push("A2"),
+      (t: { assumption_ids?: string[] }) => delete t.assumption_ids,
+      (t: { assumption_ids: string[] }) => (t.assumption_ids = ["A9"]),
+    ]) {
+      const edited = JSON.parse(new TextDecoder().decode(bytes));
+      edit(edited);
+      const reencoded = new TextEncoder().encode(JSON.stringify(edited));
+      await expect(verifyTerrain(manifest, reencoded)).rejects.toThrow(/bytes|digest/);
+    }
+  });
+});
+
 describe("reading cells", () => {
   it("indexes date-major and clamps the cursor to the grid", async () => {
     const t = await committed();

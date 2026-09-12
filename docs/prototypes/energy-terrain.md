@@ -210,6 +210,16 @@ non-technical reader. Automated checks are not proof of accessibility.
   25.2, MAC000286 High kWh 4.4 to 4.3) and the dashboard capture in the README was retaken.
   Captures dated before this show the double-rounded 72.9%; `main` carries it until the fix
   is merged. The terrain file has no share fields, so the page has one definition of a share.
+- `terrain.json` listed `assumption_ids: ["A1", "A2"]`: the exporter copied the flat-price
+  comparison's list, although the cells pool only the dynamic scenario's charged rows, which
+  carry A1. Corrected on 2026-09-12: the terrain's `assumption_ids` are read from the charged
+  rows themselves (`analytics.assumption_ids`), an `assumption_scope` sentence says so, and
+  the comparison's list (A1 and A2) is recorded under `reconciliation.compared_with_assumption_ids`,
+  where it is correct. The bundle's `comparison.assumption_ids` keeps A1 and A2. The cell
+  payload and every analytical value are unchanged; only the metadata, the two pins and the
+  bundle's terrain summary differ. Regression tests cover the terrain (A1 only), the comparison
+  (A2 kept) and edited, missing or foreign assumption metadata, which the pinned size and digest
+  refuse.
 - The legend first said High cells were "striped in 3D"; at whole-year zoom a cell is about
   3 px and no pattern is visible. Copy corrected to "striped in 3D when zoomed", and the
   Highlight control is the guaranteed non-colour route.

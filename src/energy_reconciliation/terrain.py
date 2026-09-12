@@ -187,6 +187,11 @@ def build_terrain(context: reads.ReadContext) -> dict[str, Any]:
     if "?" in band_codes:
         raise TerrainError("the schedule carries a band outside Low, Normal and High")
 
+    stamped = ta.assumption_ids(
+        context.database, context.run_id, relations=context.relations
+    )
+    if not stamped:
+        raise TerrainError("the charged rows carry no assumption id")
     rows, households_total = _fact_cells(context)
     readings = [0] * n_cells
     households = [0] * n_cells
@@ -355,7 +360,14 @@ def build_terrain(context: reads.ReadContext) -> dict[str, Any]:
             "schedule_source": context.identity.schedule_source,
             "comparison_definition": comparison.definition,
         },
-        "assumption_ids": list(comparison.assumption_ids),
+        # The assumption stamped on the charged rows these cells pool (A1 on both routes).
+        # The flat-price comparison the file reconciles with carries its own list, A2
+        # included; that list is recorded under ``reconciliation`` where it belongs.
+        "assumption_ids": list(stamped),
+        "assumption_scope": (
+            "the assumption(s) stamped on every charged row these cells pool; the "
+            "flat-price comparison's assumptions are listed under reconciliation"
+        ),
         "grid": {
             "dates": len(dates),
             "slots": SLOTS,
@@ -425,6 +437,7 @@ def build_terrain(context: reads.ReadContext) -> dict[str, Any]:
         },
         "reconciliation": {
             "compared_with": comparison.definition,
+            "compared_with_assumption_ids": list(comparison.assumption_ids),
             "checks": checks,
             "all_hold": True,
         },

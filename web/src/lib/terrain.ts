@@ -60,6 +60,7 @@ export type Terrain = {
     comparison_definition: string;
   };
   assumption_ids: string[];
+  assumption_scope?: string;
   grid: {
     dates: number;
     slots: number;
@@ -105,7 +106,9 @@ export type Terrain = {
   by_band: TerrainBand[];
   by_month: TerrainMonth[];
   peaks: { kwh: TerrainPeak | null; charge: TerrainPeak | null };
-  reconciliation: { compared_with: string; checks: Record<string, boolean>; all_hold: boolean };
+  /** The comparison's own assumption list (A2 included) stays with the reconciliation record;
+   * the terrain's own assumption_ids name only what its charged rows carry. */
+  reconciliation: { compared_with: string; compared_with_assumption_ids?: string[]; checks: Record<string, boolean>; all_hold: boolean };
   caveats: string[];
 };
 
