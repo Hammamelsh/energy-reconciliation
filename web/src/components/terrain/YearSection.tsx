@@ -78,75 +78,100 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
   };
 
   // Measure, band highlight and view are the primary controls; camera and zoom live inside
-  // the 3D panel. On a phone the controls follow the map, so the picture comes first.
-  const toolbar = (
+  // the 3D panel. On a phone the measure and view controls come before the map, and the
+  // band highlight sits behind a small disclosure so the map is not pushed down.
+  const measureCtl = compact ? (
+    <span className="ctl">
+      <span className="lbl">Show</span>
+      <span className="seg" role="group" aria-label="Which map to show">
+        <button type="button" aria-pressed={single === "kwh"} onClick={() => pickSingle("kwh")}>
+          Electricity
+        </button>
+        <button type="button" aria-pressed={single === "charge"} onClick={() => pickSingle("charge")}>
+          Charge
+        </button>
+        <button
+          type="button"
+          aria-pressed={single === "coverage"}
+          disabled={show3d}
+          title={show3d ? "Households are shown on the flat map" : undefined}
+          onClick={() => pickSingle("coverage")}
+        >
+          Households
+        </button>
+      </span>
+    </span>
+  ) : show3d ? (
+    <span className="ctl">
+      <span className="lbl">Height</span>
+      <span className="seg" role="group" aria-label="What height shows">
+        <button type="button" aria-pressed={mode === "kwh"} onClick={() => setMode("kwh")}>
+          Electricity, kWh
+        </button>
+        <button type="button" aria-pressed={mode === "charge"} onClick={() => setMode("charge")}>
+          Charge, £
+        </button>
+      </span>
+    </span>
+  ) : null;
+  const highlightCtl = (
+    <span className="ctl">
+      <span className="lbl">Highlight</span>
+      <span className="seg" role="group" aria-label="Highlight one band">
+        {BANDS.map((b) => (
+          <button key={b} type="button" aria-pressed={highlight === b} onClick={() => setHighlight(b)}>
+            {b === "all" ? "all bands" : b}
+          </button>
+        ))}
+      </span>
+    </span>
+  );
+  const viewCtl = (
+    <span className="ctl">
+      <span className="lbl">View</span>
+      <span className="seg" role="group" aria-label="View">
+        <button
+          type="button"
+          aria-pressed={show3d}
+          disabled={unavailable !== null}
+          title={unavailable ?? undefined}
+          onClick={() => setWant3d(true)}
+        >
+          Explore in 3D
+        </button>
+        <button type="button" aria-pressed={!show3d} onClick={() => setWant3d(false)}>
+          Flat map
+        </button>
+      </span>
+    </span>
+  );
+  const toolbar = compact ? (
+    <>
       <div className="instrument-bar" role="toolbar" aria-label="Map controls">
-        {show3d ? (
-          <span className="ctl">
-            <span className="lbl">Height</span>
-            <span className="seg" role="group" aria-label="What height shows">
-              <button type="button" aria-pressed={mode === "kwh"} onClick={() => setMode("kwh")}>
-                Electricity, kWh
-              </button>
-              <button type="button" aria-pressed={mode === "charge"} onClick={() => setMode("charge")}>
-                Charge, £
-              </button>
-            </span>
-          </span>
-        ) : compact ? (
-          <span className="ctl">
-            <span className="lbl">Show</span>
-            <span className="seg" role="group" aria-label="Which map to show">
-              <button type="button" aria-pressed={single === "kwh"} onClick={() => pickSingle("kwh")}>
-                Electricity, kWh
-              </button>
-              <button type="button" aria-pressed={single === "charge"} onClick={() => pickSingle("charge")}>
-                Charge, £
-              </button>
-              <button type="button" aria-pressed={single === "coverage"} onClick={() => pickSingle("coverage")}>
-                Households
-              </button>
-            </span>
-          </span>
-        ) : null}
-        <span className="ctl">
-          <span className="lbl">Highlight</span>
-          <span className="seg" role="group" aria-label="Highlight one band">
-            {BANDS.map((b) => (
-              <button key={b} type="button" aria-pressed={highlight === b} onClick={() => setHighlight(b)}>
-                {b === "all" ? "all bands" : b}
-              </button>
-            ))}
-          </span>
-        </span>
-        <span className="ctl">
-          <span className="lbl">View</span>
-          <span className="seg" role="group" aria-label="View">
-          <button
-            type="button"
-            aria-pressed={show3d}
-            disabled={unavailable !== null}
-            title={unavailable ?? undefined}
-            onClick={() => setWant3d(true)}
-          >
-            Explore in 3D
-          </button>
-          <button type="button" aria-pressed={!show3d} onClick={() => setWant3d(false)}>
-            Flat map
-          </button>
-          </span>
-        </span>
-        {!show3d && !compact && (
-          <span className="lbl-checks">
-            <label className="lbl-check">
-              <input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} /> show coverage
-            </label>
-            <label className="lbl-check">
-              <input type="checkbox" checked={large} onChange={(e) => setLarge(e.target.checked)} /> larger map
-            </label>
-          </span>
-        )}
+        {measureCtl}
+        {viewCtl}
       </div>
+      <details className="map-options">
+        <summary>Map options</summary>
+        <div className="body">{highlightCtl}</div>
+      </details>
+    </>
+  ) : (
+    <div className="instrument-bar" role="toolbar" aria-label="Map controls">
+      {measureCtl}
+      {highlightCtl}
+      {viewCtl}
+      {!show3d && (
+        <span className="lbl-checks">
+          <label className="lbl-check">
+            <input type="checkbox" checked={showCoverage} onChange={(e) => setShowCoverage(e.target.checked)} /> show coverage
+          </label>
+          <label className="lbl-check">
+            <input type="checkbox" checked={large} onChange={(e) => setLarge(e.target.checked)} /> larger map
+          </label>
+        </span>
+      )}
+    </div>
   );
 
   return (
@@ -176,8 +201,10 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
       )}
       <p className="year-lead">
         Each cell represents one half-hour timestamp label in {year}. Brightness shows the amount. Colour shows its tariff band.
-        Cells pool {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of the {s.totals.households} households
-        on the dynamic tariff. Historical scenario under assumption A1, not a bill.
+      </p>
+      <p className="year-note">
+        {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} households per cell. Historical scenario under
+        A1, not a bill.
       </p>
       <details className="year-how">
         <summary>How to read this map</summary>
@@ -225,7 +252,7 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
         </div>
       </details>
 
-      {!compact && toolbar}
+      {toolbar}
 
       <div className="stage">
       {data.kind === "loading" ? (
@@ -273,7 +300,6 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
         />
       )}
       </div>
-      {compact && toolbar}
 
       <div className="band-legend" role="group" aria-label="Legend">
         <span>

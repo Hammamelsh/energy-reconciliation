@@ -21,14 +21,14 @@ const YearSection = lazy(() => import("./components/terrain/YearSection").then((
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
-/** The measured answer, from the export's charge peak: the label with the largest exact
- * pooled charge, stated as a timestamp label rather than as clock time. */
-function peakSentence(bundle: Bundle): string {
+/** The export's charge peak: the label with the largest exact pooled charge, stated as a
+ * timestamp label rather than as clock time, with its display-rounded amount. */
+function peakLine(bundle: Bundle): string {
   const p = bundle.terrain.peaks.charge;
   if (!p) return "No half-hour label holds a charged reading.";
   const day = Number(p.date.slice(8, 10));
   const month = MONTHS[Number(p.date.slice(5, 7)) - 1] ?? p.date.slice(5, 7);
-  return `The highest single timestamp label was ${day} ${month} at ${p.slot_label}: ${money(p.charge.display)} across ${p.households} of the ${bundle.terrain.totals.households} households.`;
+  return `Peak timestamp label: ${day} ${month}, ${p.slot_label}. ${money(p.charge.display)} across ${p.households} of the ${bundle.terrain.totals.households} households.`;
 }
 
 /** The High band's two shares, with their denominators named. */
@@ -81,10 +81,10 @@ function Logo() {
   );
 }
 
-function Reveal({ children, id, title, sub }: { children: React.ReactNode; id: string; title: string; sub?: string }) {
+function Reveal({ children, id, title, sub, compact = false }: { children: React.ReactNode; id: string; title: React.ReactNode; sub?: string; compact?: boolean }) {
   const [ref, seen] = useInView<HTMLElement>();
   return (
-    <section className={`block reveal ${seen ? "in" : ""}`} id={id} ref={ref}>
+    <section className={`block reveal ${seen ? "in" : ""}${compact ? " compact" : ""}`} id={id} ref={ref}>
       <div className="wrap">
         <h2>{title}</h2>
         {sub && <p className="sub">{sub}</p>}
@@ -124,15 +124,18 @@ export function Page({ loaded }: { loaded: Loaded }) {
   // sentence is built from the counts, so it can only say what the bundle holds.
   const hc = highConcentration(bundle.hour_bands);
   const year = bundle.schedule.first_date?.slice(0, 4) ?? "2013";
-  const highHours = hc
-    ? `Across ${year}, High-labelled half-hours ${hc.everyHour ? "appeared in every clock-hour label" : "did not appear in every clock-hour label"}. Of the schedule's ${hc.total} High-labelled half-hours, ${hc.slots} (${hc.sharePct}%) were labelled from ${labelRange(hc)}.`
+  const hourStatement = hc
+    ? `${hc.slots} of the schedule's ${hc.total} High-labelled half-hours, ${hc.sharePct}%, had timestamp labels from ${labelRange(hc)}.`
     : "The schedule's High-labelled half-hours are not summarised here.";
+  const hourDetail = hc
+    ? `The dynamic schedule announced each day's bands a day ahead. High-labelled half-hours ${hc.everyHour ? "appeared in every clock-hour label across the year" : "did not appear in every clock-hour label"}. These are timestamp labels as written; no timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours, a coincidence of timing in this data. No behavioural response is measured.`
+    : "";
   const steps: TourStep[] = [
     { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
-    { id: "year", title: "One year", text: `The year, priced half-hour by half-hour. High-price half-hours accounted for ${highBand(bundle)}. ${peakSentence(bundle)}` },
-    { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
+    { id: "year", title: "One year", text: `${year}, half-hour by half-hour. High-price half-hours: ${highBand(bundle)}. ${peakLine(bundle)}` },
+    { id: "hours", title: "The hours", text: `${hourStatement} No timezone or interval convention is applied. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
   ];
@@ -277,18 +280,24 @@ export function Page({ loaded }: { loaded: Loaded }) {
 
         <Reveal
           id="year"
-          title="The year, priced half-hour by half-hour"
-          sub={`High-price half-hours accounted for ${highBand(bundle)}. ${peakSentence(bundle)}`}
+          title={
+            <>
+              {bundle.terrain.grid.first_date.slice(0, 4)}, <span className="nobreak">half-hour</span> by <span className="nobreak">half-hour</span>
+            </>
+          }
+          sub={peakLine(bundle)}
         >
           <Year bundle={bundle} loaded={loaded} />
         </Reveal>
 
-        <Reveal
-          id="hours"
-          title="Where the expensive half hours were"
-          sub={`The dynamic schedule announced each day's bands a day ahead. ${highHours} No timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours: a coincidence of timing in this data. No behavioural response is measured.`}
-        >
-          <HourRibbon hourBands={bundle.hour_bands} />
+        <Reveal id="hours" title="Label hours" sub={hourStatement} compact>
+          <details className="evidence">
+            <summary>Explore the label-hour pattern</summary>
+            <div className="body">
+              <HourRibbon hourBands={bundle.hour_bands} />
+              <p className="hint">{hourDetail}</p>
+            </div>
+          </details>
         </Reveal>
 
         <Reveal

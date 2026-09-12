@@ -492,6 +492,9 @@ section.block h2 {
   margin: 0 0 8px;
   max-width: 24ch;
 }
+.nobreak {
+  white-space: nowrap;
+}
 .sub {
   color: var(--muted);
   max-width: 68ch;
@@ -1295,9 +1298,46 @@ footer ul {
   box-shadow: var(--shadow);
 }
 .year-lead {
-  margin: 0 0 10px;
+  margin: 0 0 4px;
   color: var(--muted);
   font-size: 14px;
+}
+.year-note {
+  margin: 0 0 10px;
+  color: var(--dim);
+  font-size: 13px;
+}
+/* a small disclosure for the secondary control on phones */
+.instrument details.map-options {
+  margin: 0 0 10px;
+}
+.instrument details.map-options summary {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.instrument details.map-options .body {
+  padding: 0 12px 10px;
+}
+/* the condensed evidence section: the statement is the point, the chart is behind a summary */
+section.block.compact h2 {
+  font-size: 1.2rem;
+  margin: 0 0 4px;
+}
+section.block.compact .sub {
+  margin: 0 0 14px;
+}
+details.evidence .body {
+  padding-top: 10px;
+}
+/* the transition into the year: separated by the line, not by empty space */
+#households {
+  padding-bottom: 40px;
+}
+#year {
+  padding-top: 40px;
+}
+#hours {
+  padding: 36px 0 40px;
 }
 /* the compact takeaway: two proportions on the same 0 to 100% track */
 .takeaway {
@@ -1354,9 +1394,6 @@ footer ul {
   }
   .takeaway-row .track {
     height: 8px;
-  }
-  .instrument-bar {
-    margin: 12px 0 0;
   }
 }
 /* one stage for either view, so switching or loading the 3D scene does not move the page */
@@ -1606,8 +1643,21 @@ footer ul {
     padding: 14px;
   }
   .instrument .seg button {
-    padding: 6px 9px;
-    font-size: 12.5px;
+    padding: 9px 12px;
+    font-size: 14px;
+    min-height: 40px;
+  }
+  .instrument-bar {
+    margin: 0 0 10px;
+  }
+  #households {
+    padding-bottom: 28px;
+  }
+  #year {
+    padding-top: 28px;
+  }
+  #hours {
+    padding: 28px 0 32px;
   }
   .terrain-3d .views {
     right: 6px;

@@ -53,20 +53,25 @@ describe("the year section", () => {
   it("introduces the terrain from the verified bundle and, without WebGL, shows the flat map with every cell readable by keyboard", async () => {
     stubFetch(terrainBytes);
     const bundle = await renderPage();
-    expect(screen.getByRole("heading", { name: "The year, priced half-hour by half-hour" })).toBeInTheDocument();
-    // the takeaway leads, the peak follows as a timestamp label, and the visible copy names A1 alone
+    expect(screen.getByRole("heading", { name: "2013, half-hour by half-hour" })).toBeInTheDocument();
+    // the peak line is the only paragraph under the heading; the comparison bars carry the shares
     const sub = document.querySelector("#year .sub")!;
-    expect(sub).toHaveTextContent("High-price half-hours accounted for 4.9% of included electricity and 24.1% of the calculated energy charge.");
-    expect(sub).toHaveTextContent("The highest single timestamp label was 17 March at 19:30: £7.43 across 26 of the 27 households.");
-    expect(sub.textContent).not.toMatch(/A2|—|–/);
+    expect(sub).toHaveTextContent("Peak timestamp label: 17 March, 19:30. £7.43 across 26 of the 27 households.");
+    expect(sub.textContent).not.toMatch(/4\.9%|24\.1%|A2|—|–/);
+    // the condensed hours evidence: a statement, then a disclosure holding the chart
+    expect(screen.getByRole("heading", { name: "Label hours" })).toBeInTheDocument();
+    expect(document.querySelector("#hours .sub")).toHaveTextContent("408 of the schedule's 788 High-labelled half-hours, 51.8%, had timestamp labels from 17:00 to 22:59.");
+    const evidence = screen.getByText("Explore the label-hour pattern").closest("details")!;
+    expect(evidence).not.toHaveAttribute("open");
+    expect(within(evidence).getByRole("img", { name: /Schedule High-band half hours by hour of the timestamp label/ })).toBeInTheDocument();
     const map = await screen.findByRole("application", { name: /Flat map of 365 date labels by 48 half-hour labels/ }, { timeout: 8000 });
     // the takeaway names both denominators; the coverage range stays visible; totals move into the disclosure
     expect(screen.getByRole("img", { name: "High-price half-hours: 4.9% of included electricity, 24.1% of calculated energy charge." })).toBeInTheDocument();
     const lead = document.querySelector(".year-lead")!;
     expect(lead).toHaveTextContent("Each cell represents one half-hour timestamp label in 2013. Brightness shows the amount. Colour shows its tariff band.");
-    expect(lead).toHaveTextContent(`${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} of the ${bundle.terrain.totals.households} households`);
-    expect(lead).toHaveTextContent("Historical scenario under assumption A1, not a bill.");
-    expect(lead.textContent).not.toMatch(/exactly|A2|—|–/);
+    const note = document.querySelector(".year-note")!;
+    expect(note).toHaveTextContent(`${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} households per cell. Historical scenario under A1, not a bill.`);
+    expect(`${lead.textContent}${note.textContent}`).not.toMatch(/exactly|A2|—|–/);
     const how = screen.getByText("How to read this map").closest("details")!;
     expect(how).toHaveTextContent("Assumption A2, the documented flat price, belongs only to the dynamic-versus-flat comparison");
     // the £7.43 is a display value; the unrounded pooled charge sits in the evidence
@@ -140,6 +145,14 @@ describe("the year section", () => {
     stubFetch(terrainBytes);
     await renderPage();
     const map = await screen.findByRole("application", { name: /Flat map/ }, { timeout: 8000 });
+    // measure and view come before the map; the band highlight waits behind "Map options"
+    const bar = screen.getByRole("toolbar", { name: "Map controls" });
+    expect(bar.compareDocumentPosition(map) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(bar).getByRole("group", { name: "Which map to show" })).toBeInTheDocument();
+    expect(within(bar).getByRole("group", { name: "View" })).toBeInTheDocument();
+    expect(within(bar).queryByRole("group", { name: "Highlight one band" })).toBeNull();
+    const options = screen.getByText("Map options").closest("details")!;
+    expect(within(options).getByRole("group", { name: "Highlight one band" })).toBeInTheDocument();
     // one map, the charge map by default, with its own unit and scale stated
     expect(document.querySelectorAll(".carpet")).toHaveLength(1);
     expect(screen.getByText("Calculated energy charge, £")).toBeInTheDocument();
@@ -149,7 +162,7 @@ describe("the year section", () => {
     const readout = document.getElementById("year-readout")!;
     expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);
     const show = screen.getByRole("group", { name: "Which map to show" });
-    await userEvent.click(within(show).getByRole("button", { name: "Electricity, kWh" }));
+    await userEvent.click(within(show).getByRole("button", { name: "Electricity" }));
     expect(document.querySelectorAll(".carpet")).toHaveLength(1);
     expect(screen.getByText("Included electricity, kWh")).toBeInTheDocument();
     expect(screen.getByText(/0 to 14\.353 kWh per half hour, pooled/)).toBeInTheDocument();
