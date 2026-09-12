@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import hashlib
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 import duckdb
@@ -860,3 +860,19 @@ def test_no_scenario_yet_reports_none(tmp_path):
     body = HEADER + row("MAC000001", "ToU", "2013-01-01 00:30:00.0000000", " 1 ")
     database = load(tmp_path, body)
     assert ta.latest_run(database) is None
+
+
+def test_share_percent_rounds_once_from_the_exact_values():
+    """The Normal band's charge share: 8505.52… of 11675.43… is 72.8497%, which is 72.8%
+    when rounded once. Rounding the four-place share (0.7285) again gives 72.9%, which is
+    the defect this helper exists to prevent."""
+    part = Decimal("8505.5227817414400000")
+    whole = Decimal("11675.4339216532500000")
+    assert ta.share_percent(part, whole) == Decimal("72.8")
+    twice = (ta.round_share(part / whole) * 100).quantize(
+        Decimal("0.1"), rounding=ROUND_HALF_UP
+    )
+    assert twice == Decimal("72.9")
+    assert ta.share_percent(Decimal(1), Decimal(0)) is None
+    assert ta.share_percent(Decimal("0.0005"), Decimal(1)) == Decimal("0.1")
+    assert ta.share_percent(part, whole, places=2) == Decimal("72.85")

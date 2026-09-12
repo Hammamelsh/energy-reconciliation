@@ -535,3 +535,55 @@ def test_dataset_label_distinguishes_demo_from_real(tmp_path):
         tmp_path, [("DEMO0001", "Std", "2013-01-01 00:00:00.0000000", " 0.1 ")]
     )
     assert q.dataset_label(demo).startswith("Synthetic demo")
+
+
+def test_band_share_labels_are_rounded_once_from_the_exact_values():
+    """The chart labels and the table beneath it must not round the frame's four-place share a
+    second time: 72.8497% is 72.8%, not 72.9%."""
+    import pandas as pd
+
+    from energy_reconciliation.explorer import charts
+    from energy_reconciliation.tariff import analytics as ta
+
+    bands = pd.DataFrame(
+        [
+            {
+                "band_label": "Normal",
+                "readings": 392515,
+                "households": 27,
+                "kwh_exact": "72325.8739944000",
+                "kwh_display": 72325.874,
+                "charge_gbp_exact": "8505.5227817414400000",
+                "charge_gbp_display": 8505.52,
+                "price_pence_per_kwh": 11.76,
+                "consumption_share": 0.8462,
+                "charge_share": 0.7285,
+            },
+            {
+                "band_label": "Other",
+                "readings": 63581,
+                "households": 27,
+                "kwh_exact": "13141.2590024000",
+                "kwh_display": 13141.259,
+                "charge_gbp_exact": "3169.9111399118100000",
+                "charge_gbp_display": 3169.91,
+                "price_pence_per_kwh": 0.0,
+                "consumption_share": 0.1538,
+                "charge_share": 0.2715,
+            },
+        ]
+    )
+    frame = charts.share_frame(bands)
+    labels = dict(
+        zip(
+            zip(frame["band_label"], frame["series"], strict=True),
+            frame["share_label"],
+            strict=True,
+        )
+    )
+    assert labels[("Normal", charts.CHARGE_SERIES)] == "72.8%"
+    assert labels[("Normal", charts.CONSUMPTION_SERIES)] == "84.6%"
+    assert charts.share_label(Decimal(1), Decimal(0)) == "n/a"
+    assert ta.share_percent(
+        Decimal("8505.5227817414400000"), Decimal("11675.4339216532500000")
+    ) == Decimal("72.8")

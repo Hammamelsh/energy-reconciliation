@@ -178,16 +178,24 @@ def _hour_band_ribbons(context: reads.ReadContext) -> dict[str, Any]:
     }
 
 
-def _share(value: Any) -> float:
-    """A share in [0, 1] from the analytics frame, shown to one decimal of a percent."""
-    return float(
-        (Decimal(str(value)) * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
-    )
+def _share_pct(part: str, whole: Decimal) -> float | None:
+    """A share shown to one decimal of a percent, rounded once from the exact values.
+
+    The analytics frame also carries ``consumption_share`` and ``charge_share`` rounded to
+    four places; rounding those again is a second rounding (72.8497% became 72.9%), so
+    they are not used here.
+    """
+    pct = ta.share_percent(Decimal(part), whole)
+    return None if pct is None else float(pct)
 
 
 def _bands(frame) -> list[dict[str, Any]]:
+    rows = frame.to_dict(orient="records")
+    # The denominators are the same rows the bands partition, summed exactly.
+    kwh_total = sum((Decimal(r["kwh_exact"]) for r in rows), Decimal(0))
+    charge_total = sum((Decimal(r["charge_gbp_exact"]) for r in rows), Decimal(0))
     out = []
-    for r in frame.to_dict(orient="records"):
+    for r in rows:
         out.append(
             {
                 "band": r["band_label"],
@@ -195,8 +203,8 @@ def _bands(frame) -> list[dict[str, Any]]:
                 "charged_readings": int(r["readings"]),
                 "kwh": _energy(r["kwh_exact"]),
                 "charge": _money(r["charge_gbp_exact"]),
-                "consumption_share_pct": _share(r["consumption_share"]),
-                "charge_share_pct": _share(r["charge_share"]),
+                "consumption_share_pct": _share_pct(r["kwh_exact"], kwh_total),
+                "charge_share_pct": _share_pct(r["charge_gbp_exact"], charge_total),
             }
         )
     return out

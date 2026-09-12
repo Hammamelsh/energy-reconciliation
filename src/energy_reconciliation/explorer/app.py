@@ -118,7 +118,13 @@ def fmt_reason_table(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def fmt_band_table(bands: pd.DataFrame) -> pd.DataFrame:
-    """The accessible table beneath the share chart: same numbers, as text."""
+    """The accessible table beneath the share chart: same numbers, as text.
+
+    Shares are rounded once from the exact kWh and charge of these rows; the frame's
+    four-place ``consumption_share`` and ``charge_share`` are not rounded a second time.
+    """
+    kwh_total = sum((Decimal(v) for v in bands["kwh_exact"]), Decimal(0))
+    charge_total = sum((Decimal(v) for v in bands["charge_gbp_exact"]), Decimal(0))
     return pd.DataFrame(
         {
             "Band": bands["band_label"],
@@ -126,8 +132,13 @@ def fmt_band_table(bands: pd.DataFrame) -> pd.DataFrame:
             "Charged readings": [fmt_count(v) for v in bands["readings"]],
             "Charged kWh": [fmt_kwh(v) for v in bands["kwh_display"]],
             "Scenario charge": [fmt_gbp(v) for v in bands["charge_gbp_display"]],
-            "Consumption share": [fmt_pct(v) for v in bands["consumption_share"]],
-            "Charge share": [fmt_pct(v) for v in bands["charge_share"]],
+            "Consumption share": [
+                charts.share_label(Decimal(v), kwh_total) for v in bands["kwh_exact"]
+            ],
+            "Charge share": [
+                charts.share_label(Decimal(v), charge_total)
+                for v in bands["charge_gbp_exact"]
+            ],
         }
     )
 
@@ -153,7 +164,10 @@ def fmt_schedule_table(totals: pd.DataFrame) -> pd.DataFrame:
             "Band": totals["band_label"],
             "Half-hour slots": [fmt_count(v) for v in totals["slots"]],
             "Hours": [f"{float(v):,.1f}" for v in totals["hours"]],
-            "Share of schedule": [fmt_pct(v) for v in totals["slot_share"]],
+            "Share of schedule": [
+                charts.share_label(Decimal(int(v)), Decimal(int(totals["slots"].sum())))
+                for v in totals["slots"]
+            ],
         }
     )
 

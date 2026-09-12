@@ -167,6 +167,20 @@ def round_share(value: Decimal) -> Decimal:
     return value.quantize(SHARE_DP, rounding=ROUND_HALF_UP)
 
 
+def share_percent(part: Decimal, whole: Decimal, places: int = 1) -> Decimal | None:
+    """``part / whole`` as a percentage, rounded once, half up, to ``places`` decimals.
+
+    Display code must call this with the exact values, never with a share that
+    ``round_share`` has already rounded to four places: rounding that share again
+    moves 72.8497% to 72.9% where a single rounding gives 72.8%. ``None`` when
+    ``whole`` is zero, because the share is undefined, not zero.
+    """
+    if whole == 0:
+        return None
+    quantum = Decimal(1).scaleb(-places)
+    return (part / whole * 100).quantize(quantum, rounding=ROUND_HALF_UP)
+
+
 @dataclass(frozen=True, slots=True)
 class RunRecord:
     run_id: str

@@ -6,8 +6,12 @@ encodings the UI uses -- in particular that a withheld day never becomes a bar.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import altair as alt
 import pandas as pd
+
+from energy_reconciliation.tariff import analytics as ta
 
 TEAL, AMBER, RED, GREY = "#2bb3a3", "#d98c1f", "#d64545", "#6b7a90"
 
@@ -235,6 +239,12 @@ LABEL_SIZE = 12
 AXIS_TITLE_SIZE = 12
 
 
+def share_label(part: Decimal, whole: Decimal) -> str:
+    """A share as text, rounded once from the exact values (see analytics.share_percent)."""
+    pct = ta.share_percent(part, whole)
+    return "n/a" if pct is None else f"{pct}%"
+
+
 def share_frame(bands: pd.DataFrame) -> pd.DataFrame:
     """Long form of the two shares: one row per band per series.
 
@@ -243,9 +253,11 @@ def share_frame(bands: pd.DataFrame) -> pd.DataFrame:
     share of another.
     """
     rows = []
-    for series, column in (
-        (CONSUMPTION_SERIES, "consumption_share"),
-        (CHARGE_SERIES, "charge_share"),
+    kwh_total = sum((Decimal(v) for v in bands["kwh_exact"]), Decimal(0))
+    charge_total = sum((Decimal(v) for v in bands["charge_gbp_exact"]), Decimal(0))
+    for series, column, exact, total in (
+        (CONSUMPTION_SERIES, "consumption_share", "kwh_exact", kwh_total),
+        (CHARGE_SERIES, "charge_share", "charge_gbp_exact", charge_total),
     ):
         for _, band in bands.iterrows():
             rows.append(
@@ -253,7 +265,7 @@ def share_frame(bands: pd.DataFrame) -> pd.DataFrame:
                     "band_label": band["band_label"],
                     "series": series,
                     "share": float(band[column]),
-                    "share_label": f"{float(band[column]):.1%}",
+                    "share_label": share_label(Decimal(band[exact]), total),
                     "readings": int(band["readings"]),
                     "kwh_display": float(band["kwh_display"]),
                     "charge_gbp_display": float(band["charge_gbp_display"]),

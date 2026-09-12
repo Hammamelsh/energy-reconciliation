@@ -349,3 +349,39 @@ def test_the_committed_public_bundle_obeys_the_same_rules_and_its_manifest():
     )
     size = (where / pres.BUNDLE_NAME).stat().st_size
     assert size < 400_000, f"the public bundle is {size:,} bytes; it should stay small"
+
+
+def test_band_shares_are_rounded_once_from_the_exact_values():
+    """A frame shaped like ``band_summary`` with the published totals: the Normal charge share
+    must read 72.8, not the 72.9 that a second rounding of the four-place share produced."""
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        [
+            {
+                "band_label": band,
+                "readings": readings,
+                "households": 27,
+                "kwh_exact": kwh,
+                "charge_gbp_exact": charge,
+                "price_pence_per_kwh": price,
+                "consumption_share": float(
+                    ta.round_share(Decimal(kwh) / Decimal("85467.1329968000"))
+                ),
+                "charge_share": float(
+                    ta.round_share(Decimal(charge) / Decimal("11675.4339216532500000"))
+                ),
+            }
+            for band, readings, kwh, charge, price in (
+                ("Low", 43081, "8955.8850019000", "357.3398115758100000", 3.99),
+                ("Normal", 392515, "72325.8739944000", "8505.5227817414400000", 11.76),
+                ("High", 20500, "4185.3740005000", "2812.5713283360000000", 67.2),
+            )
+        ]
+    )
+    assert (
+        frame.loc[1, "charge_share"] == 0.7285
+    )  # the four-place share that used to be re-rounded
+    bands = pres._bands(frame)
+    assert [b["charge_share_pct"] for b in bands] == [3.1, 72.8, 24.1]
+    assert [b["consumption_share_pct"] for b in bands] == [10.5, 84.6, 4.9]
