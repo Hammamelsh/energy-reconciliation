@@ -70,7 +70,6 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
   }, [terrain, focus, mode]);
 
   const year = s.grid.first_date.slice(0, 4);
-  const shares = high ? `${high.consumption_share_pct}% of the electricity and ${high.charge_share_pct}% of the charge` : null;
   // The single-map choice on a narrow screen also sets what the 3D height shows, so the
   // selected cell and the "tallest half hour" readout carry across views.
   const pickSingle = (c: Carpet) => {
@@ -78,43 +77,9 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
     if (c !== "coverage") setMode(c);
   };
 
-  return (
-    <div ref={ref} className="instrument year" data-reduced-motion={reduced ? "true" : "false"}>
-      <p className="year-lead">
-        Together the cells hold {energy(s.totals.kwh.display)} and {money(s.totals.charge.display)}, the comparison's dynamic
-        total (display totals, rounded once; full precision under the month table). {shares && <>The High band is {shares}.</>}
-      </p>
-      <details className="year-how">
-        <summary>How to read this map</summary>
-        <div className="body">
-          <p>
-            <b>Cells.</b> One cell per half-hour timestamp label of {year}: {integer(s.grid.cells)} cells, {integer(s.grid.dates)}{" "}
-            date labels down the side by {s.grid.slots} labels across the day. A cell pools the charged readings of the households
-            present in it, {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of the {s.totals.households}; a
-            brightness or height also moves when that coverage changes, not only when recorded usage does. A cell with no charged
-            reading is empty, not zero.
-          </p>
-          <p>
-            <b>Colour and brightness.</b> Colour is the band the schedule assigned to that half hour: Low, Normal or High. Brightness
-            on the flat map, or height in 3D, is the electricity recorded in the cell in kWh, or its cost under the dynamic
-            scenario in pounds. Each map has its own zero-based scale, stated beneath it with its maximum; the two maps are
-            not on a shared scale.
-          </p>
-          <p>
-            <b>Rounding.</b> Cell values are rounded once in the export, kWh to three decimal places and charge to two, and are
-            never added in the browser. Totals on this page are display values; the export's full-precision totals, reconciled
-            against the comparison before the file was written, appear under the month table.
-          </p>
-          {terrain && (
-            <ul className="caveats">
-              {terrain.caveats.map((c) => (
-                <li key={c}>{c}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </details>
-
+  // Measure, band highlight and view are the primary controls; camera and zoom live inside
+  // the 3D panel. On a phone the controls follow the map, so the picture comes first.
+  const toolbar = (
       <div className="instrument-bar" role="toolbar" aria-label="Map controls">
         {show3d ? (
           <span className="ctl">
@@ -182,14 +147,86 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
           </span>
         )}
       </div>
-      {unavailable && (
-        <p className="hint" role="status">
-          The 3D view is not available here: {unavailable}. The flat map shows the same cells.
-        </p>
-      )}
+  );
 
+  return (
+    <div ref={ref} className="instrument year" data-reduced-motion={reduced ? "true" : "false"}>
+      {high && (
+        <div
+          className="takeaway"
+          role="img"
+          aria-label={`High-price half-hours: ${high.consumption_share_pct}% of included electricity, ${high.charge_share_pct}% of calculated energy charge.`}
+        >
+          <div className="takeaway-title">High-price half-hours</div>
+          <div className="takeaway-row">
+            <span>of included electricity</span>
+            <div className="track">
+              <i style={{ width: `${high.consumption_share_pct}%` }} />
+            </div>
+            <b>{high.consumption_share_pct}%</b>
+          </div>
+          <div className="takeaway-row">
+            <span>of calculated energy charge</span>
+            <div className="track">
+              <i style={{ width: `${high.charge_share_pct}%` }} />
+            </div>
+            <b>{high.charge_share_pct}%</b>
+          </div>
+        </div>
+      )}
+      <p className="year-lead">
+        Cells pool the charged readings of {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of the{" "}
+        {s.totals.households} households on the dynamic tariff.
+      </p>
+      <details className="year-how">
+        <summary>How to read this map</summary>
+        <div className="body">
+          <p>
+            <b>Cells and coverage.</b> One cell per half-hour timestamp label of {year}: {integer(s.grid.cells)} cells,{" "}
+            {integer(s.grid.dates)} date labels down the side by {s.grid.slots} labels across the day. A cell pools the charged
+            readings of the households present in it, {s.coverage.households_per_cell_min} to {s.coverage.households_per_cell_max} of
+            the {s.totals.households}; a brightness or height also moves when that coverage changes, not only when recorded usage
+            does. A cell with no charged reading is empty, not zero.
+          </p>
+          <p>
+            <b>Included electricity, calculated charge.</b> "Included" means the readings the dynamic scenario charged: time-of-use
+            households' readings inside the 2013 schedule that carry a value and a schedule label. The charge is that reading's
+            kWh times the band price the schedule assigned, under assumption A1 (a reading's timestamp label and the schedule label
+            denote the same half hour). Assumption A2, the documented flat price, belongs only to the dynamic-versus-flat comparison
+            elsewhere on this page; it does not shape these maps.
+          </p>
+          <p>
+            <b>Brightness and colour.</b> Brightness on the flat map, or height in 3D, is the amount in the cell on a linear,
+            zero-based scale, stated beneath each map with its maximum; the two maps are not on a shared scale. Colour is the band
+            the schedule assigned to that half hour: Low, Normal or High. These band colours differ from the lime and ember used
+            elsewhere for a lower or higher outcome.
+          </p>
+          <p>
+            <b>Rounding and totals.</b> Cell values are rounded once in the export, kWh to three decimal places and charge to two,
+            and are never added in the browser. Together the cells hold {energy(s.totals.kwh.display)} and{" "}
+            {money(s.totals.charge.display)} as display totals; the export's full-precision totals, reconciled against the comparison
+            before the file was written, appear under the month table.
+          </p>
+          <p>
+            <b>Reading a cell.</b> Hover, tap or use the arrow keys; the readout beneath the map states the cell's label, kWh,
+            households, band, price and charge. Page Up and Page Down move a week; Home and End reach the first and last half hour
+            of the day.
+          </p>
+          {terrain && (
+            <ul className="caveats">
+              {terrain.caveats.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </details>
+
+      {!compact && toolbar}
+
+      <div className="stage">
       {data.kind === "loading" ? (
-        <p className="hint" role="status">
+        <p className="hint stage-note" role="status">
           Loading the terrain file and checking its digest…
         </p>
       ) : data.kind === "error" ? (
@@ -200,7 +237,7 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
       ) : show3d ? (
         <Suspense
           fallback={
-            <p className="hint" role="status">
+            <p className="hint stage-note" role="status">
               Loading the 3D scene…
             </p>
           }
@@ -232,6 +269,8 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
           large={large && !compact}
         />
       )}
+      </div>
+      {compact && toolbar}
 
       <div className="band-legend" role="group" aria-label="Legend">
         <span>
@@ -243,12 +282,17 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
         <span>
           <i style={{ background: BAND_HEX.High }} className="sw high" /> High, 67.20p (striped in 3D when zoomed)
         </span>
-        <span className="dimtext">brighter is more; band colours differ from the lime and ember used for lower and higher outcomes</span>
+        <span className="dimtext">Brightness shows amount. Colour shows tariff band.</span>
       </div>
 
       <p className="readout" id="year-readout" aria-live="polite">
         {readout ?? "Cell readout appears here once the terrain has loaded."}
       </p>
+      {unavailable && (
+        <p className="hint" role="status">
+          The 3D view is not available here: {unavailable}. The flat map shows the same cells.
+        </p>
+      )}
 
       {terrain && (
         <details>

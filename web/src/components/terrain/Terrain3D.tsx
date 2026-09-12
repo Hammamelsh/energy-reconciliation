@@ -9,7 +9,20 @@ type Overlay = {
   slots: { x: number; y: number; label: string }[];
   bar: { x0: number; y0: number; x1: number; y1: number; ticks: { x: number; y: number; label: string }[] } | null;
   peak: { x: number; y: number; label: string; detail: string } | null;
+  /** The selected cell's top, when it is in view: a neutral marker the colours cannot be confused with. */
+  sel: { x: number; y: number } | null;
+  size: { w: number; h: number };
 };
+
+/** Keep a two-line annotation inside the canvas: flip it to the left near the right edge,
+ * and hold it below the top edge. */
+function placeLabel(x: number, y: number, longest: string, w: number, h: number) {
+  const est = longest.length * 6.6 + 12;
+  const right = x + 30 + est <= w - 4;
+  const tx = right ? x + 30 : x - 30;
+  const ty = Math.max(18, Math.min(h - 8, y - 38));
+  return { tx, ty, anchor: (right ? "start" : "end") as "start" | "end", lx: right ? x + 26 : x - 26, ly: ty + 4 };
+}
 
 const SLOT_TICKS = [0, 12, 24, 36, 48];
 const VIEWS: { key: ViewPreset; label: string }[] = [
@@ -56,9 +69,12 @@ export default function Terrain3D({
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [dragging, setDragging] = useState(false);
   const modeRef = useRef(mode);
+  const cursorRef = useRef(cursor);
+  const computeRef = useRef<(() => void) | null>(null);
   const unavailable = useRef(onUnavailable);
   useEffect(() => {
     modeRef.current = mode;
+    cursorRef.current = cursor;
     unavailable.current = onUnavailable;
   });
 
@@ -122,15 +138,25 @@ export default function Terrain3D({
         const v = mode === "kwh" ? pk.kwh.display : pk.charge.display;
         const p = h.project(xOf(pk.slot) + 0.5, (v / max) * HMAX, zOf(di) + 0.5);
         const value = mode === "kwh" ? `${pk.kwh.display} kWh` : `£${pk.charge.display.toFixed(2)}`;
-        peak = {
+        // when the peak is outside the view (a zoom on another cell), no annotation floats off it
+        if (p.visible) peak = {
           x: p.x,
           y: p.y,
           label: `${value} in one half hour`,
           detail: `${pk.date}, ${pk.slot_label} label, ${pk.band} band, ${pk.households} households`,
         };
       }
-      setOverlay({ months, slots, bar, peak });
+      let sel: Overlay["sel"] = null;
+      const ci = cursorRef.current;
+      if (ci !== null) {
+        const c = cellAt(terrain, ci);
+        const v = (mode === "kwh" ? c.kwh : c.charge) ?? 0;
+        const p = h.project(xOf(c.slot) + 0.5, (v / max) * HMAX, zOf(c.dateIndex) + 0.5);
+        if (p.visible) sel = { x: p.x, y: p.y };
+      }
+      setOverlay({ months, slots, bar, peak, sel, size: { w: canvas.clientWidth || 800, h: canvas.clientHeight || 400 } });
     };
+    computeRef.current = compute;
     h.onCamera(compute);
     const ro = new ResizeObserver(() => h.resize());
     ro.observe(canvas);
@@ -148,9 +174,12 @@ export default function Terrain3D({
     handle.current?.resize();
   }, [mode, reducedMotion]);
   useEffect(() => handle.current?.setHighlight(highlight), [highlight]);
-  useEffect(() => handle.current?.setCursor(cursor), [cursor]);
+  useEffect(() => {
+    handle.current?.setCursor(cursor);
+    computeRef.current?.();
+  }, [cursor]);
   useEffect(() => handle.current?.setHover(hover), [hover]);
-  useEffect(() => handle.current?.setView(view), [view]);
+  useEffect(() => handle.current?.setView(view, !reducedMotion), [view, reducedMotion]);
   useEffect(() => handle.current?.setZoom(zoom), [zoom]);
 
   const local = (e: PointerEvent<HTMLCanvasElement>) => {
@@ -244,14 +273,27 @@ export default function Terrain3D({
               {s.label}
             </text>
           ))}
-          {overlay.peak && (
-            <g className="peak">
-              <line x1={overlay.peak.x} y1={overlay.peak.y} x2={overlay.peak.x + 26} y2={overlay.peak.y - 34} />
-              <text x={overlay.peak.x + 30} y={overlay.peak.y - 38} className="peak-value">
-                {overlay.peak.label}
-              </text>
-              <text x={overlay.peak.x + 30} y={overlay.peak.y - 24}>
-                {overlay.peak.detail}
+          {overlay.peak &&
+            (() => {
+              const l = placeLabel(overlay.peak.x, overlay.peak.y, overlay.peak.detail, overlay.size.w, overlay.size.h);
+              return (
+                <g className="peak">
+                  <line x1={overlay.peak.x} y1={overlay.peak.y} x2={l.lx} y2={l.ly} />
+                  <text x={l.tx} y={l.ty} textAnchor={l.anchor} className="peak-value">
+                    {overlay.peak.label}
+                  </text>
+                  <text x={l.tx} y={l.ty + 14} textAnchor={l.anchor}>
+                    {overlay.peak.detail}
+                  </text>
+                </g>
+              );
+            })()}
+          {overlay.sel && (
+            <g className="sel">
+              <circle cx={overlay.sel.x} cy={overlay.sel.y} r={6} />
+              <line x1={overlay.sel.x} y1={overlay.sel.y + 6} x2={overlay.sel.x} y2={overlay.sel.y + 20} />
+              <text x={overlay.sel.x} y={overlay.sel.y + 32} textAnchor="middle">
+                selected
               </text>
             </g>
           )}

@@ -19,6 +19,24 @@ import { Insight } from "./components/Insight";
 // page carries only this introduction.
 const YearSection = lazy(() => import("./components/terrain/YearSection").then((m) => ({ default: m.YearSection })));
 
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** The measured answer, from the export's charge peak: the label with the largest exact
+ * pooled charge, stated as a timestamp label rather than as clock time. */
+function peakSentence(bundle: Bundle): string {
+  const p = bundle.terrain.peaks.charge;
+  if (!p) return "No half-hour label holds a charged reading.";
+  const day = Number(p.date.slice(8, 10));
+  const month = MONTHS[Number(p.date.slice(5, 7)) - 1] ?? p.date.slice(5, 7);
+  return `The highest single timestamp label was ${day} ${month} at ${p.slot_label}: ${money(p.charge.display)} across ${p.households} of the ${bundle.terrain.totals.households} households.`;
+}
+
+/** The High band's two shares, with their denominators named. */
+function highBand(bundle: Bundle): string {
+  const h = bundle.bands.find((b) => b.band === "High");
+  return h ? `${h.consumption_share_pct}% of the included electricity, ${h.charge_share_pct}% of the calculated energy charge` : "the High band's shares are not available";
+}
+
 function YearLoading({ bundle }: { bundle: Bundle }) {
   const t = bundle.terrain;
   return (
@@ -113,7 +131,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
     { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
-    { id: "year", title: "One year", text: `When were the calculated charges highest? Every half hour of ${year} as one map, each cell pooling 20 to 27 of the ${c.households} households. Compare the electricity map with the charge map and the High-price half hours light up: a small share of the electricity, a large share of the charge.` },
+    { id: "year", title: "One year", text: `When did the calculated energy charge peak? ${peakSentence(bundle)} Compare the electricity map with the charge map and the High-price half hours light up: ${highBand(bundle)}.` },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
@@ -259,8 +277,8 @@ export function Page({ loaded }: { loaded: Loaded }) {
 
         <Reveal
           id="year"
-          title="When were the calculated energy charges highest?"
-          sub={`Each cell pools the charged readings available for one half-hour timestamp label in ${bundle.terrain.grid.first_date.slice(0, 4)}, from ${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} of the ${bundle.terrain.totals.households} households on the dynamic tariff. A historical scenario under assumptions A1 and A2, not a bill. Hover, tap or use the arrow keys to read any cell.`}
+          title="When did the calculated energy charge peak?"
+          sub={`${peakSentence(bundle)} Each cell represents one half-hour label in ${bundle.terrain.grid.first_date.slice(0, 4)}. Brightness shows the amount; colour shows its tariff band. A historical scenario under assumption A1, not a bill.`}
         >
           <Year bundle={bundle} loaded={loaded} />
         </Reveal>

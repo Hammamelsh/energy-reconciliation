@@ -86,6 +86,7 @@ function CarpetView({
         </div>
         <div className="carpet-frame">
           <canvas
+            key={`${carpet}-${highlight}`}
             ref={ref}
             aria-hidden="true"
             onPointerMove={(e) => onHover(locate(e))}
@@ -172,8 +173,8 @@ export function TerrainFlat({
     }
   };
   const common = { terrain, highlight, cursor, hover, onHover, onSelect };
-  const kwh = <CarpetView {...common} carpet="kwh" title="Charged electricity, kWh" scale={`0 to ${terrain.scale.kwh.max} kWh per half hour, pooled`} />;
-  const charge = <CarpetView {...common} carpet="charge" title="Dynamic scenario charge, £" scale={`£0 to £${terrain.scale.charge.max.toFixed(2)} per half hour, pooled`} />;
+  const kwh = <CarpetView {...common} carpet="kwh" title="Included electricity, kWh" scale={`0 to ${terrain.scale.kwh.max} kWh per half hour, pooled`} />;
+  const charge = <CarpetView {...common} carpet="charge" title="Calculated energy charge, £" scale={`£0 to £${terrain.scale.charge.max.toFixed(2)} per half hour, pooled`} />;
   const coverage = (
     <CarpetView
       {...common}

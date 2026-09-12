@@ -53,14 +53,23 @@ describe("the year section", () => {
   it("introduces the terrain from the verified bundle and, without WebGL, shows the flat map with every cell readable by keyboard", async () => {
     stubFetch(terrainBytes);
     const bundle = await renderPage();
-    expect(screen.getByRole("heading", { name: "When were the calculated energy charges highest?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "When did the calculated energy charge peak?" })).toBeInTheDocument();
+    // the answer is the export's charge peak, stated as a timestamp label; the maps are under A1 alone
+    const sub = document.querySelector("#year .sub")!;
+    expect(sub).toHaveTextContent("The highest single timestamp label was 17 March at 19:30: £7.43 across 26 of the 27 households.");
+    expect(sub).toHaveTextContent("under assumption A1, not a bill");
+    expect(sub.textContent).not.toMatch(/A2/);
     const map = await screen.findByRole("application", { name: /Flat map of 365 date labels by 48 half-hour labels/ }, { timeout: 8000 });
-    // the lead states the totals as display values; "exactly" is reserved for the export's full-precision totals
+    // the takeaway names both denominators; the coverage range stays visible; totals move into the disclosure
+    expect(screen.getByRole("img", { name: "High-price half-hours: 4.9% of included electricity, 24.1% of calculated energy charge." })).toBeInTheDocument();
     const lead = document.querySelector(".year-lead")!;
-    expect(lead).toHaveTextContent(`${bundle.terrain.totals.kwh.display.toLocaleString("en-GB", { minimumFractionDigits: 3 })} kWh`);
-    expect(lead).toHaveTextContent("display totals, rounded once");
+    expect(lead).toHaveTextContent(`${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} of the ${bundle.terrain.totals.households} households`);
     expect(lead.textContent).not.toMatch(/exactly/);
-    expect(screen.getByText("How to read this map")).toBeInTheDocument();
+    const how = screen.getByText("How to read this map").closest("details")!;
+    expect(how).toHaveTextContent("Assumption A2, the documented flat price, belongs only to the dynamic-versus-flat comparison");
+    expect(how).toHaveTextContent(`${bundle.terrain.totals.kwh.display.toLocaleString("en-GB", { minimumFractionDigits: 3 })} kWh`);
+    expect(how).toHaveTextContent("differ from the lime and ember");
+    expect(screen.getByText("Brightness shows amount. Colour shows tariff band.")).toBeInTheDocument();
     // the readout opens on the tallest cell of the charge view, from the file's own peaks
     const readout = document.getElementById("year-readout")!;
     await waitFor(() => expect(readout).toHaveTextContent(/Tallest half hour in this view: 2013-03-17, 19:30 label/));
@@ -129,7 +138,7 @@ describe("the year section", () => {
     const map = await screen.findByRole("application", { name: /Flat map/ }, { timeout: 8000 });
     // one map, the charge map by default, with its own unit and scale stated
     expect(document.querySelectorAll(".carpet")).toHaveLength(1);
-    expect(screen.getByText("Dynamic scenario charge, £")).toBeInTheDocument();
+    expect(screen.getByText("Calculated energy charge, £")).toBeInTheDocument();
     expect(screen.getByText(/£0 to £7\.43 per half hour, pooled/)).toBeInTheDocument();
     map.focus();
     await userEvent.keyboard("{ArrowRight}{ArrowDown}");
@@ -138,7 +147,7 @@ describe("the year section", () => {
     const show = screen.getByRole("group", { name: "Which map to show" });
     await userEvent.click(within(show).getByRole("button", { name: "Electricity, kWh" }));
     expect(document.querySelectorAll(".carpet")).toHaveLength(1);
-    expect(screen.getByText("Charged electricity, kWh")).toBeInTheDocument();
+    expect(screen.getByText("Included electricity, kWh")).toBeInTheDocument();
     expect(screen.getByText(/0 to 14\.353 kWh per half hour, pooled/)).toBeInTheDocument();
     // the cell selected on the charge map is still the cell on the electricity map
     expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);

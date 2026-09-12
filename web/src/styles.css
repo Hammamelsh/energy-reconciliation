@@ -1299,6 +1299,93 @@ footer ul {
   color: var(--muted);
   font-size: 14px;
 }
+/* the compact takeaway: two proportions on the same 0 to 100% track */
+.takeaway {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-s);
+  background: var(--bg-2);
+}
+.takeaway-title {
+  font-weight: 700;
+  font-size: 14px;
+}
+.takeaway-row {
+  display: grid;
+  grid-template-columns: 12.5em minmax(0, 1fr) 3.4em;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+.takeaway-row .track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.takeaway-row .track i {
+  display: block;
+  height: 100%;
+  background: var(--ember);
+  border-radius: 999px;
+  transition: width 220ms ease-out;
+}
+.takeaway-row b {
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .takeaway {
+    padding: 8px 10px;
+    gap: 4px;
+  }
+  .takeaway-title {
+    font-size: 13px;
+  }
+  .takeaway-row {
+    grid-template-columns: 11.5em minmax(0, 1fr) 3.2em;
+    gap: 8px;
+    font-size: 12px;
+  }
+  .takeaway-row .track {
+    height: 8px;
+  }
+  .instrument-bar {
+    margin: 12px 0 0;
+  }
+}
+/* one stage for either view, so switching or loading the 3D scene does not move the page */
+.stage {
+  position: relative;
+  min-height: var(--stage-h, 500px);
+}
+.stage-note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+@keyframes stage-in {
+  from {
+    opacity: 0;
+  }
+}
+.stage > .carpets,
+.stage > .terrain-3d,
+.carpet-frame canvas {
+  animation: stage-in 200ms ease-out both;
+}
+.cell-marker.cursor {
+  transition: left 200ms ease-out, top 200ms ease-out;
+}
 .instrument details.year-how {
   margin: 0 0 14px;
 }
@@ -1415,8 +1502,9 @@ footer ul {
   outline: none;
 }
 .carpets:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 4px;
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 .carpet {
   margin: 0;
@@ -1445,11 +1533,14 @@ footer ul {
   font-family: var(--mono);
   line-height: 1;
 }
+.instrument.year {
+  --stage-h: 492px;
+}
 .carpet-frame {
   position: relative;
-  /* 365 date labels in 440px: every cell is drawn (one canvas pixel each); the larger map
+  /* 365 date labels in 424px: every cell is drawn (one canvas pixel each); the larger map
      and the keyboard cursor give single days room. */
-  height: 440px;
+  height: 424px;
   border: 1px solid var(--line);
   background: var(--bg-2);
   grid-row: 1;
@@ -1502,6 +1593,9 @@ footer ul {
   grid-template-columns: minmax(0, 1fr);
 }
 @media (max-width: 700px) {
+  .instrument.year {
+    --stage-h: 468px;
+  }
   .carpets {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1510,6 +1604,19 @@ footer ul {
   }
   .instrument {
     padding: 14px;
+  }
+  .instrument .seg button {
+    padding: 6px 9px;
+    font-size: 12.5px;
+  }
+  .terrain-3d .views {
+    right: 6px;
+    top: 6px;
+    gap: 4px;
+  }
+  .terrain-3d .views button {
+    padding: 4px 7px;
+    font-size: 11.5px;
   }
 }
 
@@ -1520,8 +1627,9 @@ footer ul {
   background: var(--bg-2);
 }
 .terrain-3d:focus-within {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  border-color: var(--dim);
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
 }
 .terrain-3d canvas {
   display: block;
@@ -1589,7 +1697,20 @@ footer ul {
   font-size: 12.5px;
 }
 .terrain-3d canvas {
-  height: clamp(300px, 34vw, 470px);
+  /* the panel's two 1px borders sit inside the reserved stage height */
+  height: calc(var(--stage-h, 500px) - 2px);
+}
+.terrain-3d .overlay .sel circle {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.5;
+}
+.terrain-3d .overlay .sel line {
+  stroke: #fff;
+}
+.terrain-3d .overlay .sel text {
+  fill: #fff;
+  font-size: 10.5px;
 }
 .peak-marker {
   position: absolute;

@@ -114,7 +114,7 @@ export type Handle = {
   setHighlight(h: Highlight): void;
   setCursor(i: number | null): void;
   setHover(i: number | null): void;
-  setView(v: ViewPreset): void;
+  setView(v: ViewPreset, animate?: boolean): void;
   setZoom(z: number): void;
   orbit(dAz: number, dEl: number): void;
   pick(cssX: number, cssY: number): number | null;
@@ -236,6 +236,7 @@ export function createScene(
   };
   let mode: Mode = "charge";
   let animation: number | null = null;
+  let camAnimation: number | null = null;
   const target = () => (mode === "kwh" ? hK : hG);
   apply(target(), target(), 1);
 
@@ -340,7 +341,7 @@ export function createScene(
         return;
       }
       const start = performance.now();
-      const dur = 600;
+      const dur = 240; // a short ease-out: a transition on request, never a show
       const step = (now: number) => {
         const t = Math.min(1, (now - start) / dur);
         const eased = 1 - Math.pow(1 - t, 3);
@@ -365,11 +366,32 @@ export function createScene(
       material.uniforms.uHover.value = i ?? -2;
       requestRender();
     },
-    setView(v) {
-      az = PRESETS[v].az;
-      el = PRESETS[v].el;
-      placeCamera();
-      requestRender();
+    setView(v, animate = false) {
+      const to = PRESETS[v];
+      if (camAnimation !== null) cancelAnimationFrame(camAnimation);
+      camAnimation = null;
+      if (!animate || (to.az === az && to.el === el)) {
+        az = to.az;
+        el = to.el;
+        placeCamera();
+        requestRender();
+        return;
+      }
+      // 220 ms ease-out between presets; frames are rendered only while it runs
+      const fromAz = az;
+      const fromEl = el;
+      const start = performance.now();
+      const dur = 220;
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - t, 3);
+        az = fromAz + (to.az - fromAz) * eased;
+        el = fromEl + (to.el - fromEl) * eased;
+        placeCamera();
+        render();
+        camAnimation = t < 1 ? requestAnimationFrame(step) : null;
+      };
+      camAnimation = requestAnimationFrame(step);
     },
     setZoom(z) {
       zoom = z;
@@ -408,6 +430,7 @@ export function createScene(
     resize,
     dispose() {
       if (animation !== null) cancelAnimationFrame(animation);
+      if (camAnimation !== null) cancelAnimationFrame(camAnimation);
       canvas.removeEventListener("webglcontextlost", onLost);
       box.dispose();
       material.dispose();
