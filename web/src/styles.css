@@ -1282,17 +1282,45 @@ footer ul {
 }
 
 /* ---------------------------------------------------------- instrument */
-/* The year-of-half-hours section: an instrument panel, not a card. Square corners, one
-   thin line, no shadow, no gradient; labels in small capitals; the readout in monospace. */
+/* The year-of-half-hours section: the page's card treatment (same radius, line and shadow),
+   with the map's own small-capital labels and a monospace readout. */
 :root {
   --slate: #8fa0be;
 }
 .instrument {
-  background: var(--bg-2);
+  background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 0;
-  padding: 16px 18px 14px;
-  box-shadow: none;
+  border-radius: var(--radius);
+  padding: 18px;
+  box-shadow: var(--shadow);
+}
+.year-lead {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+.instrument details.year-how {
+  margin: 0 0 14px;
+}
+.instrument .lbl-checks {
+  display: inline-flex;
+  gap: 14px;
+  margin-left: auto;
+}
+.instrument-bar .ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 700px) {
+  .instrument-bar {
+    gap: 10px 16px;
+  }
+  .instrument-bar .ctl {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
 }
 .instrument-bar {
   display: flex;
@@ -1314,10 +1342,9 @@ footer ul {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
 }
 .instrument .seg {
-  border-radius: 3px;
+  border-radius: 999px;
 }
 .instrument .seg button {
   padding: 5px 10px;
@@ -1351,6 +1378,7 @@ footer ul {
   font-size: 12.5px;
   color: var(--muted);
   align-items: center;
+  margin-top: 8px;
 }
 .band-legend i.sw {
   display: inline-block;
@@ -1358,7 +1386,7 @@ footer ul {
   height: 12px;
   margin-right: 6px;
   vertical-align: -1px;
-  border-radius: 0;
+  border-radius: 3px;
   border: 1px solid rgba(0, 0, 0, 0.35);
 }
 .band-legend i.high {
@@ -1376,8 +1404,6 @@ footer ul {
   gap: 4px;
 }
 .instrument details {
-  border-radius: 0;
-  background: transparent;
   margin-top: 8px;
 }
 
@@ -1421,7 +1447,9 @@ footer ul {
 }
 .carpet-frame {
   position: relative;
-  height: 548px;
+  /* 365 date labels in 440px: every cell is drawn (one canvas pixel each); the larger map
+     and the keyboard cursor give single days room. */
+  height: 440px;
   border: 1px solid var(--line);
   background: var(--bg-2);
   grid-row: 1;
@@ -1467,12 +1495,21 @@ footer ul {
   color: var(--muted);
   margin-top: 4px;
 }
-@media (max-width: 520px) {
+.carpets.large .carpet-frame {
+  height: 912px;
+}
+.carpets.single {
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (max-width: 700px) {
   .carpets {
     grid-template-columns: minmax(0, 1fr);
   }
   .carpet-frame {
-    height: 420px;
+    height: 400px;
+  }
+  .instrument {
+    padding: 14px;
   }
 }
 

@@ -135,6 +135,8 @@ export function TerrainFlat({
   onSelect,
   onCursor,
   showCoverage,
+  only = null,
+  large = false,
 }: {
   terrain: Terrain;
   highlight: Highlight;
@@ -144,6 +146,10 @@ export function TerrainFlat({
   onSelect: (i: number) => void;
   onCursor: (i: number) => void;
   showCoverage: boolean;
+  /** One map only (a narrow screen); the cursor and readout are shared, so switching keeps the cell. */
+  only?: Carpet | null;
+  /** Roughly double the map's height so single days are easier to point at. */
+  large?: boolean;
 }) {
   const g = terrain.grid;
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -166,9 +172,19 @@ export function TerrainFlat({
     }
   };
   const common = { terrain, highlight, cursor, hover, onHover, onSelect };
+  const kwh = <CarpetView {...common} carpet="kwh" title="Charged electricity, kWh" scale={`0 to ${terrain.scale.kwh.max} kWh per half hour, pooled`} />;
+  const charge = <CarpetView {...common} carpet="charge" title="Dynamic scenario charge, £" scale={`£0 to £${terrain.scale.charge.max.toFixed(2)} per half hour, pooled`} />;
+  const coverage = (
+    <CarpetView
+      {...common}
+      carpet="coverage"
+      title="Households contributing"
+      scale={`${terrain.coverage.households_per_cell_min} (dark) to ${terrain.coverage.households_per_cell_max} (light) of ${terrain.totals.households}`}
+    />
+  );
   return (
     <div
-      className="carpets"
+      className={`carpets${only ? " single" : ""}${large ? " large" : ""}`}
       role="application"
       tabIndex={0}
       aria-label={`Flat map of ${g.dates} date labels by ${g.slots} half-hour labels, ${g.cells} cells. Left and Right arrows move one half hour, Up and Down move one date, Page Up and Page Down move a week, Home and End reach the first and last half hour of the day. The readout below states the selected cell.`}
@@ -178,15 +194,12 @@ export function TerrainFlat({
         if (cursor === null) onCursor(indexOf(terrain, 0, 0));
       }}
     >
-      <CarpetView {...common} carpet="kwh" title="Charged electricity, kWh" scale={`0 to ${terrain.scale.kwh.max} kWh per half hour, pooled`} />
-      <CarpetView {...common} carpet="charge" title="Dynamic scenario charge, £" scale={`£0 to £${terrain.scale.charge.max.toFixed(2)} per half hour, pooled`} />
-      {showCoverage && (
-        <CarpetView
-          {...common}
-          carpet="coverage"
-          title="Households contributing"
-          scale={`${terrain.coverage.households_per_cell_min} (dark) to ${terrain.coverage.households_per_cell_max} (light) of ${terrain.totals.households}`}
-        />
+      {only === "kwh" ? kwh : only === "charge" ? charge : only === "coverage" ? coverage : (
+        <>
+          {kwh}
+          {charge}
+          {showCoverage && coverage}
+        </>
       )}
     </div>
   );

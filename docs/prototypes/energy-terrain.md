@@ -116,7 +116,7 @@ rule (46 `null` cells beside one `0` cell) and every refusal.
   cell. Hover, tap, or the arrow keys (one half hour, one date, Page keys a week, Home and End)
   drive a monospace readout that states date label, half-hour label, kWh, households of 27,
   band and price, and dynamic charge.
-- **3D terrain (on request, "3D terrain (loads 135 kB)"):** one instanced mesh of 17,520
+- **3D terrain (on request, the "Explore in 3D" button; the chunk is 135 kB gzipped):** one instanced mesh of 17,520
   boxes with a gap between cells, orthographic camera (no perspective distortion), presets
   Default, Top-down and Side, zoom 1×/2×/4× on the selected cell, drag to orbit with a mouse
   or pen only (touch scrolls the page), no auto-rotation, rendered only when something changed.

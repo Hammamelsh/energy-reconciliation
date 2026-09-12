@@ -113,7 +113,7 @@ export function Page({ loaded }: { loaded: Loaded }) {
     { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
-    { id: "year", title: "One year", text: `Every half hour of ${year} as one surface, pooled across the ${c.households} households. Switch the height from kWh to pounds and the High-price half hours stand up: a small share of the electricity, a large share of the charge.` },
+    { id: "year", title: "One year", text: `When were the calculated charges highest? Every half hour of ${year} as one map, each cell pooling 20 to 27 of the ${c.households} households. Compare the electricity map with the charge map and the High-price half hours light up: a small share of the electricity, a large share of the charge.` },
     { id: "hours", title: "The hours", text: `${highHours} No timezone or interval convention is applied. The largest hourly totals of charged kWh also occurred among those label hours. That is timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
@@ -259,8 +259,8 @@ export function Page({ loaded }: { loaded: Loaded }) {
 
         <Reveal
           id="year"
-          title={bundle.terrain.title}
-          sub="Timestamp labels as written, one cell per half hour, nothing smoothed between them. Hover, tap or use the arrow keys to read any cell."
+          title="When were the calculated energy charges highest?"
+          sub={`Each cell pools the charged readings available for one half-hour timestamp label in ${bundle.terrain.grid.first_date.slice(0, 4)}, from ${bundle.terrain.coverage.households_per_cell_min} to ${bundle.terrain.coverage.households_per_cell_max} of the ${bundle.terrain.totals.households} households on the dynamic tariff. A historical scenario under assumptions A1 and A2, not a bill. Hover, tap or use the arrow keys to read any cell.`}
         >
           <Year bundle={bundle} loaded={loaded} />
         </Reveal>

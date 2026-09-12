@@ -53,15 +53,21 @@ describe("the year section", () => {
   it("introduces the terrain from the verified bundle and, without WebGL, shows the flat map with every cell readable by keyboard", async () => {
     stubFetch(terrainBytes);
     const bundle = await renderPage();
-    expect(screen.getByRole("heading", { name: bundle.terrain.title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "When were the calculated energy charges highest?" })).toBeInTheDocument();
     const map = await screen.findByRole("application", { name: /Flat map of 365 date labels by 48 half-hour labels/ }, { timeout: 8000 });
+    // the lead states the totals as display values; "exactly" is reserved for the export's full-precision totals
+    const lead = document.querySelector(".year-lead")!;
+    expect(lead).toHaveTextContent(`${bundle.terrain.totals.kwh.display.toLocaleString("en-GB", { minimumFractionDigits: 3 })} kWh`);
+    expect(lead).toHaveTextContent("display totals, rounded once");
+    expect(lead.textContent).not.toMatch(/exactly/);
+    expect(screen.getByText("How to read this map")).toBeInTheDocument();
     // the readout opens on the tallest cell of the charge view, from the file's own peaks
     const readout = document.getElementById("year-readout")!;
     await waitFor(() => expect(readout).toHaveTextContent(/Tallest half hour in this view: 2013-03-17, 19:30 label/));
     expect(readout).toHaveTextContent(/dynamic charge £7\.43/);
     // the flat map is the default view everywhere; 3D is loaded only on request
     const views = screen.getByRole("group", { name: "View" });
-    const flat = within(views).getByRole("button", { name: "flat map" });
+    const flat = within(views).getByRole("button", { name: "Flat map" });
     expect(flat).toHaveAttribute("aria-pressed", "true");
     // the flat map marks the tallest cell of each carpet before any interaction
     expect(screen.getAllByText(/£7\.43|14\.353 kWh/, { selector: ".peak-marker span" })).toHaveLength(2);
@@ -84,7 +90,7 @@ describe("the year section", () => {
     const summary = screen.getByText("The same cells as a table: month by band");
     await userEvent.click(summary);
     expect(within(summary.closest("details")!).getAllByRole("row")).toHaveLength(1 + 12 + 1); // header, months, year
-    expect(screen.getByText(/Exact year totals from the export: 85467\.1329968000 kWh and £11675\.4339216532500000/)).toBeInTheDocument();
+    expect(screen.getByText(/Full-precision year totals from the export: 85467\.1329968000 kWh and £11675\.4339216532500000/)).toBeInTheDocument();
   });
 
   it("asks for WebGL only on request and reports when it is unavailable", async () => {
@@ -92,11 +98,11 @@ describe("the year section", () => {
     await renderPage();
     await screen.findByRole("application", { name: /Flat map/ }, { timeout: 8000 });
     const views = screen.getByRole("group", { name: "View" });
-    await userEvent.click(within(views).getByRole("button", { name: /^3D terrain/ }));
+    await userEvent.click(within(views).getByRole("button", { name: "Explore in 3D" }));
     // the 3D chunk (Three.js) is imported on demand; give the import time to resolve
     expect(await screen.findByText(/The 3D view is not available here: this browser provides no WebGL context/, {}, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByRole("application", { name: /Flat map/ })).toBeInTheDocument();
-    expect(within(views).getByRole("button", { name: /^3D terrain/ })).toBeDisabled();
+    expect(within(views).getByRole("button", { name: "Explore in 3D" })).toBeDisabled();
   });
 
   it("refuses a tampered terrain file and draws nothing in its place", async () => {
@@ -114,6 +120,47 @@ describe("the year section", () => {
     stubFetch(null);
     await renderPage();
     expect(await screen.findByRole("alert", {}, { timeout: 8000 })).toHaveTextContent(/HTTP 404/);
+  });
+
+  it("on a narrow screen shows one map at a time and keeps the selected cell when switching", async () => {
+    mediaMatching("max-width: 700px");
+    stubFetch(terrainBytes);
+    await renderPage();
+    const map = await screen.findByRole("application", { name: /Flat map/ }, { timeout: 8000 });
+    // one map, the charge map by default, with its own unit and scale stated
+    expect(document.querySelectorAll(".carpet")).toHaveLength(1);
+    expect(screen.getByText("Dynamic scenario charge, £")).toBeInTheDocument();
+    expect(screen.getByText(/£0 to £7\.43 per half hour, pooled/)).toBeInTheDocument();
+    map.focus();
+    await userEvent.keyboard("{ArrowRight}{ArrowDown}");
+    const readout = document.getElementById("year-readout")!;
+    expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);
+    const show = screen.getByRole("group", { name: "Which map to show" });
+    await userEvent.click(within(show).getByRole("button", { name: "Electricity, kWh" }));
+    expect(document.querySelectorAll(".carpet")).toHaveLength(1);
+    expect(screen.getByText("Charged electricity, kWh")).toBeInTheDocument();
+    expect(screen.getByText(/0 to 14\.353 kWh per half hour, pooled/)).toBeInTheDocument();
+    // the cell selected on the charge map is still the cell on the electricity map
+    expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);
+    expect(document.querySelector(".cell-marker.cursor")).not.toBeNull();
+    await userEvent.click(within(show).getByRole("button", { name: "Households" }));
+    expect(screen.getByText("Households contributing")).toBeInTheDocument();
+    expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);
+  });
+
+  it("on a wide screen shows both maps together and can enlarge them without dropping a cell", async () => {
+    stubFetch(terrainBytes);
+    await renderPage();
+    await screen.findByRole("application", { name: /Flat map/ }, { timeout: 8000 });
+    expect(document.querySelectorAll(".carpet")).toHaveLength(2);
+    const canvases = document.querySelectorAll<HTMLCanvasElement>(".carpet-frame canvas");
+    expect(canvases).toHaveLength(2);
+    // one canvas pixel per cell, whatever the displayed size
+    for (const c of canvases) expect([c.width, c.height]).toEqual([48, 365]);
+    await userEvent.click(screen.getByLabelText("larger map"));
+    expect(document.querySelector(".carpets")).toHaveClass("large");
+    await userEvent.click(screen.getByLabelText("show coverage"));
+    expect(document.querySelectorAll(".carpet")).toHaveLength(3);
   });
 
   it("carries the reduced-motion preference into the section", async () => {
