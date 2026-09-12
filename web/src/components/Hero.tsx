@@ -112,7 +112,6 @@ export function Hero({
   const w = bundle.source.warehouse;
   const compact = useMediaQuery("(max-width: 899px)");
   const year = bundle.schedule.first_date?.slice(0, 4) ?? "2013";
-  const diff = useCountUp(Math.abs(c.flat_minus_dynamic.display), 1300);
   const dynStat = useCountUp(c.dynamic_charge.display, 1100);
   const flatStat = useCountUp(c.flat_charge.display, 1100);
   const pctStat = useCountUp(c.pct_of_flat.display ?? 0, 1300);
@@ -120,62 +119,98 @@ export function Hero({
   const direction = c.flat_minus_dynamic.display > 0 ? "lower" : c.flat_minus_dynamic.display < 0 ? "higher" : "the same";
   const exception = [...sortHouseholds(c.per_household, "pct")].find((h) => h.outcome_under_dynamic === "higher");
   const flatPence = c.flat_price.pence_per_kwh.replace(/0+$/, "");
+  const share = c.pct_of_flat.display === null ? null : `${c.pct_of_flat.display.toFixed(1)}%`;
+  const answerLine = (
+    <p className="answer-line">
+      Dynamic pricing came out{" "}
+      <strong className={direction === "lower" ? "volt" : direction === "higher" ? "ember" : undefined}>
+        {share === null || direction === "the same" ? direction : `${share} ${direction}`}
+      </strong>{" "}
+      overall.
+    </p>
+  );
+  const supportingLine = (
+    <p className="answer-sub">
+      {money(c.dynamic_charge.display)} compared with {money(c.flat_charge.display)}. It came out lower for {o.lower}{" "}
+      households and higher for {o.higher}.{o.equal ? ` ${o.equal} came out the same.` : ""}
+    </p>
+  );
+  const primaryAction = exception ? (
+    <button type="button" className="cta" onClick={() => onPick(exception.household_id)}>
+      Why did {o.higher} come out higher? <span aria-hidden="true">↓</span>
+    </button>
+  ) : (
+    <a className="cta" href="#households">
+      See every household <span aria-hidden="true">↓</span>
+    </a>
+  );
+  const tourButton = (
+    <button type="button" className="tour-start" onClick={onTour}>
+      Walk me through it <span aria-hidden="true">·</span> 2 min
+    </button>
+  );
+  const qualifier = <p className="qualifier">Historical comparison, not a current tariff recommendation or a complete bill.</p>;
+  const marks = (
+    <div className="households-marks">
+      <Marks households={c.per_household} selected={selected} onPick={onPick} />
+      <div className="marks-legend" aria-hidden="true">
+        <span><i className="lower" />▲ lower under dynamic</span>
+        <span><i className="higher" />▼ higher under dynamic</span>
+      </div>
+    </div>
+  );
   return (
     <header className="hero wrap" id="top">
       <DayShape hourBands={bundle.hour_bands} />
-      <div className="eyebrow">The same electricity, priced two ways</div>
-      <h1>Would the same electricity cost less if its price could change every 30 minutes?</h1>
+      <div className="eyebrow">{year} Low Carbon London trial</div>
+      <h1>
+        Same electricity use, priced two ways. <br className="wide" />
+        <span className="nobreak">A {money(Math.abs(c.flat_minus_dynamic.display))}</span> difference.
+      </h1>
       <p className="lede">
-        In {year}, <strong>{c.households} households</strong> on the Low Carbon London trial recorded{" "}
-        <strong>{integer(c.charged_readings)}</strong> half-hourly readings on a tariff whose price could change every
-        half hour. We priced exactly those readings two ways: under that tariff, and at the trial's flat price of{" "}
-        <strong>{flatPence}p per kWh</strong>.
+        We kept <strong>{integer(c.charged_readings)} readings</strong> from <strong>{c.households} households</strong>{" "}
+        unchanged and calculated the total twice: once using the trial's published Low, Normal and High prices, and once
+        using its flat price of <strong>{flatPence}p per kWh</strong> throughout. The readings and their timestamp labels
+        stayed the same.
       </p>
 
-      <div className="opening">
-        <div className="answer">
-          <div className="answer-label">Under the dynamic tariff, the same electricity came out</div>
-          <div className="answer-value" aria-live="off">
-            <span className={`big ${direction === "lower" ? "volt" : "ember"}`}>{money(diff)}</span>
-            <span className="word">{direction}</span>
+      {/* One column: the action and the qualification follow the result directly, so the first
+          screen carries them; the two totals and the 27 marks come after. Two columns from 900px. */}
+      {compact ? (
+        <>
+          <div className="answer">
+            {answerLine}
+            {supportingLine}
+            <div className="actions">{primaryAction}</div>
           </div>
-          <div className="answer-sub">
-            {c.pct_of_flat.display === null ? "share of the flat-price charge undefined" : `${c.pct_of_flat.display.toFixed(1)}% of the flat-price charge`}
+          {qualifier}
+          <div className="actions">{tourButton}</div>
+          <div className="opening">
+            <Totals bundle={bundle} />
+            {marks}
           </div>
-          <Totals bundle={bundle} />
-        </div>
+        </>
+      ) : (
+        <>
+          <div className="opening">
+            <div className="answer">
+              {answerLine}
+              {supportingLine}
+              <Totals bundle={bundle} />
+            </div>
+            <div className="households-at-a-glance">
+              {marks}
+              <div className="actions">
+                {primaryAction}
+                {tourButton}
+              </div>
+            </div>
+          </div>
+          {qualifier}
+        </>
+      )}
 
-        <div className="households-at-a-glance">
-          <p className="outcomes">
-            <b>{o.lower} households</b> came out lower. <b>{o.higher}</b> came out higher.
-            {o.equal ? ` ${o.equal} came out the same.` : ""}
-          </p>
-          <Marks households={c.per_household} selected={selected} onPick={onPick} />
-          <div className="marks-legend" aria-hidden="true">
-            <span><i className="lower" />▲ lower under dynamic</span>
-            <span><i className="higher" />▼ higher under dynamic</span>
-          </div>
-          <div className="actions">
-            {exception ? (
-              <button type="button" className="cta" onClick={() => onPick(exception.household_id)}>
-                Why did {o.higher} go the other way? <span aria-hidden="true">↓</span>
-              </button>
-            ) : (
-              <a className="cta" href="#households">
-                See every household <span aria-hidden="true">↓</span>
-              </a>
-            )}
-            <button type="button" className="tour-start" onClick={onTour}>
-              Walk me through it <span aria-hidden="true">·</span> 2 min
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <p className="qualifier">
-        Historical fixed-consumption comparison, not a bill or a savings claim. Assumptions A1 and A2 apply; the exact
-        figures and both assumptions are below.
-      </p>
+      <PriceLadder bundle={bundle} />
 
       <details className="exact" open={!compact}>
         <summary>The exact figures, A1 and A2</summary>
@@ -205,8 +240,6 @@ export function Hero({
         </p>
         </div>
       </details>
-
-      <PriceLadder bundle={bundle} />
     </header>
   );
 }

@@ -69,6 +69,20 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
     return p === null ? "No cell has a charged reading." : `Tallest half hour in this view: ${describeCell(terrain, p)}`;
   }, [terrain, focus, mode]);
 
+  // The date in the readout stays on one line on a phone: the same characters, wrapped, not replaced.
+  const readoutNode = useMemo(() => {
+    if (readout === null) return null;
+    const m = readout.match(/^([^]*?)(\d{4}-\d{2}-\d{2})([^]*)$/);
+    if (!m) return readout;
+    return (
+      <>
+        {m[1]}
+        <span className="nobreak">{m[2]}</span>
+        {m[3]}
+      </>
+    );
+  }, [readout]);
+
   const year = s.grid.first_date.slice(0, 4);
   // The single-map choice on a narrow screen also sets what the 3D height shows, so the
   // selected cell and the "tallest half hour" readout carry across views.
@@ -315,7 +329,7 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
       </div>
 
       <p className="readout" id="year-readout" aria-live="polite">
-        {readout ?? "Cell readout appears here once the terrain has loaded."}
+        {readoutNode ?? "Cell readout appears here once the terrain has loaded."}
       </p>
       {unavailable && (
         <p className="hint" role="status">

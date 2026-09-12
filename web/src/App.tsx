@@ -116,6 +116,30 @@ export function Page({ loaded }: { loaded: Loaded }) {
     pushState({ household: selected, flat: flat === flatDefault ? null : flat });
   }, [selected, flat, flatDefault]);
 
+  // A link to a section below the year: the page scrolls smoothly to where that section is,
+  // and the year section, passed on the way, renders its map and grows, so the target ends
+  // up further down than the scroll reached. Re-anchor once when the growth follows a jump.
+  useEffect(() => {
+    const year = document.getElementById("year");
+    if (!year || typeof ResizeObserver === "undefined") return;
+    let jumpedAt = window.location.hash ? performance.now() : -Infinity;
+    const onHash = () => {
+      jumpedAt = performance.now();
+    };
+    window.addEventListener("hashchange", onHash);
+    const ro = new ResizeObserver(() => {
+      const id = window.location.hash.slice(1);
+      const target = id ? document.getElementById(id) : null;
+      if (!target || target === year || performance.now() - jumpedAt > 4000) return;
+      if (target.compareDocumentPosition(year) & Node.DOCUMENT_POSITION_PRECEDING) target.scrollIntoView({ behavior: "auto", block: "start" });
+    });
+    ro.observe(year);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("hashchange", onHash);
+    };
+  }, []);
+
   const household = c.per_household.find((h) => h.household_id === selected) ?? null;
   const o = c.outcomes_under_dynamic;
   const [tour, setTour] = useState(false);
@@ -124,18 +148,20 @@ export function Page({ loaded }: { loaded: Loaded }) {
   // sentence is built from the counts, so it can only say what the bundle holds.
   const hc = highConcentration(bundle.hour_bands);
   const year = bundle.schedule.first_date?.slice(0, 4) ?? "2013";
+  // "No permanent cheap time" is only said when the schedule put High labels in every clock hour.
+  const hourLead = `${hc?.everyHour ? "There was no permanent cheap time. " : ""}Participants received the following day's Low, Normal and High periods in advance.`;
   const hourStatement = hc
-    ? `${hc.slots} of the schedule's ${hc.total} High-labelled half-hours, ${hc.sharePct}%, had timestamp labels from ${labelRange(hc)}.`
+    ? `Of the schedule's ${hc.total} High-labelled half-hours, ${hc.slots}, or ${hc.sharePct}%, had timestamp labels from ${labelRange(hc)}. High-labelled periods ${hc.everyHour ? "also occurred in every clock-hour label" : "did not occur in every clock-hour label"}.`
     : "The schedule's High-labelled half-hours are not summarised here.";
   const hourDetail = hc
-    ? `The dynamic schedule announced each day's bands a day ahead. High-labelled half-hours ${hc.everyHour ? "appeared in every clock-hour label across the year" : "did not appear in every clock-hour label"}. These are timestamp labels as written; no timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours, a coincidence of timing in this data. No behavioural response is measured.`
+    ? `These are timestamp labels as written; no timezone or interval convention is applied, so this is not a claim about clock time. The largest hourly totals of charged kWh also occurred among those label hours, a coincidence of timing in this data. No behavioural response is measured, and this was the ${year} trial's schedule, not a current tariff.`
     : "";
   const steps: TourStep[] = [
-    { id: "top", title: "The question", text: `${c.households} households, one year of recorded readings, two prices. On the same recorded consumption the dynamic scenario came out ${money(Math.abs(c.flat_minus_dynamic.display))} (${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}%) ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} than the flat price.` },
+    { id: "top", title: "The result", text: `Same electricity use, priced two ways. ${integer(c.charged_readings)} readings from ${c.households} households, kept unchanged, were priced under the trial's dynamic schedule and at its flat price. Dynamic pricing came out ${c.pct_of_flat.display?.toFixed(1) ?? "n/a"}% ${c.flat_minus_dynamic.display > 0 ? "lower" : "higher"} overall, a ${money(Math.abs(c.flat_minus_dynamic.display))} difference.` },
     { id: "households", title: "Every household", text: `${o.lower} were lower under the dynamic tariff and ${o.higher} higher. Click any bar, or use the arrow keys, to see where that household's electricity fell.` },
     { id: "what-if", title: "What if", text: "Each household has a break-even flat price. Slide to see how many would have come out ahead at any other flat price: a comparison, not a recalculation." },
     { id: "year", title: "One year", text: `${year}, half-hour by half-hour. High-price half-hours: ${highBand(bundle)}. ${peakLine(bundle)}` },
-    { id: "hours", title: "The hours", text: `${hourStatement} No timezone or interval convention is applied. That is timing, not proof of a response.` },
+    { id: "hours", title: "The hours", text: `${hourLead} ${hourStatement} Labels as written, not clock time: timing, not proof of a response.` },
     { id: "pipeline", title: "How it's made", text: "Three million readings, every one charged or excluded with a reason, a ladder that must add up, a sealed build, and this page checking its exported data against a pinned digest before showing it." },
     { id: "provenance", title: "The small print", text: "Two assumptions, the identity of the build behind every number, the licences, and what this does not show." },
   ];
@@ -290,7 +316,8 @@ export function Page({ loaded }: { loaded: Loaded }) {
           <Year bundle={bundle} loaded={loaded} />
         </Reveal>
 
-        <Reveal id="hours" title="Label hours" sub={hourStatement} compact>
+        <Reveal id="hours" title="Label hours" sub={hourLead} compact>
+          <p className="sub finding">{hourStatement}</p>
           <details className="evidence">
             <summary>Explore the label-hour pattern</summary>
             <div className="body">

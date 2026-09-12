@@ -52,9 +52,7 @@ describe("the page", () => {
   it("renders the hero figures and every household as a keyboard-reachable button", async () => {
     const bundle = await verifyBundle(manifest, bytes);
     render(<Page loaded={{ bundle, manifest, digest: manifest.content_digest }} />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
-      "Would the same electricity cost less if its price could change every 30 minutes?",
-    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Same electricity use, priced two ways. A £484.83 difference.");
     const chart = screen.getByRole("group", { name: /Each household's difference/ });
     const bars = within(chart).getAllByRole("button");
     expect(bars).toHaveLength(27);
@@ -67,8 +65,31 @@ describe("the page", () => {
     const c = bundle.comparison;
     render(<Page loaded={{ bundle, manifest, digest: manifest.content_digest }} />);
     const opening = screen.getByRole("heading", { level: 1 }).closest("header")!;
-    expect(within(opening).getByText(`${c.outcomes_under_dynamic.lower} households`)).toBeInTheDocument();
-    expect(within(opening).getByText(`${c.pct_of_flat.display?.toFixed(1)}% of the flat-price charge`)).toBeInTheDocument();
+    // the result in plain words, every figure from the bundle, and the qualification in the opening
+    expect(opening.querySelector(".eyebrow")).toHaveTextContent("2013 Low Carbon London trial");
+    expect(opening.querySelector(".lede")).toHaveTextContent(
+      "We kept 456,096 readings from 27 households unchanged and calculated the total twice: once using the trial's published Low, Normal and High prices, and once using its flat price of 14.228p per kWh throughout. The readings and their timestamp labels stayed the same.",
+    );
+    expect(opening.querySelector(".answer-line")).toHaveTextContent(`Dynamic pricing came out ${c.pct_of_flat.display?.toFixed(1)}% lower overall.`);
+    expect(opening.querySelector(".answer-sub")).toHaveTextContent(
+      `${money(c.dynamic_charge.display)} compared with ${money(c.flat_charge.display)}. It came out lower for ${c.outcomes_under_dynamic.lower} households and higher for ${c.outcomes_under_dynamic.higher}.`,
+    );
+    expect(opening.querySelector(".qualifier")).toHaveTextContent("Historical comparison, not a current tariff recommendation or a complete bill.");
+    // how the pricing worked: the explanation, the four prices and the closing statement, before the exact figures
+    expect(within(opening).getByRole("heading", { name: "How the pricing worked" })).toBeInTheDocument();
+    const prices = within(opening).getByRole("list", { name: "The four prices, in pence per kWh" });
+    expect(within(prices).getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Low3.99p per kWh",
+      "Normal11.76p per kWh",
+      "High67.20p per kWh",
+      "Flat comparison14.228p per kWh",
+    ]);
+    expect(prices.closest(".ladder")).toHaveTextContent(
+      "Each meter reading covers one half-hour. The published schedule labelled its timestamp Low, Normal or High. Different half-hours could receive different prices, but the price did not necessarily change after every half-hour.",
+    );
+    expect(prices.closest(".ladder")).toHaveTextContent("Low and Normal were below the flat price. High was far above it. The final result depended on when each household's electricity was recorded.");
+    expect(prices.closest(".ladder")!.compareDocumentPosition(opening.querySelector("details.exact")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(opening.textContent).not.toMatch(/—|–|every 30 minutes|savings|paid/);
     expect(
       within(opening).getByRole("img", { name: `Dynamic tariff ${money(c.dynamic_charge.display)} against flat price ${money(c.flat_charge.display)} for the same recorded electricity.` }),
     ).toBeInTheDocument();
@@ -82,7 +103,7 @@ describe("the page", () => {
     await userEvent.click(buttons[26]);
     expect(buttons[26]).toHaveAttribute("aria-pressed", "true");
     expect(window.location.search).toMatch(/household=MAC000186/);
-    await userEvent.click(within(opening).getByRole("button", { name: /Why did 2 go the other way/ }));
+    await userEvent.click(within(opening).getByRole("button", { name: /Why did 2 come out higher/ }));
     expect(await screen.findByText("MAC000186", { selector: ".detail .id" })).toBeInTheDocument();
   });
 

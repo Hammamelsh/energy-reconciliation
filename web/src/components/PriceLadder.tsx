@@ -4,7 +4,7 @@ import { BAND, CURRENT, EMBER, INK, LINE, MUTED, NEUTRAL, SLATE, SURFACE, TEXT }
 
 type Mark = { key: string; p: number; label: string; tone: string; tier: "up" | "up2" | "down" | "down2"; anchor: "start" | "middle" | "end" };
 
-/** The four prices on one scale, plus the pooled break-even. A picture of "17 to 1". */
+/** How the pricing worked: the four prices stated plainly, then on one scale with the pooled break-even. */
 export function PriceLadder({ bundle }: { bundle: Bundle }) {
   const compact = useMediaQuery("(max-width: 700px)");
   const prices = bundle.prices;
@@ -15,7 +15,6 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
   const flat = Number(bundle.comparison.flat_price.pence_per_kwh);
   const even = bundle.comparison.breakeven_flat_price.display ?? 0;
   const max = Math.ceil(Math.max(high, flat) / 10) * 10;
-  const ratio = low > 0 ? (high / low).toFixed(0) : "n/a";
   const marks: Mark[] = [
     { key: "low", p: low, label: `Low ${low.toFixed(2)}p`, tone: CURRENT, tier: "down", anchor: "start" },
     // Ends at its own marker so the break-even guide line, a few pixels to the right, never crosses it.
@@ -24,16 +23,45 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
     { key: "flat", p: flat, label: `Flat ${flat.toFixed(3)}p`, tone: EMBER, tier: "down2", anchor: "middle" },
     { key: "high", p: high, label: `High ${high.toFixed(2)}p`, tone: EMBER, tier: "up", anchor: "end" },
   ];
+  // The sentence about the bands' position against the flat price is only made when the
+  // numbers support it; otherwise the scale below is left to speak.
+  const belowAbove = low < flat && normal < flat && high > flat;
+  const four = [
+    { key: "low", name: "Low", value: `${low.toFixed(2)}p per kWh`, tone: BAND.Low },
+    { key: "normal", name: "Normal", value: `${normal.toFixed(2)}p per kWh`, tone: BAND.Normal },
+    { key: "high", name: "High", value: `${high.toFixed(2)}p per kWh`, tone: BAND.High },
+    { key: "flat", name: "Flat comparison", value: `${flat.toFixed(3)}p per kWh`, tone: NEUTRAL },
+  ];
   const intro = (
     <>
-      <h2>Four prices on one scale</h2>
+      <h2 id="pricing">How the pricing worked</h2>
       <p>
-        The dynamic tariff's High band cost about {ratio}× its Low band. The pooled break-even is the flat price
-        at which this recorded consumption would have cost exactly what it did under the dynamic tariff. The
-        documented flat price sits {flat > even ? "above" : "below"} it, and that gap is the{" "}
-        {bundle.comparison.pct_of_flat.display?.toFixed(1) ?? "n/a"}%.
+        Each meter reading covers one half-hour. The published schedule labelled its timestamp Low, Normal or High.
+        Different half-hours could receive different prices, but the price did not necessarily change after every
+        half-hour.
+      </p>
+      <ul className="price-list" aria-label="The four prices, in pence per kWh">
+        {four.map((p) => (
+          <li key={p.key}>
+            <span className="name">
+              <i style={{ background: p.tone }} aria-hidden="true" />
+              {p.name}
+            </span>
+            <b>{p.value}</b>
+          </li>
+        ))}
+      </ul>
+      <p>
+        {belowAbove ? "Low and Normal were below the flat price. High was far above it. " : ""}
+        The final result depended on when each household's electricity was recorded.
       </p>
     </>
+  );
+  const note = (
+    <p className="hint">
+      The same prices on one scale, with the pooled break-even of {even.toFixed(3)}p: the flat price at which this
+      recorded consumption would have cost exactly what it did under the dynamic schedule.
+    </p>
   );
   if (compact) {
     return (
@@ -49,6 +77,7 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
             </li>
           ))}
         </ul>
+        {note}
       </div>
     );
   }
@@ -107,6 +136,7 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
         <text x={46} y={122} fontSize={11} fill={MUTED}>0p</text>
         <text x={W - 46} y={122} fontSize={11} fill={MUTED} textAnchor="end">{max}p per kWh</text>
       </svg>
+      {note}
     </div>
   );
 }

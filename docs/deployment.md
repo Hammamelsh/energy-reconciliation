@@ -203,9 +203,9 @@ or invented; a map is reserved for verified regional carbon data in a later phas
 ([`roadmap-next-phase.md`](roadmap-next-phase.md)).
 
 A third capture, [`images/front-door-landing.png`](images/front-door-landing.png), is the
-front door's opening view at 1440 px (§9): the same four values, the price ladder and the
-outcome line. It is the launch image once the front door is live, because it is the page the
-link opens.
+front door's opening view at 1440 px (§9): the result stated in plain words, the two totals,
+one mark per household and the qualification. It is the launch image once the front door is
+live, because it is the page the link opens.
 
 ## 9. The front door: a static page over a digest-checked bundle
 

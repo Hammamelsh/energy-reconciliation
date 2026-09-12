@@ -60,7 +60,9 @@ describe("the year section", () => {
     expect(sub.textContent).not.toMatch(/4\.9%|24\.1%|A2|—|–/);
     // the condensed hours evidence: a statement, then a disclosure holding the chart
     expect(screen.getByRole("heading", { name: "Label hours" })).toBeInTheDocument();
-    expect(document.querySelector("#hours .sub")).toHaveTextContent("408 of the schedule's 788 High-labelled half-hours, 51.8%, had timestamp labels from 17:00 to 22:59.");
+    const hourSubs = [...document.querySelectorAll("#hours .sub")].map((p) => p.textContent);
+    expect(hourSubs[0]).toBe("There was no permanent cheap time. Participants received the following day's Low, Normal and High periods in advance.");
+    expect(hourSubs[1]).toBe("Of the schedule's 788 High-labelled half-hours, 408, or 51.8%, had timestamp labels from 17:00 to 22:59. High-labelled periods also occurred in every clock-hour label.");
     const evidence = screen.getByText("Explore the label-hour pattern").closest("details")!;
     expect(evidence).not.toHaveAttribute("open");
     expect(within(evidence).getByRole("img", { name: /Schedule High-band half hours by hour of the timestamp label/ })).toBeInTheDocument();
@@ -161,6 +163,8 @@ describe("the year section", () => {
     await userEvent.keyboard("{ArrowRight}{ArrowDown}");
     const readout = document.getElementById("year-readout")!;
     expect(readout).toHaveTextContent(/2013-01-02, 00:30 label/);
+    // the date keeps its ASCII hyphens and sits in one non-breaking span
+    expect(readout.querySelector(".nobreak")).toHaveTextContent("2013-01-02");
     const show = screen.getByRole("group", { name: "Which map to show" });
     await userEvent.click(within(show).getByRole("button", { name: "Electricity" }));
     expect(document.querySelectorAll(".carpet")).toHaveLength(1);

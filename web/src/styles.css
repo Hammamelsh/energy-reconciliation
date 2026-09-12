@@ -173,15 +173,24 @@ button {
   font-size: 12px;
 }
 h1 {
-  font-size: clamp(1.9rem, 4.4vw, 3.5rem);
+  font-size: clamp(1.9rem, 4.4vw, 3rem);
   line-height: 1.08;
   letter-spacing: -0.02em;
   margin: 10px 0 14px;
-  max-width: 24ch;
+  max-width: 40ch;
   overflow-wrap: anywhere;
 }
+/* The heading's second sentence starts a new line only where the first fits on one. */
+.wide {
+  display: none;
+}
+@media (min-width: 900px) {
+  .wide {
+    display: inline;
+  }
+}
 .lede {
-  max-width: 62ch;
+  max-width: 78ch;
   color: var(--muted);
   font-size: clamp(1rem, 1.6vw, 1.15rem);
 }
@@ -221,9 +230,18 @@ h1 {
     align-items: start;
   }
 }
-.answer-label {
-  color: var(--muted);
-  font-size: 14px;
+.answer-line {
+  margin: 0 0 8px;
+  font-size: clamp(1.3rem, 2.6vw, 1.85rem);
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+.answer-line .volt {
+  color: var(--volt);
+}
+.answer-line .ember {
+  color: var(--ember-2);
 }
 .answer-value {
   display: flex;
@@ -252,8 +270,10 @@ h1 {
   font-weight: 700;
 }
 .answer-sub {
+  margin: 0;
   color: var(--muted);
   font-size: 15px;
+  max-width: 52ch;
 }
 .totals {
   margin-top: 18px;
@@ -298,10 +318,6 @@ h1 {
   color: var(--text);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-.outcomes {
-  margin: 0 0 10px;
-  font-size: clamp(1.05rem, 2vw, 1.25rem);
 }
 .marks {
   display: flex;
@@ -381,6 +397,43 @@ h1 {
   font-size: 14px;
   max-width: 72ch;
 }
+@media (max-width: 899px) {
+  .answer + .qualifier {
+    margin-top: 16px;
+  }
+  .qualifier + .actions {
+    margin-top: 14px;
+  }
+  .actions + .opening {
+    margin-top: 22px;
+  }
+}
+/* The narrowest phones: the same order, a little less air, so the qualification stays on the first screen. */
+@media (max-width: 360px) {
+  .hero {
+    padding-top: 16px;
+  }
+  .hero h1 {
+    font-size: 1.6rem;
+    margin: 6px 0 8px;
+  }
+  .hero .lede {
+    margin: 0 0 12px;
+  }
+  .hero .answer-line {
+    margin-bottom: 6px;
+  }
+  .hero .actions {
+    margin-top: 12px;
+  }
+  .hero .qualifier {
+    margin-top: 12px;
+  }
+  .hero .actions .cta {
+    font-size: 14px;
+    padding: 11px 14px;
+  }
+}
 .exact {
   margin-top: 18px;
 }
@@ -397,7 +450,21 @@ h1 {
 }
 @media (max-width: 640px) {
   .hero {
-    padding-top: 36px;
+    padding-top: 24px;
+  }
+  h1 {
+    font-size: 1.7rem;
+    margin: 8px 0 10px;
+  }
+  .lede {
+    font-size: 15px;
+  }
+  .actions {
+    margin-top: 14px;
+  }
+  .qualifier {
+    margin-top: 16px;
+    font-size: 13px;
   }
   .mark {
     width: 32px;
@@ -532,6 +599,53 @@ section.block h2 {
   width: 100%;
   height: auto;
   display: block;
+}
+.ladder .hint {
+  margin: 8px 0 0;
+}
+.price-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 10px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.price-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.price-list .name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.price-list .name i {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex: none;
+}
+.price-list b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+@media (max-width: 640px) {
+  .price-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.finding {
+  color: var(--text);
 }
 
 /* ---------------------------------------------------------------- outcomes */
