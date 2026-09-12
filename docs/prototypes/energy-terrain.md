@@ -202,9 +202,14 @@ non-technical reader. Automated checks are not proof of accessibility.
   bundle `bands`). The exact ratio is 72.8497%, which rounds to **72.8%** in a single
   rounding; the 72.9 comes from rounding twice (a 4 dp share, then 1 dp). Other shares are
   unaffected (Low 3.0606 to 3.1; High 24.0897 to 24.1; kWh shares 10.4787, 84.6242, 4.8971).
-  Not changed on this branch: it is a displayed figure on main; recommended fix is a single
-  half-up rounding from the exact ratio in `presentation._share`, with README and captures
-  updated. The terrain file carries no share fields, so the page has one definition of a share.
+  Corrected on this branch on 2026-09-12: `analytics.share_percent` rounds once, half up,
+  from the exact values; the export (`presentation._bands`), the dashboard's band table and
+  the chart's labels use it; the bundle was re-exported (Normal charge share 72.8%; five
+  per-household band shares moved by 0.1 point: MAC000147 Normal kWh 86.3 to 86.2, MAC000173
+  Normal charge 69.7 to 69.6, MAC000186 Low charge 2.8 to 2.7, MAC000195 High charge 25.3 to
+  25.2, MAC000286 High kWh 4.4 to 4.3) and the dashboard capture in the README was retaken.
+  Captures dated before this show the double-rounded 72.9%; `main` carries it until the fix
+  is merged. The terrain file has no share fields, so the page has one definition of a share.
 - The legend first said High cells were "striped in 3D"; at whole-year zoom a cell is about
   3 px and no pattern is visible. Copy corrected to "striped in 3D when zoomed", and the
   Highlight control is the guaranteed non-colour route.
@@ -216,16 +221,23 @@ non-technical reader. Automated checks are not proof of accessibility.
 
 ## 10. Comparison and decision
 
-**What a visitor learns from the flat map, without touching anything:** the kWh carpet is a
-year of days with evenings brighter than mornings and winter brighter than summer; the £
-carpet is almost dark except for orange streaks between the 17:00 and 23:00 labels in
-January to April and October to December, plus the marked tallest cells (14.353 kWh at a
-Low-band lunchtime in January; £7.43 at a High-band evening in March). That is the finding,
-"4.9% of the electricity, 24.1% of the charge", made visible: the cost of this year lived in
-a few winter-evening half hours priced at 67.20p.
+**What a visitor learns from the flat map, without touching anything:** the kWh carpet is
+brighter in the 17:00 to 21:59 labels than in the 03:00 to 04:59 labels, and brighter from
+the December to March labels than from June to August; the £ carpet is almost dark except
+for orange streaks between the 17:00 and 23:00 labels in January to April and October to
+December, plus the marked tallest cells (14.353 kWh at the 13:00 label of 2013-01-20, Low
+band; £7.43 at the 19:30 label of 2013-03-17, High band). These are timestamp labels as
+written, not clock time, and the cells pool 20 to 27 households, so part of any difference
+between cells can be coverage. Normalised by charged readings the pattern holds (MEASURED
+from `terrain.json`): 0.243 to 0.272 kWh per reading in the 17:00 to 21:59 labels against
+0.106 to 0.108 in the 03:00 to 04:59 labels; 0.218 to 0.229 kWh per reading in the December
+to March labels against 0.144 to 0.153 in June to August. That is the finding, "4.9% of the
+electricity, 24.1% of the charge", made visible: the cost of this year lived in a few half
+hours labelled 17:00 to 22:59, mostly between October and April, priced at 67.20p.
 
 **What the 3D terrain adds:** the same pattern as spikes standing up from a low plain, which
-is more memorable, and a kWh-to-£ switch that turns unremarkable evening cells into spikes,
+is more memorable, and a kWh-to-£ switch that turns unremarkable cells in the 17:00 to
+22:59 labels into spikes,
 which is the clearest single demonstration that price, not usage, made those cells prominent.
 It costs a 135 kB dependency on request, WebGL and a fallback path, orbit and occlusion
 concerns (mild: the tall cells sit at the far edge in the default view), and its top-down
