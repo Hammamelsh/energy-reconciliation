@@ -109,6 +109,7 @@ Each item names what was measured and how, so it can be defended under questioni
 | 2.45 | A captured baseline **replayed into a fresh database** and reproduced all 16 compared fields, including the exact total, every per-band charge, all 27 per-household charges and the fingerprint | ANL-002 §9.2, executed 2026-09-08 | **VERIFIED by execution** |
 | 2.46 | Explorer scenario views separated into selected household / loaded sample / published schedule, each with its own period bounded by schedule coverage | `tests/test_tariff_views.py` | **VERIFIED** (spec and frames asserted; browser interaction not performed) |
 | 2.47 | Both shares of every scenario view come from the same filtered rows; an empty selection returns no rows and the chart encodes no quantity | `tests/test_tariff_views.py` | **VERIFIED** |
+| 2.48 | Public front door usable at phone widths: no horizontal overflow at 320, 360, 390, 768 and 1440 px with every disclosure open; no control other than inline text links under 24 px; axe-core 0 violations (WCAG 2 A/AA and best-practice) at 320, 390 (3D view open too) and 1440 px; on the 3D terrain a sideways touch drag turns it, a vertical drag scrolls the page and a tap selects a cell, driven with real DevTools touch events | `web/src/test/mobile.test.tsx`, `web/README.md` (Phones) | **VERIFIED** in headless Chromium with touch emulation; iOS Safari and physical devices **not tested** |
 
 ---
 

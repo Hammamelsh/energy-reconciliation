@@ -64,6 +64,23 @@ the page with the committed data.
   household chart has a table view; outcomes are marked with ▲/▼ as well as colour;
   `prefers-reduced-motion` turns off count-ups, reveals and the flow animation. axe-core
   reports no violations (WCAG 2 A/AA and best-practice rules) at 1440 px and 390 px.
+- **Phones.** Below 760 px the header's seven section links sit behind one "Sections" button
+  (a native `<details>` that closes after a choice, on Escape, or on a tap outside). Charts
+  are drawn at a phone-sized coordinate space so bars are at least 24 px tall and labels stay
+  legible; the tick strip under the flat-price slider is drawn 400 units wide for the same
+  reason. Tables keep each cell on one line and scroll sideways inside a focusable region with
+  a shadow at the cut edge; the build-identity table stacks label over value. The pipeline grid
+  draws its "›" only between cells on the same row. In the 3D view a portrait canvas turns the
+  presets a quarter so the year runs down the screen as on the flat map, the view and zoom
+  buttons move beneath the canvas, a sideways drag turns the terrain while an up-or-down drag
+  scrolls the page (`terrain/gesture.ts`; the canvas keeps `touch-action: pan-y pinch-zoom`),
+  a preset button always returns to its view, the peak annotation pins to the top corner away from the
+  scale bar when neither side has room (one line in Top-down, where the first month label
+  would sit under it), hour labels thin by halves until they fit, and the scale unit rides on
+  the top tick. Hints say "tap" where `hover: none`.
+  Verified in headless Chromium at 320, 360, 390 and 768 px: no horizontal overflow with
+  every disclosure open, no non-link control under 24 px, axe-core 0 violations at 320 (all
+  disclosures open), 390 and 1440 px.
 - **State in the URL.** `?household=MAC000186&flat=13.661` restores a selection and a slider
   position, so a view can be shared.
 - **Site address at build time.** The canonical link and the Open Graph image need the site's

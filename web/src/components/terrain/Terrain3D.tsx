@@ -3,26 +3,20 @@ import type { Mode, Terrain } from "../../lib/terrain";
 import { cellAt, indexOf, maxOf, monthStarts, moveCursor, scaleTicks } from "../../lib/terrain";
 import type { Highlight } from "./flat";
 import { createScene, webglAvailable, HMAX, type Handle, type ViewPreset } from "./scene";
+import { placeLabel } from "./label";
+import { touchIntent, type TouchIntent } from "./gesture";
 
 type Overlay = {
   months: { x: number; y: number; label: string }[];
   slots: { x: number; y: number; label: string }[];
-  bar: { x0: number; y0: number; x1: number; y1: number; ticks: { x: number; y: number; label: string }[] } | null;
-  peak: { x: number; y: number; label: string; detail: string } | null;
+  bar: { x0: number; y0: number; x1: number; y1: number; ticks: { x: number; y: number; label: string }[]; unit: boolean } | null;
+  peak: { x: number; y: number; label: string; detail: string; when: string; what: string } | null;
   /** The selected cell's top, when it is in view: a neutral marker the colours cannot be confused with. */
   sel: { x: number; y: number } | null;
   size: { w: number; h: number };
+  /** Looking straight down: heights are invisible, so a pinned annotation keeps one line. */
+  topDown: boolean;
 };
-
-/** Keep a two-line annotation inside the canvas: flip it to the left near the right edge,
- * and hold it below the top edge. */
-function placeLabel(x: number, y: number, longest: string, w: number, h: number) {
-  const est = longest.length * 6.6 + 12;
-  const right = x + 30 + est <= w - 4;
-  const tx = right ? x + 30 : x - 30;
-  const ty = Math.max(18, Math.min(h - 8, y - 38));
-  return { tx, ty, anchor: (right ? "start" : "end") as "start" | "end", lx: right ? x + 26 : x - 26, ly: ty + 4 };
-}
 
 const SLOT_TICKS = [0, 12, 24, 36, 48];
 const VIEWS: { key: ViewPreset; label: string }[] = [
@@ -63,8 +57,12 @@ export default function Terrain3D({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const handle = useRef<Handle | null>(null);
-  const drag = useRef<{ x: number; y: number; moved: boolean; id: number } | null>(null);
+  const drag = useRef<{ x: number; y: number; x0: number; y0: number; moved: boolean; id: number; touch: boolean; intent: TouchIntent } | null>(null);
   const [view, setView] = useState<ViewPreset>("default");
+  // A drag leaves the preset the camera started from; no preset shows as pressed until one
+  // is chosen again. The request counter re-applies a preset even when it is already chosen.
+  const [turned, setTurned] = useState(false);
+  const [viewRequest, setViewRequest] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -111,9 +109,16 @@ export default function Terrain3D({
         const p = h.project(xOf(s), 0, zOf(D) + 1.4);
         return { x: p.x, y: p.y, label: s === 48 ? "24:00" : terrain.grid.slot_labels[s] };
       });
-      // from a low elevation the hour ticks project onto each other: show none rather than a stack
-      if (slots.length > 1 && Math.hypot(slots[1].x - slots[0].x, slots[1].y - slots[0].y) < 11) slots = [];
+      // hour ticks that would overprint (a low elevation, or the short axis of a phone) are
+      // thinned to every other one, or dropped altogether, rather than drawn as a stack
+      const gapOf = (s: typeof slots) => (s.length > 1 ? Math.hypot(s[1].x - s[0].x, s[1].y - s[0].y) : Infinity);
+      if (gapOf(slots) < 11) slots = [];
+      while (slots.length > 2 && gapOf(slots) < 36) slots = slots.filter((_, i) => i % 2 === 0);
+      if (slots.length === 2 && gapOf(slots) < 36) slots = [];
       const max = maxOf(terrain, mode);
+      // on a narrow canvas (a phone) the unit rides on the top tick, where a separate unit
+      // label would run into the peak annotation pinned to the left edge
+      const narrow = (canvas.clientWidth || 800) < 480;
       const bx = xOf(0) - 1;
       const bz = zOf(0) - 4;
       const base = h.project(bx, 0, bz);
@@ -126,10 +131,12 @@ export default function Terrain3D({
               y0: base.y,
               x1: top.x,
               y1: top.y,
-              ticks: scaleTicks(max).map((v) => {
+              ticks: scaleTicks(max).map((v, i, all) => {
                 const p = h.project(bx, (v / max) * HMAX, bz);
-                return { x: p.x, y: p.y, label: mode === "kwh" ? `${v}` : `£${v}` };
+                const topmost = narrow && i === all.length - 1;
+                return { x: p.x, y: p.y, label: mode === "kwh" ? `${v}${topmost ? " kWh" : ""}` : `£${v}` };
               }),
+              unit: !narrow,
             };
       const pk = mode === "kwh" ? terrain.peaks.kwh : terrain.peaks.charge;
       let peak: Overlay["peak"] = null;
@@ -144,6 +151,8 @@ export default function Terrain3D({
           y: p.y,
           label: `${value} in one half hour`,
           detail: `${pk.date}, ${pk.slot_label} label, ${pk.band} band, ${pk.households} households`,
+          when: `${pk.date}, ${pk.slot_label} label`,
+          what: `${pk.band} band, ${pk.households} households`,
         };
       }
       let sel: Overlay["sel"] = null;
@@ -154,7 +163,7 @@ export default function Terrain3D({
         const p = h.project(xOf(c.slot) + 0.5, (v / max) * HMAX, zOf(c.dateIndex) + 0.5);
         if (p.visible) sel = { x: p.x, y: p.y };
       }
-      setOverlay({ months, slots, bar, peak, sel, size: { w: canvas.clientWidth || 800, h: canvas.clientHeight || 400 } });
+      setOverlay({ months, slots, bar, peak, sel, size: { w: canvas.clientWidth || 800, h: canvas.clientHeight || 400 }, topDown: h.elevation > 80 });
     };
     computeRef.current = compute;
     h.onCamera(compute);
@@ -179,7 +188,7 @@ export default function Terrain3D({
     computeRef.current?.();
   }, [cursor]);
   useEffect(() => handle.current?.setHover(hover), [hover]);
-  useEffect(() => handle.current?.setView(view, !reducedMotion), [view, reducedMotion]);
+  useEffect(() => handle.current?.setView(view, !reducedMotion), [view, viewRequest, reducedMotion]);
   useEffect(() => handle.current?.setZoom(zoom), [zoom]);
 
   const local = (e: PointerEvent<HTMLCanvasElement>) => {
@@ -187,31 +196,50 @@ export default function Terrain3D({
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const onPointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
-    if (e.pointerType === "touch") return; // touch scrolls the page; a tap selects on pointerup
-    drag.current = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    const touch = e.pointerType === "touch";
+    // a second finger belongs to the browser (pinch-zoom of the page), not to the terrain
+    if (touch && drag.current) return;
+    drag.current = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, moved: false, id: e.pointerId, touch, intent: touch ? "undecided" : "turn" };
+    // a touch pointer is captured by the canvas already; a mouse needs asking
+    if (!touch) e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onPointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
-    if (d && e.buttons > 0) {
+    if (d && e.pointerId === d.id && (d.touch || e.buttons > 0)) {
+      if (d.intent !== "turn") {
+        // touch only: wait for a clear direction; a vertical drag is the page's scroll
+        if (d.intent === "undecided") d.intent = touchIntent(e.clientX - d.x0, e.clientY - d.y0);
+        if (d.intent !== "turn") return;
+        // start turning from here, so the slop does not arrive as a jump
+        d.x = e.clientX;
+        d.y = e.clientY;
+        d.moved = true;
+        setDragging(true);
+        return;
+      }
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
       if (!d.moved && Math.hypot(dx, dy) < 4) return;
       d.moved = true;
       setDragging(true);
-      handle.current?.orbit(-dx * 0.35, dy * 0.35);
+      setTurned(true);
+      // a finger covers a narrower canvas than a mouse does, so it turns a little further per pixel
+      const k = d.touch ? 0.45 : 0.35;
+      handle.current?.orbit(-dx * k, dy * k);
       d.x = e.clientX;
       d.y = e.clientY;
       return;
     }
+    if (d?.touch) return;
     const p = local(e);
     onHover(handle.current?.pick(p.x, p.y) ?? null);
   };
   const onPointerUp = (e: PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
+    if (d && e.pointerId !== d.id) return;
     drag.current = null;
     setDragging(false);
-    if (d?.moved) return;
+    if (d?.moved || d?.intent === "scroll") return;
     const p = local(e);
     const i = handle.current?.pick(p.x, p.y) ?? null;
     if (i !== null) onSelect(i);
@@ -246,7 +274,7 @@ export default function Terrain3D({
         tabIndex={0}
         role="application"
         aria-roledescription="3D chart"
-        aria-label={`Energy terrain: ${terrain.grid.dates} date labels by ${terrain.grid.slots} half-hour labels, height showing ${range} per half hour, colour showing the tariff band. Left and Right arrows move one date, Up and Down move one half hour, Page Up and Page Down move a week, Home and End reach the first and last half hour of the day; the readout below states the selected cell. Drag with a mouse to turn the view; the buttons choose a preset view or zoom on the selected cell.`}
+        aria-label={`Energy terrain: ${terrain.grid.dates} date labels by ${terrain.grid.slots} half-hour labels, height showing ${range} per half hour, colour showing the tariff band. Left and Right arrows move one date, Up and Down move one half hour, Page Up and Page Down move a week, Home and End reach the first and last half hour of the day; the readout below states the selected cell. Drag with a mouse, or drag sideways with a finger, to turn the view; an up-or-down drag scrolls the page. The buttons choose a preset view or zoom on the selected cell.`}
         aria-describedby="year-readout"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -275,16 +303,30 @@ export default function Terrain3D({
           ))}
           {overlay.peak &&
             (() => {
-              const l = placeLabel(overlay.peak.x, overlay.peak.y, overlay.peak.detail, overlay.size.w, overlay.size.h);
+              const l = placeLabel(overlay.peak.x, overlay.peak.y, overlay.peak.detail, overlay.size.w, overlay.size.h, {
+                preferRight: overlay.bar !== null && overlay.bar.x1 < overlay.size.w / 2,
+                lines: overlay.topDown ? 1 : 3,
+              });
               return (
                 <g className="peak">
                   <line x1={overlay.peak.x} y1={overlay.peak.y} x2={l.lx} y2={l.ly} />
                   <text x={l.tx} y={l.ty} textAnchor={l.anchor} className="peak-value">
                     {overlay.peak.label}
                   </text>
-                  <text x={l.tx} y={l.ty + 14} textAnchor={l.anchor}>
-                    {overlay.peak.detail}
-                  </text>
+                  {l.pinned && overlay.topDown ? null : l.pinned ? (
+                    <>
+                      <text x={l.tx} y={l.ty + 14} textAnchor={l.anchor}>
+                        {overlay.peak.when}
+                      </text>
+                      <text x={l.tx} y={l.ty + 28} textAnchor={l.anchor}>
+                        {overlay.peak.what}
+                      </text>
+                    </>
+                  ) : (
+                    <text x={l.tx} y={l.ty + 14} textAnchor={l.anchor}>
+                      {overlay.peak.detail}
+                    </text>
+                  )}
                 </g>
               );
             })()}
@@ -308,16 +350,27 @@ export default function Terrain3D({
                   </text>
                 </g>
               ))}
-              <text x={overlay.bar.x1} y={overlay.bar.y1 - 10} textAnchor="start" className="unit">
-                {mode === "kwh" ? "kWh" : "£"} per half hour, pooled
-              </text>
+              {overlay.bar.unit && (
+                <text x={overlay.bar.x1} y={overlay.bar.y1 - 10} textAnchor={overlay.bar.x1 > overlay.size.w / 2 ? "end" : "start"} className="unit">
+                  {mode === "kwh" ? "kWh" : "£"} per half hour, pooled
+                </text>
+              )}
             </g>
           )}
         </svg>
       )}
       <div className="views" role="group" aria-label="View and zoom">
         {VIEWS.map((v) => (
-          <button key={v.key} type="button" aria-pressed={view === v.key} onClick={() => setView(v.key)}>
+          <button
+            key={v.key}
+            type="button"
+            aria-pressed={view === v.key && !turned}
+            onClick={() => {
+              setView(v.key);
+              setTurned(false);
+              setViewRequest((n) => n + 1);
+            }}
+          >
             {v.label}
           </button>
         ))}

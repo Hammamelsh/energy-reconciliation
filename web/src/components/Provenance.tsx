@@ -47,12 +47,12 @@ export function Provenance({ bundle, digest }: { bundle: Bundle; digest: string 
           </ul>
           <p>
             Variation, stated only as measured: the largest single household difference is{" "}
-            {c.variation.largest_difference ? signedMoney(c.variation.largest_difference.display) : "n/a"}
+            <span className="nobreak">{c.variation.largest_difference ? signedMoney(c.variation.largest_difference.display) : "n/a"}</span>
             {c.variation.largest_share_of_pooled_pct?.display != null
               ? ` (${pct(c.variation.largest_share_of_pooled_pct.display)} of the pooled difference)`
               : ""}
             ; the median household difference is{" "}
-            {c.variation.median_household_difference ? signedMoney(c.variation.median_household_difference.display) : "n/a"}.
+            <span className="nobreak">{c.variation.median_household_difference ? signedMoney(c.variation.median_household_difference.display) : "n/a"}</span>.
           </p>
         </div>
       </details>

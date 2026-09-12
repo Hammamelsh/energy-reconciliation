@@ -26,11 +26,12 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
   // The sentence about the bands' position against the flat price is only made when the
   // numbers support it; otherwise the scale below is left to speak.
   const belowAbove = low < flat && normal < flat && high > flat;
+  // The unit is its own span so that, in a narrow card, it can take the second line cleanly.
   const four = [
-    { key: "low", name: "Low", value: `${low.toFixed(2)}p per kWh`, tone: BAND.Low },
-    { key: "normal", name: "Normal", value: `${normal.toFixed(2)}p per kWh`, tone: BAND.Normal },
-    { key: "high", name: "High", value: `${high.toFixed(2)}p per kWh`, tone: BAND.High },
-    { key: "flat", name: "Flat comparison", value: `${flat.toFixed(3)}p per kWh`, tone: NEUTRAL },
+    { key: "low", name: "Low", value: `${low.toFixed(2)}p`, tone: BAND.Low },
+    { key: "normal", name: "Normal", value: `${normal.toFixed(2)}p`, tone: BAND.Normal },
+    { key: "high", name: "High", value: `${high.toFixed(2)}p`, tone: BAND.High },
+    { key: "flat", name: "Flat comparison", value: `${flat.toFixed(3)}p`, tone: NEUTRAL },
   ];
   const intro = (
     <>
@@ -47,7 +48,9 @@ export function PriceLadder({ bundle }: { bundle: Bundle }) {
               <i style={{ background: p.tone }} aria-hidden="true" />
               {p.name}
             </span>
-            <b>{p.value}</b>
+            <b>
+              {p.value} <span className="unit">per kWh</span>
+            </b>
           </li>
         ))}
       </ul>

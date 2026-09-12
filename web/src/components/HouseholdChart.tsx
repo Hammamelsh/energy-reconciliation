@@ -19,6 +19,8 @@ export function HouseholdChart({
   sortKey: SortKey;
 }) {
   const compact = useMediaQuery("(max-width: 700px)");
+  const narrow = useMediaQuery("(max-width: 360px)");
+  const touch = useMediaQuery("(hover: none)");
   const [wrapRef, seen] = useInView<HTMLDivElement>("0px 0px -15% 0px");
   const rows = useMemo(() => sortHouseholds(households, sortKey), [households, sortKey]);
   const [hover, setHover] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -26,13 +28,15 @@ export function HouseholdChart({
   const values = rows.map((h) => (sortKey === "gbp" ? h.flat_minus_dynamic.display : (h.pct_of_flat.display ?? 0)));
   const minV = Math.min(0, ...values);
   const maxV = Math.max(0, ...values);
-  const W = compact ? 380 : 760;
-  const rowH = compact ? 26 : 24;
+  // On a phone the drawing is 340 units wide so it renders close to 1:1 on a 360 to 430px
+  // screen: the rows are tall enough to tap (30 units) and the labels stay legible.
+  const W = narrow ? 300 : compact ? 340 : 760;
+  const rowH = compact ? 30 : 24;
   const top = 26;
-  const left = compact ? 96 : 172;
-  const right = compact ? 58 : 60;
-  const fs = compact ? 10.5 : 12;
-  const H = top + rows.length * rowH + 30;
+  const left = narrow ? 86 : compact ? 92 : 172;
+  const right = narrow ? 50 : compact ? 54 : 60;
+  const fs = compact ? 11.5 : 12;
+  const H = top + rows.length * rowH + 34;
   const plotW = W - left - right;
   const scale = (v: number) => left + ((v - minV) / (maxV - minV || 1)) * plotW;
   const zero = scale(0);
@@ -71,13 +75,13 @@ export function HouseholdChart({
       >
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={scale(t)} x2={scale(t)} y1={top - 6} y2={H - 26} stroke={GRID} strokeWidth={1} />
-            <text x={scale(t)} y={H - 10} textAnchor="middle" fontSize={compact ? 10 : 11} fill={DIM}>
+            <line x1={scale(t)} x2={scale(t)} y1={top - 6} y2={H - 30} stroke={GRID} strokeWidth={1} />
+            <text x={scale(t)} y={H - 15} textAnchor="middle" fontSize={compact ? 10.5 : 11} fill={DIM}>
               {sortKey === "gbp" ? `${t < 0 ? "−" : ""}£${Math.abs(t)}` : `${t}%`}
             </text>
           </g>
         ))}
-        <line x1={zero} x2={zero} y1={top - 8} y2={H - 26} stroke={TEXT} strokeWidth={1.5} />
+        <line x1={zero} x2={zero} y1={top - 8} y2={H - 30} stroke={TEXT} strokeWidth={1.5} />
         <text x={zero + 6} y={top - 10} fontSize={11} fill={MUTED}>
           dynamic lower →
         </text>
@@ -115,7 +119,7 @@ export function HouseholdChart({
                 {h.household_id}
               </text>
               <rect className="bar" x={x0} y={y + 4} width={w} height={rowH - 8} rx={3} fill={COLOUR[h.outcome_under_dynamic]} stroke={isSel ? "#fff" : "none"} strokeWidth={1.5} />
-              <text x={labelX} y={y + rowH / 2 + 4} textAnchor="start" fontSize={compact ? 10 : 11} fill={TEXT}>
+              <text x={labelX} y={y + rowH / 2 + 4} textAnchor="start" fontSize={compact ? 11 : 11} fill={TEXT}>
                 {label}
                 {partial && (
                   <tspan fill="#ffb27a" dx={6}>
@@ -126,7 +130,7 @@ export function HouseholdChart({
             </g>
           );
         })}
-        <text x={W / 2} y={H - 0.5} textAnchor="middle" fontSize={11} fill={MUTED} fontStyle="italic">
+        <text x={W / 2} y={H - 1} textAnchor="middle" fontSize={compact ? 10.5 : 11} fill={MUTED} fontStyle="italic">
           {sortKey === "gbp" ? "flat-price charge minus dynamic charge" : "difference as % of the household's flat-price charge"}
         </text>
       </svg>
@@ -148,8 +152,8 @@ export function HouseholdChart({
       )}
       <p className="hint">
         Sorted {sortKey === "gbp" ? "by pounds" : sortKey === "coverage" ? "by coverage" : "by percentage"}. Volt-green ▲ means the
-        dynamic tariff was lower for that household; ember ▼ means higher. Click or Tab into a bar and use the arrow keys.{" "}
-        Unit: {unit}.
+        dynamic tariff was lower for that household; ember ▼ means higher.{" "}
+        {touch ? "Tap a bar to see that household below." : "Click or Tab into a bar and use the arrow keys."} Unit: {unit}.
       </p>
     </div>
   );

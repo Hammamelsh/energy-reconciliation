@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { loadBundle, type Bundle, type Loaded } from "./lib/bundle";
 import { prefersReducedMotion, pushState, readState } from "./lib/url";
 import { Hero } from "./components/Hero";
@@ -18,6 +18,63 @@ import { Insight } from "./components/Insight";
 // scene's loader) is its own chunk, fetched when the section comes near; the initial
 // page carries only this introduction.
 const YearSection = lazy(() => import("./components/terrain/YearSection").then((m) => ({ default: m.YearSection })));
+
+/** The sections a reader can jump to, in page order: the header's links on a wide screen and
+ * the "Sections" menu on a phone are built from the same list. */
+const SECTIONS: [string, string][] = [
+  ["households", "Households"],
+  ["what-if", "What if"],
+  ["year", "One year"],
+  ["hours", "Hours"],
+  ["pipeline", "How it's made"],
+  ["quality", "Data quality"],
+  ["provenance", "Provenance"],
+];
+
+/** The phone header's section menu: a native disclosure that closes after a choice, on
+ * Escape, or on a tap outside it. */
+function SectionMenu() {
+  const ref = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const close = () => {
+      el.open = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && el.open) close();
+    };
+    const onPointer = (e: PointerEvent) => {
+      if (el.open && e.target instanceof Node && !el.contains(e.target)) close();
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onPointer);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onPointer);
+    };
+  }, []);
+  return (
+    <details className="menu" ref={ref}>
+      <summary>
+        Sections <span className="chev" aria-hidden="true">⌄</span>
+      </summary>
+      <nav className="sheet" aria-label="Sections menu">
+        {SECTIONS.map(([id, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            onClick={() => {
+              if (ref.current) ref.current.open = false;
+            }}
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+    </details>
+  );
+}
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
@@ -176,14 +233,13 @@ export function Page({ loaded }: { loaded: Loaded }) {
             <Logo /> Energy Reconciliation
           </a>
           <nav className="nav" aria-label="Sections">
-            <a href="#households">Households</a>
-            <a href="#what-if">What if</a>
-            <a href="#year">One year</a>
-            <a href="#hours">Hours</a>
-            <a href="#pipeline">How it's made</a>
-            <a href="#quality">Data quality</a>
-            <a href="#provenance">Provenance</a>
+            {SECTIONS.map(([id, label]) => (
+              <a key={id} href={`#${id}`}>
+                {label}
+              </a>
+            ))}
           </nav>
+          <SectionMenu />
         </div>
       </div>
       <main id="main">
@@ -228,7 +284,8 @@ export function Page({ loaded }: { loaded: Loaded }) {
               <HouseholdChart households={c.per_household} selected={selected} onSelect={setSelected} sortKey={sortKey} />
               <details>
                 <summary>Table view of the same figures</summary>
-                <div className="body scroll-x">
+                {/* on a phone the table scrolls sideways, so the region is focusable for keyboard users */}
+                <div className="body scroll-x" tabIndex={0} role="region" aria-label="Household table, scrolls sideways on a narrow screen">
                   <table className="data-table">
                     <thead>
                       <tr>

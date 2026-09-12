@@ -33,6 +33,7 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
   const reduced = useMediaQuery("(prefers-reduced-motion: reduce)");
   // One map at a time on a narrow screen; two side by side otherwise.
   const compact = useMediaQuery("(max-width: 700px)");
+  const touch = useMediaQuery("(hover: none)");
   const [mode, setMode] = useState<Mode>("charge");
   const [single, setSingle] = useState<Carpet>("charge");
   const [highlight, setHighlight] = useState<Highlight>("all");
@@ -331,6 +332,12 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
       <p className="readout" id="year-readout" aria-live="polite">
         {readoutNode ?? "Cell readout appears here once the terrain has loaded."}
       </p>
+      {show3d && touch && data.kind === "ready" && (
+        <p className="hint">
+          Drag sideways across the terrain to turn it; an up-or-down drag scrolls the page as usual. Tap a cell to select
+          it. Default, Top-down and Side bring back a preset view, and 2× or 4× zoom on the selected cell.
+        </p>
+      )}
       {unavailable && (
         <p className="hint" role="status">
           The 3D view is not available here: {unavailable}. The flat map shows the same cells.
@@ -340,7 +347,7 @@ export function YearSection({ bundle, manifest, base = "data/" }: { bundle: Bund
       {terrain && (
         <details>
           <summary>The same cells as a table: month by band</summary>
-          <div className="body scroll-x">
+          <div className="body scroll-x" tabIndex={0} role="region" aria-label="Month table, scrolls sideways on a narrow screen">
             <table className="data-table">
               <thead>
                 <tr>

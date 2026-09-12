@@ -42,6 +42,8 @@ const BAND_INDEX: Record<string, number> = { L: 0, N: 1, H: 2, "-": 3 };
 const FILTER_INDEX: Record<Highlight, number> = { all: -1, Low: 0, Normal: 1, High: 2, none: 3 } as Record<Highlight, number>;
 
 export type ViewPreset = "default" | "top" | "side";
+/** Degrees added to every preset's azimuth on a portrait canvas. */
+const PORTRAIT_TURN = 90;
 const PRESETS: Record<ViewPreset, { az: number; el: number }> = {
   default: { az: -74, el: 30 },
   top: { az: -90, el: 89 },
@@ -251,7 +253,11 @@ export function createScene(
   const tmp = new Vector3();
   const placeCamera = () => {
     const rad = Math.PI / 180;
-    const dir = new Vector3(Math.cos(el * rad) * Math.sin(az * rad), Math.sin(el * rad), Math.cos(el * rad) * Math.cos(az * rad));
+    // On a portrait canvas (a phone held upright) the year runs down the screen, as it does
+    // on the flat map, instead of across the narrow side: the same presets, turned a quarter.
+    const portrait = (canvas.clientWidth || 1) < (canvas.clientHeight || 1);
+    const azEff = az + (portrait ? PORTRAIT_TURN : 0);
+    const dir = new Vector3(Math.cos(el * rad) * Math.sin(azEff * rad), Math.sin(el * rad), Math.cos(el * rad) * Math.cos(azEff * rad));
     const centre = new Vector3(0, HMAX / 4, 0);
     if (zoom > 1 && focusCell !== null) {
       const dateIndex = Math.floor(focusCell / W);

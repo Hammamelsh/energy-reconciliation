@@ -12,6 +12,7 @@ import { DIM, GRID, INK, MUTED, TEXT } from "../lib/palette";
  */
 export function Insight({ households, selected, onSelect }: { households: Household[]; selected: string | null; onSelect: (id: string) => void }) {
   const compact = useMediaQuery("(max-width: 700px)");
+  const touch = useMediaQuery("(hover: none)");
   const [hover, setHover] = useState<string | null>(null);
   const W = compact ? 380 : 620;
   const H = compact ? 300 : 340;
@@ -73,7 +74,7 @@ export function Insight({ households, selected, onSelect }: { households: Househ
               onClick={() => onSelect(h.household_id)}
               style={{ cursor: "pointer" }}
             >
-              <circle cx={x(highShare(h))} cy={y(h.pct_of_flat.display ?? 0)} r={isActive ? 8 : 5.5} fill={COLOUR[h.outcome_under_dynamic]} stroke={isActive ? "#fff" : INK} strokeWidth={isActive ? 2 : 1} className="dot" />
+              <circle cx={x(highShare(h))} cy={y(h.pct_of_flat.display ?? 0)} r={isActive ? (compact ? 9 : 8) : compact ? 7 : 5.5} fill={COLOUR[h.outcome_under_dynamic]} stroke={isActive ? "#fff" : INK} strokeWidth={isActive ? 2 : 1} className="dot" />
               {(isActive || h.outcome_under_dynamic === "higher") && (
                 <text x={x(highShare(h)) + 10} y={y(h.pct_of_flat.display ?? 0) + 4} fontSize={fs} fill={TEXT} fontFamily="ui-monospace, Menlo, monospace">
                   {h.household_id}
@@ -85,7 +86,7 @@ export function Insight({ households, selected, onSelect }: { households: Househ
         })}
       </svg>
       <p className="hint">
-        Hover or click a dot; the selected household is highlighted here and in the bar chart. This describes
+        {touch ? "Tap a dot" : "Hover or click a dot"}; the selected household is highlighted here and in the bar chart. This describes
         where each household's electricity fell in time, not whether anyone chose that timing.
       </p>
     </div>

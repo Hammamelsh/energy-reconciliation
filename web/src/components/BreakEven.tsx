@@ -21,7 +21,9 @@ export function BreakEven({
   const evens = hh.map((h) => h.breakeven_flat_price.display).filter((v): v is number => v !== null);
   const lo = Math.floor(Math.min(...evens, flat) - 1);
   const hi = Math.ceil(Math.max(...evens, flat) + 1);
-  const W = 800;
+  // The tick strip is drawn 400 units wide on a phone so it renders near 1:1 there: the ticks
+  // and the value label keep their size instead of shrinking with an 800-unit drawing.
+  const W = compact ? 400 : 800;
   const x = (p: number) => 10 + ((p - lo) / (hi - lo)) * (W - 20);
   return (
     <div className="card" id="what-if">
@@ -57,7 +59,7 @@ export function BreakEven({
           <line x1={x(value)} x2={x(value)} y1={4} y2={36} stroke="#fff" strokeWidth={2} />
           <circle cx={x(flat)} cy={34} r={4} fill="none" stroke={EMBER} strokeWidth={2} />
           <circle cx={x(pooled)} cy={34} r={4} fill="none" stroke={NEUTRAL} strokeWidth={2} />
-          <text x={x(value)} y={compact ? 56 : 54} fontSize={compact ? 20 : 11} fill="#fff" textAnchor="middle">
+          <text x={x(value)} y={compact ? 55 : 54} fontSize={compact ? 12.5 : 11} fill="#fff" textAnchor="middle">
             {value.toFixed(3)}p
           </text>
         </svg>
@@ -67,12 +69,14 @@ export function BreakEven({
           Each tick is one household's break-even price. ○ ember: documented flat price {flat.toFixed(3)}p · ○ grey:
           pooled break-even {pence(pooled)}
         </span>
-        <span className="seg">
+        <span className="seg presets" role="group" aria-label="Preset flat prices">
           <button type="button" onClick={() => onChange(flat)} aria-pressed={value === flat}>
-            documented {flat.toFixed(3)}p
+            <span className="k">documented</span>
+            <b>{flat.toFixed(3)}p</b>
           </button>
           <button type="button" onClick={() => onChange(pooled)} aria-pressed={value === pooled}>
-            break-even {pooled.toFixed(3)}p
+            <span className="k">break-even</span>
+            <b>{pooled.toFixed(3)}p</b>
           </button>
         </span>
       </div>
